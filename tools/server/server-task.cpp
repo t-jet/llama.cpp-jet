@@ -2018,13 +2018,16 @@ server_prompt * server_prompt_cache::alloc(const server_prompt & prompt, size_t 
         }
     }
 
-    std::vector<uint8_t> state_data_tgt;
-    std::vector<uint8_t> state_data_dft;
-
-    // check if we can allocate enough memory for the new state
     try {
-        state_data_tgt.resize(state_size_tgt);
-        state_data_dft.resize(state_size_dft);
+        std::vector<uint8_t> state_data_tgt(state_size_tgt);
+        std::vector<uint8_t> state_data_dft(state_size_dft);
+
+        states.emplace_back();
+        auto & state = states.back();
+        state.data.main = std::move(state_data_tgt);
+        state.data.drft = std::move(state_data_dft);
+
+        return &state;
     } catch (const std::bad_alloc & e) {
         SRV_ERR("failed to allocate memory for prompt cache state: %s\n", e.what());
 
@@ -2036,17 +2039,20 @@ server_prompt * server_prompt_cache::alloc(const server_prompt & prompt, size_t 
 
         return nullptr;
     }
+}
 
-    states.push_back({
-        /*.tokens      =*/ prompt.tokens.clone(),
-        /*.data        =*/ {
-            /*.main =*/ std::move(state_data_tgt),
-            /*.drft =*/ std::move(state_data_dft),
-        },
-        /*.checkpoints =*/ prompt.checkpoints,
-    });
+void server_prompt_cache::discard(server_prompt * prompt) {
+    if (prompt == nullptr) {
+        return;
+    }
 
-    return &states.back();
+    for (auto it = states.begin(); it != states.end(); ++it) {
+        if (&*it == prompt) {
+            SRV_WRN(" - discarding incomplete cached prompt with length %d\n", it->n_tokens());
+            states.erase(it);
+            return;
+        }
+    }
 }
 
 bool server_prompt_cache::load(server_prompt & prompt, const server_tokens & tokens_new, llama_context * ctx_tgt, llama_context * ctx_dft, int32_t id_slot) {

@@ -2,6 +2,8 @@
 
 #include "ggml.h"
 
+#include <vector>
+
 enum common_params_fit_status {
     COMMON_PARAMS_FIT_STATUS_SUCCESS = 0, // found allocations that are projected to fit
     COMMON_PARAMS_FIT_STATUS_FAILURE = 1, // could not find allocations that are projected to fit
@@ -22,6 +24,16 @@ enum common_params_fit_status common_fit_params(
                                      size_t * margins,               // margins of memory to leave per device in bytes
                                    uint32_t   n_ctx_min,             // minimum context size to set when trying to reduce memory use
                         enum ggml_log_level   log_level);            // minimum log level to print during fitting, lower levels go to debug log
+
+// returns the per-device memory overhead (context + compute, NOT model weights) of an MTP context
+// in bytes; one entry per model device, last entry is host memory.
+// returns an empty vector if the model could not be loaded.
+// this is used to pre-subtract MTP context costs from fit margins when draft-mtp is active.
+std::vector<size_t> common_get_mtp_ctx_memory_overhead(
+                               const char   * path_model,
+                const struct llama_model_params   * mparams,
+                const struct llama_context_params * cparams,
+                        enum ggml_log_level   log_level);
 
 // print estimated memory to stdout
 void common_fit_print(

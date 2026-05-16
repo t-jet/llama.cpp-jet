@@ -107,7 +107,88 @@ struct server_slot {
 
     server_prompt prompt;
 
-    void prompt_save(server_prompt_cache & prompt_cache) const {
+    static size_t checkpoints_size(const server_prompt & src_prompt) {
+        size_t total = 0;
+        for (const auto & ckpt : src_prompt.checkpoints) {
+            total += ckpt.size();
+        }
+        return total;
+    }
+
+    size_t trim_checkpoints(server_prompt & dst_prompt, size_t max_bytes, const char * reason) const {
+        size_t total = checkpoints_size(dst_prompt);
+        size_t removed = 0;
+
+        while (dst_prompt.checkpoints.size() > 1 && total > max_bytes) {
+            const auto & cur = dst_prompt.checkpoints.front();
+
+            SLT_WRN(*this,
+                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                    reason,
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens,
+                    (float) cur.size() / 1024 / 1024);
+
+            total -= cur.size();
+            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
+            removed++;
+        }
+
+        return removed;
+    }
+
+    bool checkpoint_update_tgt(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
+        if (ctx_tgt == nullptr) {
+            return true;
+        }
+
+        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_tgt, id, flags);
+
+        try {
+            ckpt.data_tgt.resize(ckpt_size);
+        } catch (const std::bad_alloc & e) {
+            SLT_ERR(*this, "failed to allocate target checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
+            ckpt.clear_tgt();
+            return false;
+        }
+
+        const size_t n = llama_state_seq_get_data_ext(ctx_tgt, ckpt.data_tgt.data(), ckpt_size, id, flags);
+        if (n != ckpt_size) {
+            SLT_ERR(*this, "failed to save target checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
+            ckpt.clear_tgt();
+            return false;
+        }
+
+        return true;
+    }
+
+    bool checkpoint_update_dft(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
+        if (ctx_dft == nullptr) {
+            return true;
+        }
+
+        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_dft, id, flags);
+
+        try {
+            ckpt.data_dft.resize(ckpt_size);
+        } catch (const std::bad_alloc & e) {
+            SLT_ERR(*this, "failed to allocate draft checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
+            ckpt.clear_dft();
+            return false;
+        }
+
+        const size_t n = llama_state_seq_get_data_ext(ctx_dft, ckpt.data_dft.data(), ckpt_size, id, flags);
+        if (n != ckpt_size) {
+            SLT_ERR(*this, "failed to save draft checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
+            ckpt.clear_dft();
+            return false;
+        }
+
+        return true;
+    }
+
+    bool prompt_save(server_prompt_cache & prompt_cache, bool move_metadata = false) {
         GGML_ASSERT(prompt.data.size() == 0);
 
         const size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
@@ -120,13 +201,36 @@ struct server_slot {
 
         auto * cur = prompt_cache.alloc(prompt, cur_size_tgt, cur_size_dft);
         if (cur == nullptr) {
-            return;
+            return false;
         }
 
-        llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (ctx_dft) {
-            llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != cur_size_tgt) {
+            SLT_ERR(*this, "failed to save target state: expected %zu bytes, got %zu\n", cur_size_tgt, n_tgt);
+            prompt_cache.discard(cur);
+            return false;
         }
+
+        if (ctx_dft) {
+            const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+            if (n_dft != cur_size_dft) {
+                SLT_ERR(*this, "failed to save draft state: expected %zu bytes, got %zu\n", cur_size_dft, n_dft);
+                prompt_cache.discard(cur);
+                return false;
+            }
+        }
+
+        if (move_metadata) {
+            cur->tokens = std::move(prompt.tokens);
+            cur->checkpoints = std::move(prompt.checkpoints);
+        } else {
+            cur->tokens = prompt.tokens.clone();
+            cur->checkpoints = prompt.checkpoints;
+        }
+
+        trim_checkpoints(*cur, cur_size, "prompt cache checkpoint memory");
+
+        return true;
     }
 
     bool prompt_load(server_prompt_cache & prompt_cache, const server_tokens & tokens) {
@@ -725,7 +829,7 @@ private:
         }
         SLT_INF(slot, "%s", "saving idle slot to prompt cache\n");
         SLT_DBG(slot, "%s", "__TEST_TAG_CACHE_IDLE_SLOT__\n");
-        slot.prompt_save(*prompt_cache);
+        slot.prompt_save(*prompt_cache, true);
         slot.prompt_clear(false);
         prompt_cache->update();
     }
@@ -1241,7 +1345,9 @@ private:
 
                 // don't save the slot's state if its context is empty
                 if (tokens.size() > 0) {
-                    ret->prompt_save(*prompt_cache);
+                    if (ret->prompt_save(*prompt_cache, true)) {
+                        ret->prompt_clear(false);
+                    }
                 }
 
                 if (!ret->prompt_load(*prompt_cache, task.tokens)) {
@@ -1917,17 +2023,36 @@ private:
             slot.prompt.checkpoints.erase(slot.prompt.checkpoints.begin());
         }
 
-        auto & cur = slot.prompt.checkpoints.emplace_back();
+        common_prompt_checkpoint cur;
 
         cur.update_pos(slot.prompt.n_tokens() - n_tokens_cur, pos_min, pos_max);
 
-        cur.update_tgt(ctx_tgt,       slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        cur.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const bool ok_tgt = slot.checkpoint_update_tgt(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const bool ok_dft = slot.checkpoint_update_dft(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+
+        if (!ok_tgt || !ok_dft) {
+            SLT_WRN(slot,
+                    "skipping context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ") due to checkpoint export failure\n",
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens);
+            return;
+        }
+
+        slot.prompt.checkpoints.emplace_back(std::move(cur));
+
+        const size_t checkpoint_budget =
+            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) +
+            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0);
+
+        slot.trim_checkpoints(slot.prompt, checkpoint_budget, "live checkpoint memory");
+
+        const auto & saved = slot.prompt.checkpoints.back();
 
         SLT_INF(slot,
                 "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, cur.pos_min,
-                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
+                (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, saved.pos_min,
+                saved.pos_max, saved.n_tokens, (float) saved.size() / 1024 / 1024);
     }
 
     void process_single_task(server_task && task) {
@@ -2357,7 +2482,10 @@ private:
                                 llama_memory_seq_pos_max(llama_get_memory(ctx_tgt), slot.id));
 
                         if (use_ckpt_dft) {
-                            slot.spec_ckpt.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                            if (!slot.checkpoint_update_dft(slot.spec_ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                                slot.spec_ckpt.clear();
+                                continue;
+                            }
                         }
 
                         slot.spec_prompt = slot.prompt.tokens.get_text_tokens();
@@ -2413,7 +2541,11 @@ private:
                 if (use_ckpt_tgt) {
                     //const int64_t t_start = ggml_time_us();
 
-                    ckpt.update_tgt(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                    if (!slot.checkpoint_update_tgt(ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                        slot.spec_draft.clear();
+                        ckpt.clear();
+                        continue;
+                    }
 
                     //const int64_t t_total = ggml_time_us() - t_start;
                     //printf("checkpoint total: %f ms\n", t_total / 1000.0);
@@ -2425,7 +2557,11 @@ private:
                 }
 
                 if (use_ckpt_dft) {
-                    ckpt.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                    if (!slot.checkpoint_update_dft(ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                        slot.spec_draft.clear();
+                        ckpt.clear();
+                        continue;
+                    }
                 }
             }
         }
