@@ -35,6 +35,8 @@
 using json = nlohmann::ordered_json;
 
 constexpr int HTTP_POLLING_SECONDS = 1;
+constexpr size_t SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES = 256ull * 1024 * 1024;
+constexpr int32_t SPECULATIVE_PROMPT_SAFE_BATCH_SIZE = 128;
 
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
 enum slot_state {
@@ -106,6 +108,7 @@ struct server_slot {
     slot_state state = SLOT_STATE_IDLE;
 
     server_prompt prompt;
+    bool checkpoints_enabled = true;
 
     static size_t checkpoints_size(const server_prompt & src_prompt) {
         size_t total = 0;
@@ -136,6 +139,48 @@ struct server_slot {
         }
 
         return removed;
+    }
+
+    size_t trim_checkpoints_for_allocation(server_prompt & dst_prompt, size_t max_bytes, size_t reserve_bytes, const char * reason) const {
+        if (max_bytes == 0 || reserve_bytes == 0) {
+            return 0;
+        }
+
+        size_t total = checkpoints_size(dst_prompt);
+        size_t removed = 0;
+
+        while (!dst_prompt.checkpoints.empty() && total + reserve_bytes > max_bytes) {
+            const auto & cur = dst_prompt.checkpoints.front();
+
+            SLT_WRN(*this,
+                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                    reason,
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens,
+                    (float) cur.size() / 1024 / 1024);
+
+            total -= cur.size();
+            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
+            removed++;
+        }
+
+        return removed;
+    }
+
+    void disable_checkpoints(const char * reason) {
+        if (checkpoints_enabled) {
+            checkpoints_enabled = false;
+
+            const size_t n_cleared = prompt.checkpoints.size();
+            prompt.checkpoints.clear();
+            spec_ckpt.clear();
+
+            SLT_WRN(*this,
+                    "disabling further context checkpoints for this task after %s; cleared %zu saved checkpoints\n",
+                    reason,
+                    n_cleared);
+        }
     }
 
     bool checkpoint_update_tgt(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
@@ -295,6 +340,7 @@ struct server_slot {
         stop           = STOP_TYPE_NONE;
         stopping_word  = "";
         n_sent_text    = 0;
+        checkpoints_enabled = true;
 
         if (can_speculate()) {
             spec_draft.clear();
@@ -2013,6 +2059,10 @@ private:
 
     // n_tokens_cur: the number of tokens added to the batch for the current slot
     void create_checkpoint(server_slot & slot, const int64_t n_tokens_cur, llama_pos pos_min, llama_pos pos_max) {
+        if (!slot.checkpoints_enabled) {
+            return;
+        }
+
         while (slot.prompt.checkpoints.size() >= (size_t) params_base.n_ctx_checkpoints) {
             // make room for the new checkpoint, if needed
             const auto & cur = slot.prompt.checkpoints.front();
@@ -2023,14 +2073,29 @@ private:
             slot.prompt.checkpoints.erase(slot.prompt.checkpoints.begin());
         }
 
+        const size_t checkpoint_budget =
+            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) +
+            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0);
+
+        const size_t checkpoint_reserve =
+            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) +
+            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) : 0);
+
+        slot.trim_checkpoints_for_allocation(
+                slot.prompt,
+                checkpoint_budget,
+                checkpoint_reserve,
+                "upcoming live checkpoint allocation");
+
         common_prompt_checkpoint cur;
 
         cur.update_pos(slot.prompt.n_tokens() - n_tokens_cur, pos_min, pos_max);
 
         const bool ok_tgt = slot.checkpoint_update_tgt(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        const bool ok_dft = slot.checkpoint_update_dft(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const bool ok_dft = ok_tgt ? slot.checkpoint_update_dft(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) : false;
 
         if (!ok_tgt || !ok_dft) {
+            slot.disable_checkpoints("checkpoint export failure");
             SLT_WRN(slot,
                     "skipping context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ") due to checkpoint export failure\n",
                     cur.pos_min,
@@ -2040,10 +2105,6 @@ private:
         }
 
         slot.prompt.checkpoints.emplace_back(std::move(cur));
-
-        const size_t checkpoint_budget =
-            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) +
-            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0);
 
         slot.trim_checkpoints(slot.prompt, checkpoint_budget, "live checkpoint memory");
 
@@ -2438,6 +2499,7 @@ private:
 
         // track if given slot can be batched with slots already in the batch
         server_slot * slot_batched = nullptr;
+        bool batch_request_embd = false;
 
         std::vector<server_slot *> generating;
         std::vector<server_slot *> drafting;
@@ -2571,16 +2633,32 @@ private:
             auto & slot = *slot_ptr;
 
             slot.update_batch(batch);
+            batch_request_embd = batch_request_embd || slot.task->need_embd();
         }
 
         // process in chunks of params.n_batch
         int32_t n_batch  = llama_n_batch(ctx_tgt);
         int32_t n_ubatch = llama_n_ubatch(ctx_tgt);
 
+        int32_t n_batch_prompt = n_batch;
+        const bool has_speculative_prompt = std::any_of(slots.begin(), slots.end(), [&](const server_slot & slot) {
+            return slot.is_processing() &&
+                (slot.state == SLOT_STATE_STARTED || slot.state == SLOT_STATE_PROCESSING_PROMPT) &&
+                slot.need_embd() &&
+                !slot.task->need_embd();
+        });
+
+        if (has_speculative_prompt) {
+            const size_t vocab_bytes = (size_t) llama_vocab_n_tokens(vocab) * sizeof(float);
+            const size_t max_outputs = std::max<size_t>(1, vocab_bytes == 0 ? 1 : SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES / vocab_bytes);
+            n_batch_prompt = std::max<int32_t>(1, std::min<int32_t>(n_batch, (int32_t) max_outputs));
+            n_batch_prompt = std::min(n_batch_prompt, SPECULATIVE_PROMPT_SAFE_BATCH_SIZE);
+        }
+
         float  alora_scale       = -1.0f;
         size_t alora_disabled_id = 0;
 
-        // next, batch any pending prompts without exceeding n_batch
+        // next, batch any pending prompts without exceeding the effective prompt batch size
         if (params_base.cont_batching || batch.n_tokens == 0) {
             for (auto & slot : slots) {
                 if (!slot.is_processing()) {
@@ -2923,6 +3001,8 @@ private:
 
                     bool do_checkpoint = params_base.n_ctx_checkpoints > 0;
 
+                    do_checkpoint = do_checkpoint && slot.checkpoints_enabled;
+
                     // make checkpoints only for completion tasks
                     do_checkpoint = do_checkpoint && slot.task->type == SERVER_TASK_TYPE_COMPLETION;
 
@@ -2972,7 +3052,7 @@ private:
                     }
 
                     // add prompt tokens for processing in the current batch
-                    while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.n_tokens < n_batch) {
+                    while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.n_tokens < n_batch_prompt) {
                         // get next token to process
                         llama_token cur_tok = input_tokens[slot.prompt.n_tokens()];
                         if (cur_tok == LLAMA_TOKEN_NULL) {
@@ -2987,9 +3067,8 @@ private:
                             break;
                         }
 
-                        // embedding requires all tokens in the batch to be output;
-                        // MTP also wants logits at every prompt position so the
-                        // streaming hook can mirror t_h_pre_norm into ctx_dft.
+                        // Mark every token when the task or the speculative path
+                        // needs per-token hidden states from this batch.
                         common_batch_add(batch,
                             cur_tok,
                             slot.prompt.tokens.pos_next(),
@@ -3001,15 +3080,15 @@ private:
 
                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
                         // create checkpoints that many tokens before the end of the prompt:
-                        //  - 4 + n_ubatch
+                        //  - 4 + current prompt batch limit
                         //  - 4
                         // ref: https://github.com/ggml-org/llama.cpp/pull/20288
                         if (do_checkpoint) {
-                            static const int checkpoint_offsets[] = {4 + n_ubatch, 4};
+                            const int checkpoint_offsets[] = {4 + n_batch_prompt, 4};
 
                             bool should_break = false;
                             for (int offset : checkpoint_offsets) {
-                                const int n_last = std::min(n_batch, offset);
+                                const int n_last = std::min(n_batch_prompt, offset);
                                 if (slot.task->n_tokens() == slot.prompt.n_tokens() + n_last) {
                                     should_break = true;
                                     break;
@@ -3023,6 +3102,7 @@ private:
 
                     // the number of tokens added to the batch for the current slot
                     const auto n_tokens_cur = batch.n_tokens - n_tokens_prev;
+                    batch_request_embd = batch_request_embd || (n_tokens_cur > 0 && slot.task->need_embd());
 
                     // entire prompt has been processed
                     if (slot.prompt.n_tokens() == slot.task->n_tokens()) {
@@ -3038,7 +3118,7 @@ private:
 
                         slot.init_sampler();
                     } else {
-                        if (slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch) {
+                        if (slot.task->n_tokens() < slot.prompt.n_tokens() + n_batch_prompt) {
                             // near the end of the prompt
                             do_checkpoint = do_checkpoint && true;
                         } else {
@@ -3084,7 +3164,7 @@ private:
                     slot_batched = &slot;
                 }
 
-                if (batch.n_tokens >= n_batch) {
+                if (batch.n_tokens >= n_batch_prompt) {
                     break;
                 }
             }
@@ -3108,7 +3188,7 @@ private:
                 slot_batched->lora[alora_disabled_id].scale = alora_scale;
             }
 
-            llama_set_embeddings(ctx_tgt, slot_batched->need_embd());
+            llama_set_embeddings(ctx_tgt, batch_request_embd);
         }
 
         if (batch.n_tokens == 0) {

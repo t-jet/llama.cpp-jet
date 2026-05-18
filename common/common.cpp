@@ -1168,36 +1168,10 @@ common_init_result::common_init_result(common_params & params, bool model_only) 
     if (params.fit_params) {
         LOG_INF("%s: fitting params to device memory ...\n", __func__);
         LOG_INF("%s: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)\n", __func__);
-
-        // When draft-mtp is active without a separate draft model, a second llama_context
-        // (ctx_type=MTP) is created from the same model after the fit step completes.
-        // Pre-deduct its estimated memory cost from the fit margins so the fit step
-        // reserves enough headroom for it.
-        std::vector<size_t> fit_targets = params.fit_params_target; // copy to avoid modifying original
-        const bool uses_mtp_no_draft =
-            !params.speculative.has_dft() &&
-            std::find(params.speculative.types.begin(), params.speculative.types.end(),
-                      COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != params.speculative.types.end();
-        if (uses_mtp_no_draft) {
-            LOG_INF("%s: getting device memory data for MTP context overhead ...\n", __func__);
-            const auto log_level = params.verbosity >= 4 ? GGML_LOG_LEVEL_DEBUG : GGML_LOG_LEVEL_ERROR;
-            const auto mtp_overhead = common_get_mtp_ctx_memory_overhead(
-                params.model.path.c_str(), &mparams, &cparams, log_level);
-            // mtp_overhead has nd + 1 entries; fit_targets has llama_max_devices() entries.
-            // Add the MTP cost to each device's margin so that fit leaves enough headroom.
-            for (size_t i = 0; i < mtp_overhead.size() && i < fit_targets.size(); i++) {
-                fit_targets[i] += mtp_overhead[i];
-                if (mtp_overhead[i] > 0) {
-                    LOG_INF("%s: MTP context overhead for device %zu = %zu MiB (added to fit margin)\n",
-                            __func__, i, mtp_overhead[i] / (1024 * 1024));
-                }
-            }
-        }
-
         common_fit_params(params.model.path.c_str(), &mparams, &cparams,
             params.tensor_split,
             params.tensor_buft_overrides.data(),
-            fit_targets.data(),
+            params.fit_params_target.data(),
             params.fit_params_min_ctx,
             params.verbosity >= LOG_LEVEL_DEBUG ? GGML_LOG_LEVEL_DEBUG : GGML_LOG_LEVEL_ERROR);
     }

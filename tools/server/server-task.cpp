@@ -2018,6 +2018,23 @@ server_prompt * server_prompt_cache::alloc(const server_prompt & prompt, size_t 
         }
     }
 
+    const size_t estimated_size = prompt.size() + state_size_tgt + state_size_dft;
+
+    if (limit_size > 0 && estimated_size > limit_size) {
+        SRV_WRN(" - skipping prompt cache save for length %d, estimated size = %.3f MiB exceeds cache limit of %.3f MiB\n",
+                prompt.n_tokens(),
+                estimated_size / (1024.0 * 1024.0),
+                limit_size / (1024.0 * 1024.0));
+        return nullptr;
+    }
+
+    if (limit_tokens > 0 && (size_t) prompt.n_tokens() > limit_tokens) {
+        SRV_WRN(" - skipping prompt cache save for length %d, token count exceeds cache limit of %zu\n",
+                prompt.n_tokens(),
+                limit_tokens);
+        return nullptr;
+    }
+
     try {
         std::vector<uint8_t> state_data_tgt(state_size_tgt);
         std::vector<uint8_t> state_data_dft(state_size_dft);
@@ -2132,8 +2149,7 @@ bool server_prompt_cache::load(server_prompt & prompt, const server_tokens & tok
 
 void server_prompt_cache::update() {
     if (limit_size > 0) {
-        // always keep at least one state, regardless of the limits
-        while (states.size() > 1 && size() > limit_size) {
+        while (!states.empty() && size() > limit_size) {
             if (states.empty()) {
                 break;
             }
@@ -2151,7 +2167,7 @@ void server_prompt_cache::update() {
     const size_t limit_tokens_cur = limit_size > 0 ? std::max<size_t>(limit_tokens, limit_size/size_per_token) : limit_tokens;
 
     if (limit_tokens > 0) {
-        while (states.size() > 1 && n_tokens() > limit_tokens_cur) {
+        while (!states.empty() && n_tokens() > limit_tokens_cur) {
             if (states.empty()) {
                 break;
             }
