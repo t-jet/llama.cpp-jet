@@ -390,7 +390,8 @@ struct server_slot {
 
     bool need_embd() const {
         GGML_ASSERT(task);
-        return task->need_embd() || (spec && common_speculative_need_embd(spec));
+        return task->need_embd() ||
+            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_pre_norm(spec)));
     }
 
     bool need_embd_pre_norm() const {
