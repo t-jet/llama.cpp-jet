@@ -1407,9 +1407,18 @@ static void ggml_backend_meta_buffer_clear(ggml_backend_buffer_t buffer, uint8_t
 }
 
 static void ggml_backend_meta_buffer_reset(ggml_backend_buffer_t buffer) {
-    const size_t n_buffers = ggml_backend_meta_buffer_n_bufs(buffer);
-    for (size_t i = 0; i < n_buffers; i++) {
-        ggml_backend_buffer_reset(ggml_backend_meta_buffer_simple_buffer(buffer, i));
+    GGML_ASSERT(ggml_backend_buffer_is_meta(buffer));
+
+    auto * buf_ctx = (ggml_backend_meta_buffer_context *) buffer->context;
+
+    // These caches reference per-reset tensor/context state and must not survive
+    // into the next graph allocation cycle.
+    buf_ctx->split_state_cache.clear();
+    buf_ctx->simple_tensors.clear();
+
+    for (auto & [ctx, buf] : buf_ctx->buf_configs) {
+        ggml_reset(ctx);
+        ggml_backend_buffer_reset(buf);
     }
 }
 

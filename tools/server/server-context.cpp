@@ -1210,13 +1210,54 @@ private:
 
         // wiring up server queues
         queue_tasks.on_new_task([this](server_task && task) {
-            process_single_task(std::move(task));
+            const auto task_ids = collect_task_ids(task);
+
+            try {
+                process_single_task(std::move(task));
+            } catch (const std::bad_alloc & e) {
+                const std::string error = format_runtime_bad_alloc_message("task scheduling", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            } catch (const std::exception & e) {
+                const std::string error = format_runtime_exception_message("task scheduling", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            } catch (...) {
+                const std::string error = "Unhandled non-standard server exception during task scheduling";
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            }
         });
         queue_tasks.on_update_slots([this]() {
-            update_slots();
+            try {
+                update_slots();
+            } catch (const std::bad_alloc & e) {
+                const std::string error = format_runtime_bad_alloc_message("slot update", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            } catch (const std::exception & e) {
+                const std::string error = format_runtime_exception_message("slot update", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            } catch (...) {
+                const std::string error = "Unhandled non-standard server exception during slot update";
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            }
         });
         queue_tasks.on_sleeping_state([this](bool sleeping) {
-            handle_sleeping_state(sleeping);
+            try {
+                handle_sleeping_state(sleeping);
+            } catch (const std::bad_alloc & e) {
+                SRV_ERR("Host memory allocation failed during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (const std::exception & e) {
+                SRV_ERR("Unhandled server exception during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (...) {
+                SRV_ERR("%s", "Unhandled non-standard server exception during sleeping state transition\n");
+                queue_tasks.terminate();
+            }
         });
 
         metrics.init();
@@ -1788,6 +1829,77 @@ private:
         res->n_ctx           = n_ctx;
 
         queue_results.send(std::move(res));
+    }
+
+    void try_send_error(const int id_task, const std::string & error, const enum error_type type = ERROR_TYPE_SERVER, const int32_t n_prompt_tokens = 0, const int32_t n_ctx = 0) {
+        try {
+            send_error(id_task, error, type, n_prompt_tokens, n_ctx);
+        } catch (const std::exception & e) {
+            SRV_ERR("failed to send task error for task %d: %s\n", id_task, e.what());
+        } catch (...) {
+            SRV_ERR("failed to send task error for task %d: unknown exception\n", id_task);
+        }
+    }
+
+    void try_send_error(const server_slot & slot, const std::string & error, const enum error_type type = ERROR_TYPE_SERVER) {
+        try_send_error(slot.task->id, error, type, slot.task->n_tokens(), slot.n_ctx);
+    }
+
+    static std::unordered_set<int> collect_task_ids(const server_task & task) {
+        std::unordered_set<int> task_ids;
+        task_ids.reserve(task.child_tasks.size() + 1);
+        task_ids.insert(task.id);
+
+        for (const auto & child_task : task.child_tasks) {
+            task_ids.insert(child_task.id);
+        }
+
+        return task_ids;
+    }
+
+    static std::string format_runtime_bad_alloc_message(const char * phase, const char * details) {
+        return string_format("Host memory allocation failed during %s: %s", phase, details);
+    }
+
+    static std::string format_runtime_exception_message(const char * phase, const char * details) {
+        return string_format("Unhandled server exception during %s: %s", phase, details);
+    }
+
+    void fail_task_ids(const std::unordered_set<int> & task_ids, const std::string & error) {
+        auto remaining = task_ids;
+
+        for (auto & slot : slots) {
+            if (!slot.is_processing() || !slot.task) {
+                continue;
+            }
+
+            auto it = remaining.find(slot.task->id);
+            if (it == remaining.end()) {
+                continue;
+            }
+
+            try_send_error(slot, error);
+            slot.release();
+            slot.prompt_clear(false);
+
+            remaining.erase(it);
+        }
+
+        for (const int id_task : remaining) {
+            try_send_error(id_task, error);
+        }
+    }
+
+    void fail_processing_slots(const std::string & error) {
+        for (auto & slot : slots) {
+            if (!slot.is_processing() || !slot.task) {
+                continue;
+            }
+
+            try_send_error(slot, error);
+            slot.release();
+            slot.prompt_clear(false);
+        }
     }
 
     // if multimodal is enabled, send an error and return false
