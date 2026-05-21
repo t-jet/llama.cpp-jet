@@ -488,8 +488,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         }
 
         // MTP needs pre-norm rows for every target token in the prompt batch.
-            llama_set_embeddings_pre_norm(ctx_tgt, true, /*masked*/ true);
-            llama_set_embeddings_pre_norm(ctx_dft, true, /*masked*/ true);
+        llama_set_embeddings_pre_norm(ctx_tgt, true, /*masked*/ true);
+        llama_set_embeddings_pre_norm(ctx_dft, true, /*masked*/ true);
 
         pending_h.assign(n_seq, std::vector<float>(n_embd, 0.0f));
 
