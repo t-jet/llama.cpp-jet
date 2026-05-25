@@ -4,7 +4,7 @@ Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
 
 ## Implemented scope
 
-The test plan covers the implementation status described in:
+The test plan covers the implementation status described in the design documents listed in [document-index.md](../document-index.md). Check these documents to understand what features are currently available:
 
 - `cache-handling-phase1-implementation.md`
 - `cache-handling-phase1-verification.md`
@@ -37,7 +37,7 @@ The current implemented cache surface is:
 | Namespace isolation | Metadata compatibility keys and runtime-derived namespace IDs prevent cross-namespace hits. |
 | Metadata transport | `prepared_prompt_metadata` travels on `server_task`, child tasks, slots, and hybrid entries. |
 | Boundary extraction | Chat requests get best-effort rendered-text metadata and mark it degraded; `/completion` gets minimal degraded prompt metadata when no richer metadata exists. |
-| Observability | `/metrics` exports cache counters when metrics are enabled. `/health` is unchanged. `/cache/stats` is intentionally absent. |
+| Observability | `/metrics` exports cache counters when metrics are enabled. `/health` returns `{"status":"ok"}` only. `/cache/stats` intentionally returns 404. |
 | Failure handling | Target restore failure resets slot prompt state. Missing paired draft payloads and draft restore failures count as restore failures. |
 
 ## Exclusions
@@ -69,10 +69,16 @@ Allow `LLAMA_CACHE_TEST_MODEL` to override this path. Keep tests small: `-np 2`,
 
 ## Minimum build targets
 
-Before running integration tests, build:
+Before running integration tests, perform a clean build:
 
 ```powershell
-cmake --build build --config Release --target llama-server
+# Clean build (recommended)
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target llama-server -j 4
+
+# Or use existing build directory with rebuild
+cmake --build build --config Release --target llama-server --clean-first
 ```
 
 Use the build directory that matches the local CMake configuration. CUDA builds may use `build-cuda`, but the plan should not require CUDA-only behavior.

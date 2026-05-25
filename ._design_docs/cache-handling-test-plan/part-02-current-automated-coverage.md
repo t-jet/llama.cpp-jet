@@ -15,26 +15,6 @@ Do not use this document to track:
 
 Those tests are useful, but they are not integration coverage.
 
-## Existing integration coverage
-
-Current integration-level evidence from the implementation reports:
-
-| Source | Current evidence |
-| --- | --- |
-| `tools/server/tests/unit/test_cache_modes.py` | Starts `llama-server`, checks invalid `--cache-mode`, stable `/health`, missing `/cache/stats`, cache metrics under `/metrics`, and keeps repeated hybrid restore as xfail. Despite the path name, this is server integration coverage. |
-| `tools/server/tests/test_cache_phase2_integration.sh` | Manual smoke script against a running server for `/health`, missing `/cache/stats`, and cache metrics. It does not start the server itself and should not be treated as unattended coverage until wrapped by a runner. |
-| Phase 2 implementation report | `pytest tools/server/tests/unit/test_cache_modes.py -q` passed with `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1`: 2 passed, 1 xfailed. |
-
-## Current integration gap
-
-The repeated hybrid restore test is still marked `xfail`:
-
-```text
-Hybrid exact-blob restore is implemented below the controller, but server-slot reuse does not expose a cache hit yet.
-```
-
-Do not count hybrid runtime restore as covered until a model-backed server test passes without xfail.
-
 ## Integration coverage needed
 
 Model-backed integration tests must cover behavior that depends on real `llama_context` state and the server scheduler:
@@ -49,9 +29,7 @@ Model-backed integration tests must cover behavior that depends on real `llama_c
 
 ## Coverage reporting
 
-Do not report unit-test line coverage in this integration plan.
-
-The implementation reports mention an 85% historical estimate and a later 95.52% focused cache-controller run. Those numbers belong to focused/unit coverage. They do not prove server integration behavior or real `llama_state_seq_*` restore.
+Do not report unit-test line coverage in this integration plan. Unit coverage belongs to focused/unit coverage reports and does not prove server integration behavior.
 
 Integration reports should instead list:
 
@@ -61,4 +39,4 @@ Integration reports should instead list:
 - HTTP requests sent
 - response status and relevant response fields
 - metrics before and after cache events
-- pass, fail, skip, and xfail counts
+- pass, fail, skip counts

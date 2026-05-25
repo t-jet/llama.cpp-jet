@@ -2,62 +2,81 @@
 
 Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
 
-## Recommended runner
+## Implemented runner
 
-Add a PowerShell runner, for example `tools/server/tests/run_cache_integration.ps1`, with these switches:
+**Implementation available:** The test runner described below has been implemented and is available in [../cache-handling-test-scripts/](../cache-handling-test-scripts/).
+
+**Quick start:**
 
 ```powershell
-param(
-    [string] $BuildDir = "build",
-    [string] $Model = $env:LLAMA_CACHE_TEST_MODEL,
-    [int] $StartPort = 8120,
-    [switch] $SkipBuild,
-    [switch] $IncludeDraft,
-    [switch] $IncludeStress
-)
+# Run all tests with default configuration
+& "._design_docs\cache-handling-test-scripts\execute_tests.ps1"
 ```
 
-The runner should:
+See [../cache-handling-test-scripts/README.md](../cache-handling-test-scripts/README.md) for usage instructions and customization options.
 
-1. Build `llama-server` unless `-SkipBuild` is set.
-2. Start a fresh server for each integration case.
-3. Run server-backed Python or PowerShell integration cases with `LLAMA_SERVER_BIN_PATH` set when needed.
-4. Write logs to `._test_output/cache-handling/<timestamp>/`.
-5. Save request bodies, response JSON, metrics snapshots, stderr, and process exit codes.
-6. Fail the run if any non-xfailed integration test fails.
+## Runner specification
 
-## Helper expectations
+The implemented PowerShell runner (`execute_tests.ps1`) includes these features:
 
-The runner should include helpers for:
+**Configuration (via script variables):**
 
-- Finding a free port.
-- Starting and stopping `llama-server`.
-- Waiting for `/health`.
-- Fetching `/metrics`.
-- Posting `/completion` and `/v1/chat/completions`.
-- Capturing logs even when startup fails.
-- Comparing Prometheus counter values before and after a request.
+- `$BuildDir` - Build directory path (default: "build")
+- `$Model` - Test model path (default: hardcoded Qwen2.5-VL-3B path)
+- `$StartPort` - Starting port for server instances (default: 8120)
 
-Keep the helper script boring. Cache tests are hard enough without clever shell behavior.
+The runner:
+
+1. Uses a pre-built `llama-server` from the specified build directory (build must be done separately).
+2. Starts a fresh server for each integration test case.
+3. Writes logs to `._test_output/cache-handling/<timestamp>/`.
+4. Saves stdout, stderr, and process exit codes for each test.
+5. Writes a comprehensive test report to `._design_docs/.test_reports/test-report-<date>.md`.
+6. Exits with non-zero code if any tests fail.
+
+## Helper functions
+
+The runner includes helper functions in `run_cache_integration.ps1`:
+
+- `Get-FreePort` - Finding a free TCP port
+- `Start-LlamaServer` - Starting `llama-server` with test configuration
+- `Wait-ForServer` - Waiting for `/health` endpoint to become ready
+- `Stop-LlamaServer` - Stopping server processes cleanly
+- `Invoke-Test` - Executing individual test cases with logging and error handling
+- `Add-TestResult` - Recording test results to the report file
+
+The helper functions handle HTTP requests to `/completion`, `/health`, `/metrics`, and `/cache/stats`, capture logs even when startup fails, and ensure process cleanup in finally blocks.
+
+The implementation follows the principle: keep the helper script boring. Cache tests are hard enough without clever shell behavior.
+
+## Current test coverage
+
+The implemented test suite covers:
+
+- **C01-C04:** Cache mode selection (default, legacy, hybrid, invalid)
+- **C05-C06:** HTTP endpoints with/without metrics
+- **C10:** Legacy mode compatibility with prompt reuse
+- **N01-N04:** Edge and negative scenarios (invalid modes, cache disabled, idle-slots config, missing model)
+- **N05-N07:** HTTP surface validation (`/cache/stats`, `/health`, `/metrics`)
+
+See Parts 3 and 4 of this test plan for the complete test matrix.
+
+## Future enhancements
+
+The current runner does not yet implement:
+
+- `-SkipBuild` switch (build must be done separately)
+- `-IncludeDraft` switch (draft model tests not yet implemented)
+- `-IncludeStress` switch (stress tests not yet implemented)
+- Environment variable for model path override (path is hardcoded)
+- Cache hit/miss counter validation from `/metrics`
+- Multi-prompt cache behavior tests
+
+These features should be added as the cache implementation matures and the test scope expands.
 
 ## Acceptance criteria
 
-The current implemented cache scope is covered when:
-
-- Server-backed cache mode tests pass, except any documented xfail for an open runtime gap.
-- Invalid `--cache-mode` fails cleanly.
-- Legacy remains the default mode.
-- `/health` returns exactly `{"status":"ok"}`.
-- `/cache/stats` returns 404.
-- `/metrics` exposes cache counters for legacy and hybrid when metrics are enabled.
-- Hybrid target-only model-backed restore passes at least once with `timings.cache_n > 0`.
-- Repeated hybrid restore from the same saved entry passes, proving non-destructive hits at runtime.
-- Hybrid divergent-prefix requests miss and still complete.
-- Hybrid eviction moves the eviction counter and leaves the server usable.
-- Namespace or compatibility-key mismatch tests prove no cross-namespace hit.
-- Restore failure tests prove the slot is reset before recomputation, at least for a deterministic synthetic or debug-hook path.
-
-These criteria deliberately go beyond the older Phase 1 and Phase 2 report evidence. The reports show that endpoint-shape integration checks pass, but they also say model-backed restore coverage remains open.
+The test matrix scenarios (Part 3) define the testable acceptance criteria for the currently implemented cache scope. Check the design documents listed in [document-index.md](../document-index.md) to understand what features are available for testing.
 
 ## Optional stress criteria
 
@@ -78,8 +97,8 @@ For each run, record:
 - Build directory and server binary path.
 - Model path.
 - Test command lines.
-- Test summary with pass, fail, skip, and xfail counts.
+- Test summary with pass, fail, skip counts.
 - Metrics snapshots around cache save, hit, miss, eviction, and restore failure cases.
-- Known gaps, especially any remaining xfail.
+- Known gaps with references to implementation gap documents.
 
-Do not report focused cache-controller line coverage here. Integration evidence should describe server runs, model paths, HTTP requests, metrics changes, and remaining xfails.
+Do not report focused cache-controller line coverage here. Integration evidence should describe server runs, model paths, HTTP requests, and metrics changes.
