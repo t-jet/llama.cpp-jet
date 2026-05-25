@@ -32,6 +32,7 @@ This index should be updated whenever new documents are added or existing docume
 | [cache-handling-architecture.md](cache-handling-architecture.md) | Architecture entry point for alternate hybrid cache mode, with links to detailed part files. | Use this to navigate architecture requirements, runtime semantics, ADRs, security, and traceability. |
 | [cache-handling-phase1-design.md](cache-handling-phase1-design.md) | Phase 1 design entry point for alternate hybrid cache mode, with links to detailed part files. | Use this to understand the Phase 1 scope, component design, integration points, and testing strategy. |
 | [cache-handling-phase2-design.md](cache-handling-phase2-design.md) | Phase 2 design entry point, with links to detailed part files. | Use this to understand Phase 2 gap closure, component design, data structures, and testing strategy. |
+| [cache-handling-phase3-design.md](cache-handling-phase3-design.md) | Phase 3 design entry point for non-destructive exact blob cache, with links to detailed part files. | Use this to understand Stage 3 implementation: complete save/load functionality, non-destructive hits, usage tracking, multi-slot reuse, and metrics. |
 
 ## Cache implementation, verification, and tests
 
