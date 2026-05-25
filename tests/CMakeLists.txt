@@ -236,6 +236,13 @@ set_tests_properties(test-thread-safety PROPERTIES FIXTURES_REQUIRED test-downlo
 
 llama_build_and_test(test-arg-parser.cpp)
 
+# test-cache-controller requires server-context library
+llama_build(test-cache-controller.cpp get-model.cpp)
+target_link_libraries(test-cache-controller PRIVATE server-context)
+target_include_directories(test-cache-controller PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-cache-controller PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-cache-controller)
+
 if (NOT LLAMA_SANITIZE_ADDRESS AND NOT GGML_SCHED_NO_REALLOC)
   # TODO: repair known memory leaks
   llama_build_and_test(test-opt.cpp)

@@ -333,8 +333,62 @@ static common_chat_msg simple_msg(const std::string & role, const std::string & 
     return msg;
 }
 
+static std::string strip_template_markup(std::string prompt) {
+    prompt = std::regex_replace(prompt, std::regex("<\\|template_markup:[^|]*\\|>"), "");
+    prompt = std::regex_replace(prompt, std::regex("<\\|cache_boundary:[^|]*\\|>"), "");
+    return prompt;
+}
+
+static void test_template_markup_protocol(void) {
+    static const char * tmpl = R"jinja(
+{%- set template_markup = namespace(features=[]) -%}
+{%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+    {%- set template_markup.features = template_markup.features + ['cache_boundary=1'] -%}
+{%- endif -%}
+{%- macro cache_mark(kind, label='') -%}
+    {%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+        {{- '<|cache_boundary:' ~ kind ~ (':' ~ label if label else '') ~ '|>' -}}
+    {%- endif -%}
+{%- endmacro -%}
+{%- if template_markup.features|length > 0 -%}
+    {{- '<|template_markup:v1:' ~ template_markup.features|join(',') ~ '|>' -}}
+{%- endif -%}
+{%- for message in messages -%}
+    {{- cache_mark('message_start', message.role) -}}
+    {{- message.role ~ ': ' ~ message.content ~ '\n' -}}
+    {{- cache_mark('message_end', message.role) -}}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- cache_mark('generation_prompt_start', 'assistant') -}}
+    {{- 'assistant:' -}}
+    {{- cache_mark('generation_prompt_end', 'assistant') -}}
+{%- endif -%}
+)jinja";
+
+    auto tmpls = common_chat_templates_init(nullptr, tmpl, "", "");
+    common_chat_templates_inputs inputs;
+    inputs.use_jinja = true;
+    inputs.messages = {
+        simple_msg("user", "Hello"),
+    };
+    inputs.add_generation_prompt = true;
+
+    const std::string normal = common_chat_templates_apply(tmpls.get(), inputs).prompt;
+    assert(normal == "user: Hello\nassistant:");
+
+    inputs.chat_template_kwargs["emit_cache_boundaries"] = "true";
+    const std::string marked = common_chat_templates_apply(tmpls.get(), inputs).prompt;
+    assert(marked.rfind("<|template_markup:v1:", 0) == 0);
+    assert(std::regex_search(marked, std::regex("^<\\|template_markup:v1:([^|,=]+=[0-9]+,)*cache_boundary=1(,[^|,=]+=[0-9]+)*\\|>")));
+    assert(marked.find("<|cache_boundary:message_start:user|>") != std::string::npos);
+    assert(marked.find("<|cache_boundary:generation_prompt_start:assistant|>") != std::string::npos);
+    assert(strip_template_markup(marked) == normal);
+}
+
 int main_automated_tests(void) {
     // jinja::enable_debug(true);
+
+    test_template_markup_protocol();
 
     std::vector<llama_chat_message> conversation {
         {"system", "You are a helpful assistant"},

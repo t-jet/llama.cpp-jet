@@ -17,6 +17,11 @@ add_library(${TARGET} STATIC
     server-context.h
     server-tools.cpp
     server-tools.h
+    server-cache-controller.cpp
+    server-cache-controller.h
+    server-cache-legacy.h
+    server-cache-hybrid.cpp
+    server-cache-hybrid.h
 )
 
 if (BUILD_SHARED_LIBS)
@@ -25,6 +30,7 @@ endif()
 
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(${TARGET} PRIVATE LLAMA_SERVER_CACHE_TESTS)
 target_link_libraries(${TARGET} PUBLIC llama-common mtmd ${CMAKE_THREAD_LIBS_INIT})
 
 # llama-server-impl: server logic, reusable by app

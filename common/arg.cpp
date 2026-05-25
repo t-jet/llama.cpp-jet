@@ -1349,6 +1349,19 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_CACHE_RAM").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}));
     add_opt(common_arg(
+        {"--cache-mode"}, "MODE",
+        "cache mode: legacy (FIFO, destructive) or hybrid (LRU, non-destructive) (default: legacy)",
+        [](common_params & params, const std::string & value) {
+            if (value == "legacy") {
+                params.cache_mode_val = CACHE_MODE_LEGACY;
+            } else if (value == "hybrid") {
+                params.cache_mode_val = CACHE_MODE_HYBRID;
+            } else {
+                throw std::invalid_argument("invalid cache mode: " + value);
+            }
+        }
+    ).set_env("LLAMA_ARG_CACHE_MODE").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}));
+    add_opt(common_arg(
         {"-kvu", "--kv-unified"},
         {"-no-kvu", "--no-kv-unified"},
         "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)",

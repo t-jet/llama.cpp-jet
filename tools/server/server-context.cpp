@@ -5,6 +5,9 @@
 #include "server-http.h"
 #include "server-task.h"
 #include "server-queue.h"
+#include "server-cache-controller.h"
+#include "server-cache-hybrid.h"
+#include "server-cache-legacy.h"
 
 #include "build-info.h"
 #include "common.h"
@@ -108,6 +111,7 @@ struct server_slot {
     slot_state state = SLOT_STATE_IDLE;
 
     server_prompt prompt;
+    prepared_prompt_metadata prompt_metadata;
     bool checkpoints_enabled = true;
 
     static size_t checkpoints_size(const server_prompt & src_prompt) {
@@ -300,6 +304,7 @@ struct server_slot {
         }
 
         prompt.tokens.clear();
+        prompt_metadata.clear();
     }
 
     std::vector<common_adapter_lora_info> lora;
@@ -802,6 +807,17 @@ public:
         }
     }
 
+    json get_cache_stats() const {
+        if (!cache_ctrl) {
+            return {
+                {"type", "none"},
+                {"message", "No cache controller initialized"},
+            };
+        }
+
+        return cache_ctrl->get_stats();
+    }
+
 private:
     // note: accessing these fields outside of this class is not thread-safe
     // use server_context methods instead
@@ -838,7 +854,8 @@ private:
     int slots_debug = 0;
     int n_empty_consecutive = 0;
 
-    std::unique_ptr<server_prompt_cache> prompt_cache;
+    std::unique_ptr<cache_controller> cache_ctrl;
+    cache_mode cache_mode_active = CACHE_MODE_LEGACY;
 
     server_metrics metrics;
 
@@ -871,14 +888,14 @@ private:
     }
 
     void slot_save_and_clear(server_slot & slot) {
-        if (slot.prompt.n_tokens() == 0) {
+        if (!cache_ctrl || slot.prompt.n_tokens() == 0) {
             return;
         }
         SLT_INF(slot, "%s", "saving idle slot to prompt cache\n");
         SLT_DBG(slot, "%s", "__TEST_TAG_CACHE_IDLE_SLOT__\n");
-        slot.prompt_save(*prompt_cache, true);
+        cache_ctrl->save_slot(slot, slot.prompt_metadata);
         slot.prompt_clear(false);
-        prompt_cache->update();
+        cache_ctrl->update();
     }
 
     void handle_sleeping_state(bool new_state) {
@@ -1171,9 +1188,25 @@ private:
             }
             SRV_INF("%s", "use `--cache-ram 0` to disable the prompt cache\n");
 
-            prompt_cache = std::make_unique<server_prompt_cache>(params_base.cache_ram_mib, n_ctx);
+            // Store active cache mode
+            cache_mode_active = params_base.cache_mode_val;
+
+            cache_ctrl = create_cache_controller(
+                cache_mode_active,
+                params_base.cache_ram_mib,
+                n_ctx,
+                ctx_tgt,
+                ctx_dft ? ctx_dft.get() : nullptr
+            );
+
+            if (cache_mode_active == CACHE_MODE_LEGACY) {
+                SRV_INF("%s", "cache mode: legacy (FIFO, destructive hits)\n");
+            } else {
+                SRV_INF("%s", "cache mode: hybrid (LRU, non-destructive hits)\n");
+            }
         } else {
             SRV_INF("%s", "prompt cache is disabled - use `--cache-ram N` to enable it\n");
+            cache_ctrl.reset();
         }
         SRV_INF("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
 
@@ -1421,7 +1454,7 @@ private:
         if (ret) {
             const auto & tokens = ret->prompt.tokens;
 
-            update_cache = update_cache && prompt_cache;
+            update_cache = update_cache && cache_ctrl;
 
             // cache prompts only for completion tasks
             update_cache = update_cache && task.type == SERVER_TASK_TYPE_COMPLETION;
@@ -1433,16 +1466,16 @@ private:
 
                 // don't save the slot's state if its context is empty
                 if (tokens.size() > 0) {
-                    if (ret->prompt_save(*prompt_cache, true)) {
+                    if (cache_ctrl->save_slot(*ret, ret->prompt_metadata)) {
                         ret->prompt_clear(false);
                     }
                 }
 
-                if (!ret->prompt_load(*prompt_cache, task.tokens)) {
+                if (!cache_ctrl->load_slot(*ret, task)) {
                     ret->prompt_clear(false);
                 }
 
-                prompt_cache->update();
+                cache_ctrl->update();
 
                 SRV_INF("prompt cache update took %.2f ms\n", (ggml_time_us() - t_start) / 1000.0);
             }
@@ -1604,6 +1637,7 @@ private:
             slot.smpl.reset();
         }
 
+        slot.prompt_metadata = task.prompt_metadata;
         slot.task = std::make_unique<const server_task>(std::move(task));
 
         slot.state = slot.task->is_child()
@@ -3785,12 +3819,180 @@ void server_context::on_sleeping_changed(std::function<void(bool)> callback) {
 // server_routes
 //
 
+static std::string cache_metadata_content_text(const json & content) {
+    if (content.is_string()) {
+        return content.get<std::string>();
+    }
+    if (content.is_null()) {
+        return "";
+    }
+    if (!content.is_array()) {
+        return content.dump();
+    }
+
+    std::string result;
+    for (const auto & part : content) {
+        const std::string type = json_value(part, "type", std::string());
+        if (type == "text" || type == "media_marker") {
+            result += json_value(part, "text", std::string());
+        }
+    }
+    return result;
+}
+
+static size_t cache_metadata_token_index(
+        const llama_vocab * vocab,
+        const std::string & prompt,
+        size_t char_index) {
+    char_index = std::min(char_index, prompt.size());
+    if (char_index == 0) {
+        return 0;
+    }
+
+    return common_tokenize(vocab, prompt.substr(0, char_index), true, true).size();
+}
+
+static uint64_t cache_metadata_checksum(
+        const server_tokens & tokens,
+        size_t token_start,
+        size_t token_end) {
+    const llama_tokens & token_ids = tokens.get_tokens();
+    token_start = std::min(token_start, token_ids.size());
+    token_end = std::min(std::max(token_end, token_start), token_ids.size());
+
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = token_start; i < token_end; ++i) {
+        hash ^= static_cast<uint64_t>(static_cast<uint32_t>(token_ids[i]));
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static prepared_prompt_metadata cache_metadata_from_chat_messages(
+        const llama_vocab * vocab,
+        const std::string & prompt,
+        const json & messages,
+        const server_tokens & tokens,
+        size_t n_prompt_tokens) {
+    prepared_prompt_metadata metadata;
+    metadata.preparation_id = "chat-template-rendered-text-search";
+
+    if (!messages.is_array()) {
+        metadata.degraded_reason = "chat metadata source is not an array";
+        return metadata;
+    }
+
+    size_t search_pos = 0;
+    size_t fallback_token = 0;
+
+    for (const auto & message : messages) {
+        const std::string role = json_value(message, "role", std::string());
+        const std::string content = message.contains("content")
+            ? cache_metadata_content_text(message.at("content"))
+            : std::string();
+
+        size_t token_start = fallback_token;
+        size_t token_end = fallback_token;
+
+        if (!content.empty()) {
+            const size_t char_start = prompt.find(content, search_pos);
+            if (char_start != std::string::npos) {
+                const size_t char_end = char_start + content.size();
+                token_start = cache_metadata_token_index(vocab, prompt, char_start);
+                token_end = cache_metadata_token_index(vocab, prompt, char_end);
+                search_pos = char_end;
+            } else {
+                SRV_DBG("cache metadata: could not map chat message role '%s' into rendered prompt\n", role.c_str());
+                if (metadata.degraded_reason.empty()) {
+                    metadata.degraded_reason = "one or more chat messages could not be mapped to the rendered prompt";
+                }
+            }
+        }
+
+        token_start = std::min(token_start, n_prompt_tokens);
+        token_end = std::min(std::max(token_end, token_start), n_prompt_tokens);
+
+        const bool protect = role == "system" || role == "developer";
+        const uint64_t checksum = cache_metadata_checksum(tokens, token_start, token_end);
+
+        metadata.add_span(prompt_boundary::MESSAGE_START, token_start, token_end, checksum, protect, role);
+        if (role == "system" || role == "developer") {
+            metadata.protect_system = true;
+            metadata.add_span(prompt_boundary::SYSTEM_START, token_start, token_end, checksum, true, role);
+            metadata.add_span(prompt_boundary::SYSTEM_END, token_start, token_end, checksum, true, role);
+        }
+        metadata.add_span(prompt_boundary::MESSAGE_END, token_start, token_end, checksum, protect, role);
+        fallback_token = token_end;
+
+        if (message.contains("tool_calls") && message.at("tool_calls").is_array()) {
+            for (const auto & tool_call : message.at("tool_calls")) {
+                const json fn = tool_call.contains("function") ? tool_call.at("function") : json::object();
+                const std::string name = json_value(fn, "name", std::string());
+                const std::string args = json_value(fn, "arguments", std::string());
+                const std::string needle = !name.empty() ? name : args;
+                if (needle.empty()) {
+                    continue;
+                }
+                const size_t char_start = prompt.find(needle, search_pos);
+                if (char_start == std::string::npos) {
+                    continue;
+                }
+                const size_t char_end = char_start + needle.size();
+                const size_t tool_start = cache_metadata_token_index(vocab, prompt, char_start);
+                const size_t tool_end = cache_metadata_token_index(vocab, prompt, char_end);
+                const size_t span_start = std::min(tool_start, n_prompt_tokens);
+                const size_t span_end = std::min(tool_end, n_prompt_tokens);
+                const uint64_t tool_checksum = cache_metadata_checksum(tokens, span_start, span_end);
+                metadata.add_span(prompt_boundary::TOOL_CALL_START, span_start, span_end, tool_checksum, false, name);
+                metadata.add_span(prompt_boundary::TOOL_CALL_END, span_start, span_end, tool_checksum, false, name);
+            }
+        }
+    }
+
+    return metadata;
+}
+
+static prepared_prompt_metadata cache_metadata_for_request(
+        const llama_vocab * vocab,
+        const json & data,
+        const server_tokens & tokens,
+        const json * chat_messages = nullptr) {
+    prepared_prompt_metadata metadata;
+
+    if (chat_messages != nullptr && data.contains("prompt") && data.at("prompt").is_string()) {
+        metadata = cache_metadata_from_chat_messages(
+            vocab,
+            data.at("prompt").get<std::string>(),
+            *chat_messages,
+            tokens,
+            tokens.size());
+        if (metadata.has_boundaries()) {
+            metadata.degraded_reason = "rendered text boundary inference";
+        }
+    }
+
+    if (!metadata.has_boundaries() && !tokens.empty()) {
+        const uint64_t checksum = cache_metadata_checksum(tokens, 0, tokens.size());
+        metadata.preparation_id = "completion-minimal";
+        metadata.degraded_reason = "minimal completion metadata";
+        metadata.add_span(prompt_boundary::MESSAGE_START, 0, tokens.size(), checksum, false, "prompt");
+        metadata.add_span(prompt_boundary::MESSAGE_END, 0, tokens.size(), checksum, false, "prompt");
+    }
+
+    if (metadata.compatibility_key.empty()) {
+        metadata.compatibility_key = "server-prepared-prompt-v1";
+    }
+
+    return metadata;
+}
+
 std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const server_http_req & req,
             server_task_type type,
             const json & data,
             const std::vector<raw_buffer> & files,
-            task_response_type res_type) {
+            task_response_type res_type,
+            const json * chat_messages) {
     GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
@@ -3823,6 +4025,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             task.id = rd.get_new_id();
 
             task.tokens = std::move(inputs[i]);
+            task.prompt_metadata = cache_metadata_for_request(ctx_server.vocab, data, task.tokens, chat_messages);
             task.params = server_task::params_from_json_cmpl(
                     ctx_server.vocab,
                     params,
@@ -4028,8 +4231,8 @@ void server_routes::init_routes() {
 
         // this endpoint can be accessed during sleeping
         // the next LOC is to avoid someone accidentally use ctx_server
-        bool ctx_server; // do NOT delete this line
-        GGML_UNUSED(ctx_server);
+        bool ctx_server_shadow; // do NOT delete this line
+        GGML_UNUSED(ctx_server_shadow);
 
         res->ok({{"status", "ok"}});
         return res;
@@ -4131,6 +4334,26 @@ void server_routes::init_routes() {
                             << "# TYPE llamacpp:" << name << " " << type  << "\n"
                             << "llamacpp:"        << name << " " << value << "\n";
             }
+        }
+
+        try {
+            const json cache_stats = this->ctx_server.get_cache_stats();
+            const std::string mode = json_value(cache_stats, "type", std::string("none"));
+            const auto write_cache_metric = [&prometheus, &mode](const char * type, const char * name, const char * help, auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"} " << value << "\n";
+            };
+
+            write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_tokens",  "Current cached token count by mode.", json_value(cache_stats, "n_tokens", 0));
+            write_cache_metric("counter", "llamacpp_cache_hits_total", "Successful cache restores by mode.", json_value(cache_stats, "n_hits", 0));
+            write_cache_metric("counter", "llamacpp_cache_misses_total", "Cache lookup misses by mode.", json_value(cache_stats, "n_misses", 0));
+            write_cache_metric("counter", "llamacpp_cache_evictions_total", "Cache evictions by mode.", json_value(cache_stats, "n_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
+        } catch (const std::exception & e) {
+            SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
 
         res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->t_start);
@@ -4397,7 +4620,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_CHAT);
+            TASK_RESPONSE_TYPE_OAI_CHAT,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_responses_oai = [this](const server_http_req & req) {
@@ -4415,7 +4639,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_RESP);
+            TASK_RESPONSE_TYPE_OAI_RESP,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_transcriptions_oai = [this](const server_http_req & req) {
@@ -4443,7 +4668,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_ASR);
+            TASK_RESPONSE_TYPE_OAI_ASR,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_anthropic_messages = [this](const server_http_req & req) {
@@ -4461,7 +4687,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_ANTHROPIC);
+            TASK_RESPONSE_TYPE_ANTHROPIC,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_anthropic_count_tokens = [this](const server_http_req & req) {
@@ -4957,4 +5184,227 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
         : json(responses);
     res->ok(root);
     return res;
+}
+
+//
+// Cache controller methods that need server_slot.
+// server_slot is private to this translation unit.
+//
+
+bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) {
+    if (slot.prompt.tokens.empty()) {
+        SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
+        return false;
+    }
+
+    const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t total_size = state_size_tgt + state_size_dft;
+
+    SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
+            slot.id,
+            slot.prompt.tokens.size(),
+            total_size / (1024.0 * 1024.0),
+            state_size_tgt / (1024.0 * 1024.0),
+            state_size_dft / (1024.0 * 1024.0));
+
+    while (!entries.empty() &&
+           limit_size > 0 &&
+           calculate_total_size() + total_size > limit_size) {
+        evict_lru();
+    }
+
+    hybrid_cache_entry entry;
+    entry.namespace_id = compute_namespace_id();
+    entry.tokens = slot.prompt.tokens.clone();
+    entry.last_used_time = std::chrono::system_clock::now();
+    entry.use_count = 0;
+    entry.checkpoints = slot.prompt.checkpoints;
+    entry.metadata = metadata;
+    entry.namespace_id = compute_namespace_id(entry.metadata);
+    entry.protected_root = false;
+    if (!metadata.degraded()) {
+        entry.protected_root = metadata.protect_system || metadata.protect_messages;
+        for (const auto & boundary : metadata.boundaries) {
+            entry.protected_root = entry.protected_root || boundary.protect;
+        }
+    }
+
+    if (ctx_tgt && state_size_tgt > 0) {
+        try {
+            entry.data.main.resize(state_size_tgt);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate target state buffer (%zu bytes): %s\n", state_size_tgt, e.what());
+            return false;
+        }
+
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, entry.data.main.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt) {
+            SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
+            return false;
+        }
+    }
+
+    if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
+        try {
+            entry.data.drft.resize(state_size_dft);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate draft state buffer (%zu bytes): %s\n", state_size_dft, e.what());
+            return false;
+        }
+
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, entry.data.drft.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft) {
+            SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
+            return false;
+        }
+    }
+
+    entries.push_back(std::move(entry));
+    auto it_new = std::prev(entries.end());
+    add_to_lru_index(it_new);
+    add_to_prefix_index(it_new);
+
+    SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
+            slot.id, it_new->namespace_id.c_str(), entries.size());
+
+    return true;
+}
+
+bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & task) {
+    auto it_best = find_best_match(task.tokens, task.prompt_metadata);
+
+    if (it_best == entries.end()) {
+        SRV_INF("%s", " - hybrid cache: no match found\n");
+        n_misses++;
+        return false;
+    }
+
+    const int match_len = it_best->tokens.get_common_prefix(task.tokens);
+    SRV_INF(" - hybrid cache: found match with %d tokens (matched: %d/%zu, namespace: %s)\n",
+            it_best->n_tokens(), match_len, task.tokens.size(), it_best->namespace_id.c_str());
+
+    if (match_len != it_best->n_tokens()) {
+        SRV_WRN(" - hybrid cache: rejecting partial exact-blob match (%d/%d tokens)\n",
+                match_len, it_best->n_tokens());
+        n_misses++;
+        return false;
+    }
+
+    const bool need_tgt = ctx_tgt != nullptr;
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const auto reset_after_restore_failure = [&slot]() {
+        slot.prompt_clear(false);
+        slot.n_prompt_tokens_cache = 0;
+        slot.n_prompt_tokens_processed = 0;
+    };
+
+    if (need_tgt && it_best->data.main.empty()) {
+        SRV_ERR("%s", " - hybrid cache: rejecting entry without target payload\n");
+        n_restore_failures++;
+        return false;
+    }
+
+    if (need_dft && it_best->data.drft.empty()) {
+        SRV_ERR("%s", " - hybrid cache: rejecting paired restore without draft payload\n");
+        n_restore_failures++;
+        return false;
+    }
+
+    auto old_time = it_best->last_used_time;
+    it_best->mark_used();
+    update_lru_index(it_best, old_time);
+
+    if (ctx_tgt && !it_best->data.main.empty()) {
+        const size_t n_tgt = llama_state_seq_set_data_ext(
+            ctx_tgt,
+            it_best->data.main.data(),
+            it_best->data.main.size(),
+            slot.id,
+            LLAMA_STATE_SEQ_FLAGS_NONE);
+
+        if (n_tgt != it_best->data.main.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
+            reset_after_restore_failure();
+            n_restore_failures++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
+    }
+
+    if (ctx_dft && slot.ctx_dft && !it_best->data.drft.empty()) {
+        const size_t n_dft = llama_state_seq_set_data_ext(
+            ctx_dft,
+            it_best->data.drft.data(),
+            it_best->data.drft.size(),
+            slot.id,
+            LLAMA_STATE_SEQ_FLAGS_NONE);
+
+        if (n_dft != it_best->data.drft.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
+            reset_after_restore_failure();
+            n_restore_failures++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
+    }
+
+    slot.prompt.tokens.clear();
+    for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {
+        slot.prompt.tokens.push_back(it_best->tokens[i]);
+    }
+
+    slot.prompt.checkpoints = it_best->checkpoints;
+    slot.n_prompt_tokens_cache = match_len;
+    slot.n_prompt_tokens_processed = match_len;
+    slot.prompt_metadata = it_best->metadata;
+    n_hits++;
+
+    SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
+            match_len, slot.id, it_best->use_count);
+
+    return true;
+}
+
+legacy_cache_controller::legacy_cache_controller(
+    int32_t limit_size_mib,
+    size_t limit_tokens,
+    llama_context * ctx_tgt_param,
+    llama_context * ctx_dft_param)
+    : ctx_tgt(ctx_tgt_param)
+    , ctx_dft(ctx_dft_param) {
+    GGML_UNUSED(ctx_tgt);
+    GGML_UNUSED(ctx_dft);
+    cache = std::make_unique<server_prompt_cache>(limit_size_mib, limit_tokens);
+}
+
+bool legacy_cache_controller::save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) {
+    GGML_UNUSED(metadata);
+    return const_cast<server_slot &>(slot).prompt_save(*cache, true);
+}
+
+bool legacy_cache_controller::load_slot(server_slot & slot, const server_task & task) {
+    return slot.prompt_load(*cache, task.tokens);
+}
+
+void legacy_cache_controller::update() {
+    cache->update();
+}
+
+json legacy_cache_controller::get_stats() const {
+    return json {
+        {"type",     "legacy"},
+        {"size_bytes", size()},
+        {"size_mib", size() / (1024.0 * 1024.0)},
+        {"n_tokens", n_tokens()},
+        {"n_entries", cache->states.size()},
+    };
+}
+
+size_t legacy_cache_controller::size() const {
+    return cache->size();
+}
+
+size_t legacy_cache_controller::n_tokens() const {
+    return cache->n_tokens();
 }

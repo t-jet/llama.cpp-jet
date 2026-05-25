@@ -1,0 +1,58 @@
+{%- set image_count = namespace(value=0) -%}
+{%- set video_count = namespace(value=0) -%}
+{%- set template_markup = namespace(features=[]) -%}
+{%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+    {%- set template_markup.features = template_markup.features + ['cache_boundary=1'] -%}
+{%- endif -%}
+{%- macro cache_mark(kind, label='') -%}
+    {%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+        {{- '<|cache_boundary:' ~ kind ~ (':' ~ label if label else '') ~ '|>' -}}
+    {%- endif -%}
+{%- endmacro -%}
+{%- if template_markup.features|length > 0 -%}
+    {{- '<|template_markup:v1:' ~ template_markup.features|join(',') ~ '|>' -}}
+{%- endif -%}
+{%- macro render_content(content) -%}
+    {%- if content is string -%}
+        {{- content -}}
+    {%- else -%}
+        {%- for item in content -%}
+            {%- if item['type'] == 'image' or 'image' in item or 'image_url' in item -%}
+                {{- cache_mark('media_start', 'image') -}}
+                {%- set image_count.value = image_count.value + 1 -%}
+                {%- if add_vision_id -%}Picture {{ image_count.value }}: {%- endif -%}
+                {{- '<|vision_start|><|image_pad|><|vision_end|>' -}}
+                {{- cache_mark('media_end', 'image') -}}
+            {%- elif item['type'] == 'video' or 'video' in item -%}
+                {{- cache_mark('media_start', 'video') -}}
+                {%- set video_count.value = video_count.value + 1 -%}
+                {%- if add_vision_id -%}Video {{ video_count.value }}: {%- endif -%}
+                {{- '<|vision_start|><|video_pad|><|vision_end|>' -}}
+                {{- cache_mark('media_end', 'video') -}}
+            {%- elif 'text' in item -%}
+                {{- item['text'] -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+{%- endmacro -%}
+{%- if messages and messages[0]['role'] != 'system' -%}
+    {{- cache_mark('system_start', 'system') -}}
+    {{- cache_mark('message_start', 'system') -}}
+    {{- '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n' -}}
+    {{- cache_mark('message_end', 'system') -}}
+    {{- cache_mark('system_end', 'system') -}}
+{%- endif -%}
+{%- for message in messages -%}
+    {{- cache_mark('system_start', message['role']) if message['role'] == 'system' -}}
+    {{- cache_mark('message_start', message['role']) -}}
+    {{- '<|im_start|>' ~ message['role'] ~ '\n' -}}
+    {{- render_content(message['content']) -}}
+    {{- '<|im_end|>\n' -}}
+    {{- cache_mark('message_end', message['role']) -}}
+    {{- cache_mark('system_end', message['role']) if message['role'] == 'system' -}}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- cache_mark('generation_prompt_start', 'assistant') -}}
+    {{- '<|im_start|>assistant\n' -}}
+    {{- cache_mark('generation_prompt_end', 'assistant') -}}
+{%- endif -%}

@@ -422,6 +422,12 @@ struct lr_opt {
 
 struct ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
+// cache mode for prompt caching
+enum cache_mode {
+    CACHE_MODE_LEGACY = 0,  // legacy FIFO cache with destructive hits
+    CACHE_MODE_HYBRID = 1,  // new hybrid cache with LRU and non-destructive hits
+};
+
 struct common_params {
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
     int32_t n_ctx                 =     0; // context size, 0 == context the model was trained with
@@ -596,6 +602,7 @@ struct common_params {
     int32_t n_ctx_checkpoints   = 32;    // max number of context checkpoints per slot
     int32_t checkpoint_every_nt = 8192;  // make a checkpoint every n tokens during prefill
     int32_t cache_ram_mib       = 8192;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
+    cache_mode cache_mode_val   = CACHE_MODE_LEGACY;  // cache mode (legacy or hybrid)
 
     std::string hostname      = "127.0.0.1";
     std::string public_path   = "";                                                                         // NOLINT

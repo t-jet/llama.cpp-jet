@@ -122,6 +122,107 @@ struct task_result_state {
         bool filter_tool_calls = false);
 };
 
+//
+// Boundary metadata for prepared prompts (Phase 1)
+//
+
+// Represents one boundary span in the prepared prompt
+struct prompt_boundary {
+    enum boundary_type {
+        SYSTEM_START,      // start of system prompt
+        SYSTEM_END,        // end of system prompt
+        MESSAGE_START,     // start of a user/assistant message
+        MESSAGE_END,       // end of a user/assistant message
+        TOOL_CALL_START,   // start of a tool call
+        TOOL_CALL_END,     // end of a tool call
+    };
+
+    boundary_type type;        // type of boundary
+    size_t token_index;        // legacy point position, equal to token_start
+    size_t token_start;        // inclusive token offset
+    size_t token_end;          // exclusive token offset, or token_start for point markers
+    uint64_t checksum = 0;     // optional span checksum, 0 when not computed
+    bool protect = false;      // hint that this span should be retained preferentially
+    std::string metadata;      // optional metadata (e.g., role, tool name)
+
+    prompt_boundary() = default;
+    prompt_boundary(boundary_type t, size_t idx, const std::string & meta = "")
+        : type(t), token_index(idx), token_start(idx), token_end(idx), metadata(meta) {}
+
+    prompt_boundary(
+            boundary_type t,
+            size_t start,
+            size_t end,
+            uint64_t checksum_value,
+            bool protect_value,
+            const std::string & meta = "")
+        : type(t)
+        , token_index(start)
+        , token_start(start)
+        , token_end(end)
+        , checksum(checksum_value)
+        , protect(protect_value)
+        , metadata(meta) {}
+};
+
+// Metadata for a prepared prompt with boundaries
+struct prepared_prompt_metadata {
+    std::vector<prompt_boundary> boundaries;
+    std::string compatibility_key;
+    std::string preparation_id;
+    std::string degraded_reason;
+    bool protect_system = false;
+    bool protect_messages = false;
+
+    prepared_prompt_metadata() = default;
+
+    void add_boundary(prompt_boundary::boundary_type type, size_t token_index, const std::string & metadata = "") {
+        boundaries.emplace_back(type, token_index, metadata);
+    }
+
+    void add_span(
+            prompt_boundary::boundary_type type,
+            size_t token_start,
+            size_t token_end,
+            uint64_t checksum = 0,
+            bool protect = false,
+            const std::string & metadata = "") {
+        boundaries.emplace_back(type, token_start, token_end, checksum, protect, metadata);
+        if (type == prompt_boundary::SYSTEM_END ||
+            type == prompt_boundary::MESSAGE_END ||
+            type == prompt_boundary::TOOL_CALL_END) {
+            boundaries.back().token_index = token_end;
+        }
+    }
+
+    std::vector<prompt_boundary> get_boundaries(prompt_boundary::boundary_type type) const {
+        std::vector<prompt_boundary> result;
+        for (const auto & b : boundaries) {
+            if (b.type == type) {
+                result.push_back(b);
+            }
+        }
+        return result;
+    }
+
+    bool has_boundaries() const {
+        return !boundaries.empty();
+    }
+
+    bool degraded() const {
+        return !degraded_reason.empty();
+    }
+
+    void clear() {
+        boundaries.clear();
+        compatibility_key.clear();
+        preparation_id.clear();
+        degraded_reason.clear();
+        protect_system = false;
+        protect_messages = false;
+    }
+};
+
 struct server_task {
     int id = -1; // to be filled by server_queue
 
@@ -141,6 +242,7 @@ struct server_task {
     // used by SERVER_TASK_TYPE_INFERENCE
     task_params   params;
     server_tokens tokens;
+    prepared_prompt_metadata prompt_metadata;  // boundary metadata for the prompt
 
     // only used by CLI, this allow tokenizing CLI inputs on server side
     // we need this because mtmd_context and vocab are not accessible outside of server_context
@@ -229,6 +331,7 @@ struct server_task {
         copy.params    = params;
         copy.type      = type;
         copy.tokens    = tokens.clone();
+        copy.prompt_metadata = prompt_metadata;
         copy.id_slot   = -1; // child tasks cannot specify slot
 
         // use different sampling seed for each child
