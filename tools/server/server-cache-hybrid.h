@@ -14,6 +14,43 @@
 // Forward declarations
 struct server_slot;
 
+// Phase 3: Comprehensive namespace compatibility key (Gap 2.2)
+// Tracks all runtime configuration that affects cache compatibility
+struct cache_compatibility_key {
+    // Model identity
+    std::string model_path_hash;              // Hash of model file path
+    std::string model_params_hash;            // Hash of key model hyperparameters
+    
+    // Draft model (for speculative decoding)
+    std::string draft_model_hash;             // Hash of draft model params or "none"
+    
+    // Tokenizer and template
+    std::string tokenizer_id;                 // Tokenizer identifier from model
+    std::string template_id;                  // Template hash or identifier
+    
+    // Active modifiers
+    std::vector<std::string> lora_adapters;   // LoRA adapter paths with scales
+    std::vector<std::string> control_vectors; // Control vectors with layer ranges
+    
+    // Multimodal configuration
+    std::string mm_projector_id;              // Multimodal projector identifier
+    int mm_patch_size = 0;                    // Image patch size (0 if not multimodal)
+    bool mm_use_dynamic_tokens = false;       // Dynamic vs. fixed token count
+    
+    // Context and KV configuration
+    int n_ctx = 0;                            // Context window size
+    int n_batch = 0;                          // Batch size
+    bool kv_unified = false;                  // Unified KV cache mode
+    
+    // Workload profile
+    std::string workload_profile;             // Workload profile identifier
+    
+    cache_compatibility_key() = default;
+    
+    // Compute deterministic hash of all components
+    std::string compute() const;
+};
+
 // Phase 1 hybrid cache entry with LRU tracking
 struct hybrid_cache_entry {
     server_tokens tokens;                          // Token sequence for this cache entry
@@ -64,6 +101,7 @@ struct hybrid_cache_entry {
 class hybrid_cache_controller : public cache_controller {
 public:
     hybrid_cache_controller(
+        const common_params & params,
         int32_t limit_size_mib,
         size_t limit_tokens,
         llama_context * ctx_tgt,
@@ -79,6 +117,17 @@ public:
     size_t size() const override;
     size_t n_tokens() const override;
 
+    // Non-destructive cache restore for hybrid mode
+    // Returns true if a matching entry was found and restored into the slot
+    // Unlike load_slot(), this does not require the slot to be cleared first
+    bool try_restore_from_cache(server_slot & slot, const server_task & task);
+
+    // Phase 3: Build comprehensive compatibility key (Gap 2.2)
+    cache_compatibility_key build_compatibility_key() const;
+
+    // Phase 3: Validate configuration safety for hybrid cache (Gap 2.2)
+    bool validate_hybrid_cache_safety(bool log_warnings = true) const;
+
 #ifdef LLAMA_SERVER_CACHE_TESTS
     // Test helpers for pure lookup/index coverage without a llama context.
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
@@ -87,6 +136,7 @@ public:
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
+    cache_compatibility_key debug_get_compatibility_key_for_tests() const;
 #endif
 
 private:
@@ -97,6 +147,7 @@ private:
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
+    cache_compatibility_key debug_get_compatibility_key_for_tests() const;
 #endif
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
@@ -130,6 +181,7 @@ private:
     > prefix_index;
 
     // Configuration
+    const common_params & params; // runtime parameters for comprehensive namespace keys
     size_t limit_size;       // size limit in bytes, 0 = no limit
     size_t limit_tokens;     // token limit, 0 = no limit
     llama_context * ctx_tgt; // target context
@@ -146,6 +198,12 @@ private:
     std::list<hybrid_cache_entry>::iterator find_best_match(
         const server_tokens & tokens_new,
         const prepared_prompt_metadata & metadata);
+
+    // Find exact matching entry for deduplication
+    // Returns iterator to exact match, or entries.end() if no match found
+    std::list<hybrid_cache_entry>::iterator find_exact_match(
+        const server_tokens & tokens,
+        const std::string & namespace_id);
 
     // Evict least recently used entry (respects protected_root flag)
     void evict_lru();

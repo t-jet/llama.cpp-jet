@@ -18,3 +18,14 @@ Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
 | N05 | `GET /cache/stats` | 404. This is the expected upstream target. |
 | N06 | `GET /health` | Response is exactly `{"status":"ok"}`. Do not add cache fields. |
 | N07 | `GET /metrics` without metrics enabled | The endpoint returns a not-supported error; cache tests that need counters must enable metrics explicitly. |
+
+## State Serialization and Restore Failures
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| N08 | Corrupted state data | Hybrid mode with simulated `llama_state_set_data()` failure. Verify `llamacpp_cache_restore_failures{mode="hybrid"}` increments. Slot state reset. Request continues without cache. Log ERROR message. |
+| N09 | Oversized entry rejection | Hybrid mode, entry size exceeds `--cache-ram` budget. Verify entry rejected with WARNING log. No cache entry created. `/metrics` shows no change in entry count. |
+| N10 | Zero-token slot save (duplicate) | Same as H09. Attempt to save slot with 0 tokens. Log warning, no entry created. Verify idempotent: multiple attempts don't corrupt cache state. |
+| N11 | Invalid compatibility key | Hybrid mode with mismatched namespace on load attempt. Should never happen in correct implementation. Document assumption: namespace validation prevents this. |
+| N12 | Metrics counter overflow | Not practical to test. Document assumption: 64-bit counters sufficient for production lifetime. Counters may wrap after 2^64 operations. |
+| N13 | Cache controller factory failure | Invalid `--cache-mode` value (covered by N01). Document other factory failure modes: nullptr contexts, invalid limits. |

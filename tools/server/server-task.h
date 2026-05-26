@@ -173,6 +173,7 @@ struct prepared_prompt_metadata {
     std::string degraded_reason;
     bool protect_system = false;
     bool protect_messages = false;
+    bool boundaries_native = false;  // true if boundaries captured natively, false if inferred
 
     prepared_prompt_metadata() = default;
 

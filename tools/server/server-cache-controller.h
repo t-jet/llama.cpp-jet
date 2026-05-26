@@ -27,6 +27,14 @@ public:
     // Returns true if a match was found and loaded
     virtual bool load_slot(server_slot & slot, const server_task & task) = 0;
 
+    // Non-destructive cache restore (for hybrid mode)
+    // Returns true if a matching entry was found and restored
+    // Default implementation calls load_slot for backwards compatibility
+    virtual bool try_restore_from_cache(server_slot & slot, const server_task & task) {
+        // Default: use standard load_slot (works for legacy cache)
+        return load_slot(slot, task);
+    }
+
     // Perform cache maintenance (eviction, cleanup)
     virtual void update() = 0;
 
@@ -43,6 +51,7 @@ public:
 // Factory function to create appropriate cache controller based on mode
 std::unique_ptr<cache_controller> create_cache_controller(
     cache_mode mode,
+    const common_params & params,
     int32_t limit_size_mib,
     size_t limit_tokens,
     llama_context * ctx_tgt,

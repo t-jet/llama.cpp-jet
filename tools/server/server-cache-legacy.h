@@ -11,6 +11,7 @@ struct server_slot;
 class legacy_cache_controller : public cache_controller {
 public:
     legacy_cache_controller(
+        const common_params & params,
         int32_t limit_size_mib,
         size_t limit_tokens,
         llama_context * ctx_tgt,

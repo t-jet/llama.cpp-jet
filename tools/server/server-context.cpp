@@ -1193,6 +1193,7 @@ private:
 
             cache_ctrl = create_cache_controller(
                 cache_mode_active,
+                params_base,
                 params_base.cache_ram_mib,
                 n_ctx,
                 ctx_tgt,
@@ -1459,11 +1460,35 @@ private:
             // cache prompts only for completion tasks
             update_cache = update_cache && task.type == SERVER_TASK_TYPE_COMPLETION;
 
-            if (update_cache) {
+            // For hybrid mode, ALWAYS try to restore from cache when assigning a slot
+            // Hybrid cache is non-destructive, so we can check even for similarity-matched slots
+            if (cache_ctrl && cache_mode_active == CACHE_MODE_HYBRID && task.type == SERVER_TASK_TYPE_COMPLETION) {
+                const int64_t t_start = ggml_time_us();
+                
+                SRV_INF("%s", " - hybrid cache: attempting non-destructive restore\n");
+                
+                // Try to load a matching entry for the new task
+                if (cache_ctrl->try_restore_from_cache(*ret, task)) {
+                    SRV_INF("%s", " - hybrid cache: restored from cache for new task\n");
+                } else {
+                    // No match found, clear the slot for the new task if needed
+                    // Only clear if the slot has old content from a different task
+                    if (!ret->prompt.tokens.empty()) {
+                        SRV_INF("%s", " - hybrid cache: no match found, clearing slot\n");
+                        ret->prompt_clear(false);
+                    }
+                }
+                
+                cache_ctrl->update();
+                SRV_INF("prompt cache update took %.2f ms\n", (ggml_time_us() - t_start) / 1000.0);
+            }
+            // For legacy mode, only update cache when the flag is set
+            else if (update_cache && cache_mode_active != CACHE_MODE_HYBRID) {
                 SRV_INF("%s", "updating prompt cache\n");
 
                 const int64_t t_start = ggml_time_us();
 
+                // Legacy cache: destructive save/load cycle
                 // don't save the slot's state if its context is empty
                 if (tokens.size() > 0) {
                     if (cache_ctrl->save_slot(*ret, ret->prompt_metadata)) {
@@ -3577,6 +3602,13 @@ private:
                     slot.print_timings();
                     send_final_response(slot);
                     metrics.on_prediction(slot);
+
+                    // Save to hybrid cache after successful completion
+                    if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
+                        cache_ctrl->save_slot(slot, slot.prompt_metadata);
+                        cache_ctrl->update();  // Trigger eviction check after save
+                    }
+
                     slot.release();
 
                     continue;
@@ -3691,6 +3723,13 @@ private:
                         slot.print_timings();
                         send_final_response(slot);
                         metrics.on_prediction(slot);
+
+                        // Save to hybrid cache after successful completion
+                        if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
+                            cache_ctrl->save_slot(slot, slot.prompt_metadata);
+                            cache_ctrl->update();  // Trigger eviction check after save
+                        }
+
                         slot.release();
 
                         break;
@@ -3876,10 +3915,16 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
         size_t n_prompt_tokens) {
     prepared_prompt_metadata metadata;
     metadata.preparation_id = "chat-template-rendered-text-search";
+    metadata.boundaries_native = false;  // Using inferred boundaries from rendered text search
 
     if (!messages.is_array()) {
         metadata.degraded_reason = "chat metadata source is not an array";
         return metadata;
+    }
+
+    // Mark as degraded if using fallback rendered-text inference
+    if (metadata.degraded_reason.empty()) {
+        metadata.degraded_reason = "boundaries inferred from rendered text (not native capture)";
     }
 
     size_t search_pos = 0;
@@ -5230,6 +5275,18 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
         }
     }
 
+    // Check for duplicate entry before expensive serialization (Phase 3 deduplication)
+    auto existing = find_exact_match(entry.tokens, entry.namespace_id);
+    if (existing != entries.end()) {
+        // Update existing entry instead of creating duplicate
+        const auto old_time = existing->last_used_time;
+        existing->mark_used();
+        update_lru_index(existing, old_time);
+        SRV_DBG(" - hybrid cache: updated existing entry with %zu tokens (namespace: %s)\n",
+                entry.tokens.size(), entry.namespace_id.c_str());
+        return true;
+    }
+
     if (ctx_tgt && state_size_tgt > 0) {
         try {
             entry.data.main.resize(state_size_tgt);
@@ -5267,6 +5324,131 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
 
     SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
             slot.id, it_new->namespace_id.c_str(), entries.size());
+
+    return true;
+}
+
+// Non-destructive cache restore for hybrid mode
+// This method attempts to load a matching cache entry without requiring the slot to be cleared first
+// Returns true if a match was found and successfully restored
+bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const server_task & task) {
+    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
+    
+    SRV_DBG(" - hybrid cache: try_restore - looking up %zu tokens in namespace %s\n",
+            task.tokens.size(), lookup_namespace_id.c_str());
+
+    // Find best matching entry
+    std::list<hybrid_cache_entry>::iterator it_best = entries.end();
+    
+    // Search for exact match
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+        if (it->namespace_id != lookup_namespace_id) {
+            SRV_DBG("%s", " - hybrid cache: try_restore - skipping entry with different namespace\n");
+            continue;
+        }
+
+        const int common_prefix = it->tokens.get_common_prefix(task.tokens);
+        
+        // For hybrid cache, we need the entire task prompt to match the entry prefix
+        // The entry may have more tokens (continuation), but the task prompt must be fully contained
+        if (common_prefix == (int)task.tokens.size()) {
+            it_best = it;
+            SRV_INF(" - hybrid cache: try_restore - found match: task %d tokens, entry %d tokens, prefix %d\n", 
+                    (int)task.tokens.size(), it->n_tokens(), common_prefix);
+            break;
+        } else {
+            SRV_DBG(" - hybrid cache: try_restore - partial match %d tokens (entry: %d, task: %zu)\n",
+                    common_prefix, it->n_tokens(), task.tokens.size());
+        }
+    }
+
+    if (it_best == entries.end()) {
+        SRV_INF("%s", " - hybrid cache: try_restore - no exact match found\n");
+        n_misses++;
+        return false;
+    }
+
+    // Exact match found - restore state
+    const int match_len = it_best->n_tokens();
+    SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
+            match_len, it_best->namespace_id.c_str(), it_best->use_count);
+
+    const bool need_tgt = ctx_tgt != nullptr;
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+
+    // Validate payloads exist
+    if (need_tgt && it_best->data.main.empty()) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - rejecting entry without target payload\n");
+        n_restore_failures++;
+        return false;
+    }
+
+    if (need_dft && it_best->data.drft.empty()) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - rejecting paired restore without draft payload\n");
+        n_restore_failures++;
+        return false;
+    }
+
+    // Update LRU tracking
+    auto old_time = it_best->last_used_time;
+    it_best->mark_used();
+    update_lru_index(it_best, old_time);
+
+    // Restore target state
+    if (ctx_tgt && !it_best->data.main.empty()) {
+        const size_t n_tgt = llama_state_seq_set_data_ext(
+            ctx_tgt,
+            it_best->data.main.data(),
+            it_best->data.main.size(),
+            slot.id,
+            LLAMA_STATE_SEQ_FLAGS_NONE);
+
+        if (n_tgt != it_best->data.main.size()) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore target state\n");
+            slot.prompt_clear(false);
+            slot.n_prompt_tokens_cache = 0;
+            slot.n_prompt_tokens_processed = 0;
+            n_restore_failures++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: try_restore - restored target state (%zu bytes)\n", n_tgt);
+    }
+
+    // Restore draft state
+    if (ctx_dft && slot.ctx_dft && !it_best->data.drft.empty()) {
+        const size_t n_dft = llama_state_seq_set_data_ext(
+            ctx_dft,
+            it_best->data.drft.data(),
+            it_best->data.drft.size(),
+            slot.id,
+            LLAMA_STATE_SEQ_FLAGS_NONE);
+
+        if (n_dft != it_best->data.drft.size()) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore draft state\n");
+            slot.prompt_clear(false);
+            slot.n_prompt_tokens_cache = 0;
+            slot.n_prompt_tokens_processed = 0;
+            n_restore_failures++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
+    }
+
+    // Update slot state with restored data
+    slot.prompt.tokens.clear();
+    for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {
+        slot.prompt.tokens.push_back(it_best->tokens[i]);
+    }
+
+    slot.prompt.checkpoints = it_best->checkpoints;
+    slot.n_prompt_tokens_cache = match_len;
+    slot.n_prompt_tokens_processed = match_len;
+    slot.prompt_metadata = it_best->metadata;
+    
+    n_hits++;
+
+    SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d (hits: %zu, misses: %zu)\n",
+            match_len, slot.id, n_hits, n_misses);
 
     return true;
 }
@@ -5367,12 +5549,14 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
 }
 
 legacy_cache_controller::legacy_cache_controller(
+    const common_params & params,
     int32_t limit_size_mib,
     size_t limit_tokens,
     llama_context * ctx_tgt_param,
     llama_context * ctx_dft_param)
     : ctx_tgt(ctx_tgt_param)
     , ctx_dft(ctx_dft_param) {
+    GGML_UNUSED(params);  // Legacy mode doesn't need params
     GGML_UNUSED(ctx_tgt);
     GGML_UNUSED(ctx_dft);
     cache = std::make_unique<server_prompt_cache>(limit_size_mib, limit_tokens);

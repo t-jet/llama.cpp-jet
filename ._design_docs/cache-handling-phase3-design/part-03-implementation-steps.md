@@ -24,19 +24,26 @@ Until native boundary capture is ready, Phase 3 uses degraded metadata with expl
 
 1. Add `compatibility_key` field to `prepared_prompt_metadata` in `server-task.h`
 2. **[Gap 2.2 Integration]** Implement comprehensive namespace key builder (see Part 1, Gap 2.2 for design)
-3. Implement `compute_namespace_id()` method (no-argument version)
-4. Implement `compute_namespace_id(metadata)` method (metadata-aware version, uses comprehensive key)
-5. Implement `find_exact_match()` helper for deduplication
-6. Implement `update_lru_index()` helper for atomic LRU updates
-7. **[Degraded Metadata Marker]** Add `boundaries_native` flag to `prepared_prompt_metadata`
-8. **[Degraded Metadata Marker]** Set `metadata.degraded_reason = "inferred_from_rendered_text"` in current boundary extraction code
+3. **[Architecture Update]** Update `create_cache_controller()` factory to accept `common_params` reference
+4. **[Architecture Update]** Update `hybrid_cache_controller` constructor to accept and store `common_params` reference
+5. Implement `compute_namespace_id()` method (no-argument version)
+6. Implement `compute_namespace_id(metadata)` method (metadata-aware version, uses comprehensive key)
+7. Implement `build_compatibility_key()` using `params` member for full 14-field population
+8. Implement `find_exact_match()` helper for deduplication
+9. Implement `update_lru_index()` helper for atomic LRU updates
+10. **[Degraded Metadata Marker]** Add `boundaries_native` flag to `prepared_prompt_metadata`
+11. **[Degraded Metadata Marker]** Set `metadata.degraded_reason = "inferred_from_rendered_text"` in current boundary extraction code
 
 **Files Modified**:
 
 - `tools/server/server-task.h` (add compatibility_key field, boundaries_native flag, degraded_reason field)
-- `tools/server/server-cache-hybrid.h` (add method declarations, comprehensive key structure from Gap 2.2)
-- `tools/server/server-cache-hybrid.cpp` (add method implementations)
-- `tools/server/server-context.cpp` (mark current boundary extraction as degraded)
+- `tools/server/server-cache-controller.h` (update factory signature)
+- `tools/server/server-cache-controller.cpp` (pass params to constructors)
+- `tools/server/server-cache-hybrid.h` (add params member, method declarations, comprehensive key structure from Gap 2.2)
+- `tools/server/server-cache-hybrid.cpp` (update constructor, add method implementations with full params access)
+- `tools/server/server-cache-legacy.h` (update constructor signature for consistency)
+- `tools/server/server-cache-legacy.cpp` (update constructor signature for consistency)
+- `tools/server/server-context.cpp` (pass params_base to cache controller creation, mark current boundary extraction as degraded)
 
 **Test Coverage**:
 
@@ -284,3 +291,148 @@ if ($percentage -lt 80.0) {
 ---
 
 **Next**: [Part 4: Test Specifications](./part-04-test-specifications.md)
+
+---
+
+## Addendum: Production Integration Approach
+
+**Added**: May 26, 2026  
+**Status**: Implementation Complete
+
+### Overview
+
+During production integration, the implementation followed the design steps but required additional integration points beyond the `save_slot()` and `load_slot()` methods themselves. This addendum documents the actual production integration approach.
+
+### Integration Point 1: Save Triggers After Completion
+
+**Design Assumption**: The design assumed `save_slot()` would be called as part of the normal slot lifecycle.
+
+**Production Reality**: Explicit save triggers were required after completion responses to capture finalized slot state.
+
+**Implementation**:
+
+Two save trigger locations in `server-context.cpp`:
+
+1. **Normal completion path** (line ~3608): After `send_final_response()` and before `slot.release()`
+2. **Speculative decoding path** (line ~3728): After `send_final_response()` and before `slot.release()`
+
+**Code Pattern**:
+```cpp
+slot.print_timings();
+send_final_response(slot);
+metrics.on_prediction(slot);
+
+// Save to hybrid cache after successful completion
+if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
+    cache_ctrl->save_slot(slot, slot.prompt_metadata);
+}
+
+slot.release();
+```
+
+**Rationale**:
+- Placement ensures slot state is complete and stable
+- Conditional logic restricts to hybrid mode completion tasks only
+- `save_slot()` internally handles mode differentiation (hybrid vs legacy)
+- No explicit error handling needed (save_slot() logs internally)
+
+### Integration Point 2: Non-Destructive Load Mechanism
+
+**Design Assumption**: The design described `load_slot()` as the primary load mechanism.
+
+**Production Reality**: A separate non-destructive method was required because `load_slot()` was being called in a legacy FIFO context that destructively cleared slots.
+
+**Implementation**:
+
+Added `try_restore_from_cache()` method to provide non-destructive cache lookup:
+
+**Purpose**: Lookup and restore cache entry without modifying slot state on miss.
+
+**Location**: `server-context.cpp` lines ~5332-5450
+
+**Key Differences from `load_slot()`**:
+1. **Non-destructive**: Returns false on miss without clearing slot
+2. **Task-based**: Takes `task` parameter with tokens and metadata, not slot state
+3. **Explicit namespace check**: Validates namespace_id before restoration
+4. **Separate from legacy flow**: Called in hybrid-specific code path only
+
+### Integration Point 3: Separated Code Paths in get_available_slot()
+
+**Design Assumption**: Cache lookup would happen uniformly across modes.
+
+**Production Reality**: Legacy FIFO cache pattern (save → clear → load) conflicts fundamentally with hybrid non-destructive semantics.
+
+**Implementation**:
+
+Separated code paths in `get_available_slot()` (lines ~1465-1505):
+
+**Hybrid Mode Path**:
+```cpp
+if (cache_ctrl && cache_mode_active == CACHE_MODE_HYBRID 
+    && task.type == SERVER_TASK_TYPE_COMPLETION) {
+    
+    // Try non-destructive restore
+    if (cache_ctrl->try_restore_from_cache(*ret, task)) {
+        // Cache hit - slot restored
+    } else {
+        // Cache miss - clear only if slot has old content
+        if (!ret->prompt.tokens.empty()) {
+            ret->prompt_clear(false);
+        }
+    }
+    
+    cache_ctrl->update();
+}
+```
+
+**Legacy Mode Path** (preserved unchanged):
+```cpp
+else if (update_cache && cache_mode_active != CACHE_MODE_HYBRID) {
+    // Legacy: destructive save/load cycle
+    if (tokens.size() > 0) {
+        if (cache_ctrl->save_slot(*ret, ret->prompt_metadata)) {
+            ret->prompt_clear(false);  // Destructive clear
+        }
+    }
+    
+    if (!cache_ctrl->load_slot(*ret, task)) {
+        ret->prompt_clear(false);
+    }
+    
+    cache_ctrl->update();
+}
+```
+
+**Rationale**:
+- Clear conditional branching prevents mode conflicts
+- Non-destructive semantics preserved for hybrid mode
+- Legacy behavior unchanged for backward compatibility
+- Each path handles its own timing and logging
+
+### Architecture Compliance
+
+This production approach fully complies with Architecture Part 2 requirements:
+
+1. **Non-Destructive Reuse**: Slot state preserved on miss, only cleared if needed
+2. **Namespace Validation**: Explicit check in `try_restore_from_cache()`
+3. **Separated Code Paths**: Clear conditional prevents legacy/hybrid conflicts
+4. **Proper Integration Point**: Load happens before slot initialization, not after destructive operations
+
+### Lessons Learned
+
+1. **Integration points matter**: Well-designed methods still need explicit integration into request flow
+2. **Legacy compatibility**: Existing patterns may conflict with new semantics - separation is required
+3. **Non-destructive semantics**: Requires explicit support throughout the call chain, not just in cache methods
+4. **Explicit save triggers**: Cannot rely on implicit lifecycle hooks for critical operations
+
+### Impact on Design Steps
+
+The six-step implementation workflow remains valid, but Step 3.6 (End-to-End Validation) should explicitly include:
+
+- **Save trigger integration**: Identify and instrument completion paths
+- **Load mechanism integration**: Ensure lookup happens before slot initialization  
+- **Code path separation**: Verify legacy and hybrid modes don't interfere
+- **Non-destructive verification**: Confirm slot state preserved on cache miss
+
+These integration tasks are distinct from implementing the `save_slot()` and `load_slot()` methods themselves.
+

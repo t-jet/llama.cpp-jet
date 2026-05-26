@@ -60,17 +60,22 @@ function Start-LlamaServer {
     $ArgList = @(
         "--model", $Model,
         "--host", "127.0.0.1",
-        "--port", $Port
+        "--port", [string]$Port
     )
     
-    # Add custom arguments
+    # Add custom arguments with explicit string conversion
     foreach ($key in $ServerArgs.Keys) {
-        if ($ServerArgs[$key] -eq $true) {
+        # Check for explicit boolean true (not numeric 1)
+        if ($ServerArgs[$key] -is [bool] -and $ServerArgs[$key] -eq $true) {
             $ArgList += $key
         } elseif ($ServerArgs[$key] -ne $false) {
-            $ArgList += $key, $ServerArgs[$key]
+            # Explicitly cast to string
+            $ArgList += $key, [string]$ServerArgs[$key]
         }
     }
+    
+    # Debug: Log the full argument list
+    Write-Host "  Arguments: $($ArgList -join ' ')" -ForegroundColor DarkGray
     
     Write-Host "[$TestId] Starting server on port $Port..."
     
@@ -118,6 +123,103 @@ function Stop-LlamaServer {
         $ServerInfo.Process.Kill($true)
         $ServerInfo.Process.WaitForExit(5000)
     }
+}
+
+function Get-LogField {
+    param(
+        [string]$LogPath,
+        [string]$FieldName
+    )
+    if (-not (Test-Path $LogPath)) {
+        return $null
+    }
+    $Content = Get-Content $LogPath -Raw
+    $Pattern = "$FieldName[=:](.+?)[\s;,`r`n]"
+    if ($Content -match $Pattern) {
+        return $Matches[1].Trim()
+    }
+    return $null
+}
+
+function Get-CacheMetrics {
+    param([int]$Port)
+    
+    try {
+        $Response = Invoke-WebRequest "http://127.0.0.1:$Port/metrics" -UseBasicParsing -ErrorAction Stop
+        $Lines = $Response.Content -split "`n"
+        
+        $Metrics = @{}
+        foreach ($Line in $Lines) {
+            if ($Line -match 'llamacpp_cache_(\w+)\{.*mode="([^"]+)".*\}\s+(\d+)') {
+                $MetricName = $Matches[1]
+                $Mode = $Matches[2]
+                $Value = [int]$Matches[3]
+                $Metrics["${MetricName}_${Mode}"] = $Value
+            }
+        }
+        return $Metrics
+    }
+    catch {
+        Write-Warning "Failed to get metrics: $($_.Exception.Message)"
+        return @{}
+    }
+}
+
+function Invoke-ParallelRequests {
+    param(
+        [int]$Port,
+        [array]$Prompts,
+        [int]$MaxParallel = 4
+    )
+    
+    $Jobs = @()
+    $Results = @()
+    
+    foreach ($Prompt in $Prompts) {
+        $Job = Start-Job -ScriptBlock {
+            param($P, $Pr)
+            try {
+                $Body = @{
+                    prompt = $Pr
+                    n_predict = 5
+                } | ConvertTo-Json
+                
+                $Response = Invoke-WebRequest -Uri "http://127.0.0.1:$P/completion" `
+                    -Method Post -ContentType "application/json" -Body $Body -TimeoutSec 60
+                
+                return @{
+                    Success = ($Response.StatusCode -eq 200)
+                    Content = $Response.Content
+                    StatusCode = $Response.StatusCode
+                }
+            }
+            catch {
+                return @{
+                    Success = $false
+                    Error = $_.Exception.Message
+                }
+            }
+        } -ArgumentList $Port, $Prompt
+        
+        $Jobs += $Job
+        
+        # Throttle to MaxParallel
+        if ($Jobs.Count -ge $MaxParallel) {
+            $Completed = Wait-Job -Job $Jobs -Any
+            $Results += Receive-Job -Job $Completed
+            $Jobs = $Jobs | Where-Object { $_.Id -ne $Completed.Id }
+            Remove-Job -Job $Completed
+        }
+    }
+    
+    # Wait for remaining jobs
+    if ($Jobs.Count -gt 0) {
+        Wait-Job -Job $Jobs | Out-Null
+        $Results += $Jobs | Receive-Job
+        $Jobs | Remove-Job
+    }
+    
+    return $Results
 }
 
 function Invoke-Test {

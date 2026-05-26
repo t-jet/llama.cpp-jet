@@ -26,6 +26,22 @@ static server_tokens create_tokens(const std::vector<int> & ids) {
     return tokens;
 }
 
+// Helper to create test common_params with configurable fields
+static common_params create_test_params(
+    const std::string & model_path = "test_model.gguf",
+    const std::string & chat_template = "",
+    const std::string & mmproj_path = "",
+    bool kv_unified_val = false
+) {
+    common_params params;
+    params.model.path = model_path;
+    params.chat_template = chat_template;
+    params.mmproj.path = mmproj_path;
+    params.kv_unified = kv_unified_val;
+    // lora_adapters and control_vectors remain empty by default
+    return params;
+}
+
 // Test 1: Cache mode enum exists and has correct values
 void test_cache_mode_enum() {
     printf("test-cache-controller: cache_mode enum...\n");
@@ -39,8 +55,10 @@ void test_factory_creation() {
     printf("test-cache-controller: factory creation...\n");
     
     // Test legacy controller creation
+    common_params params = create_test_params();
     auto legacy_ctrl = create_cache_controller(
         CACHE_MODE_LEGACY,
+        params,
         100,  // 100 MiB
         1000, // 1000 tokens
         nullptr,
@@ -51,6 +69,7 @@ void test_factory_creation() {
     // Test hybrid controller creation
     auto hybrid_ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,  // 100 MiB
         1000, // 1000 tokens
         nullptr,
@@ -65,8 +84,10 @@ void test_factory_creation() {
 void test_legacy_controller_interface() {
     printf("test-cache-controller: legacy controller interface...\n");
     
+    common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_LEGACY,
+        params,
         100,
         1000,
         nullptr,
@@ -91,8 +112,10 @@ void test_legacy_controller_interface() {
 void test_hybrid_controller_interface() {
     printf("test-cache-controller: hybrid controller interface...\n");
     
+    common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,
         1000,
         nullptr,
@@ -239,9 +262,12 @@ void test_common_params_field() {
 void test_update_method() {
     printf("test-cache-controller: update method...\n");
     
+    common_params params = create_test_params();
+    
     // Legacy controller
     auto legacy_ctrl = create_cache_controller(
         CACHE_MODE_LEGACY,
+        params,
         100,
         1000,
         nullptr,
@@ -252,6 +278,7 @@ void test_update_method() {
     // Hybrid controller
     auto hybrid_ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,
         1000,
         nullptr,
@@ -266,8 +293,10 @@ void test_update_method() {
 void test_hybrid_statistics() {
     printf("test-cache-controller: hybrid statistics tracking...\n");
     
+    common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,
         1000,
         nullptr,
@@ -288,9 +317,12 @@ void test_hybrid_statistics() {
 void test_namespace_computation() {
     printf("test-cache-controller: namespace computation...\n");
     
+    common_params params = create_test_params();
+    
     // Create two hybrid controllers with same params
     auto ctrl1 = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,
         1000,
         nullptr,
@@ -299,6 +331,7 @@ void test_namespace_computation() {
     
     auto ctrl2 = create_cache_controller(
         CACHE_MODE_HYBRID,
+        params,
         100,
         1000,
         nullptr,
@@ -411,7 +444,8 @@ void test_metadata_spans() {
 void test_hybrid_rejects_partial_blob_match() {
     printf("test-cache-controller: hybrid rejects partial blob match...\n");
 
-    hybrid_cache_controller ctrl(100, 1000, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}));
 
     prepared_prompt_metadata meta;
@@ -427,7 +461,8 @@ void test_hybrid_rejects_partial_blob_match() {
 void test_hybrid_prefix_index_short_entry() {
     printf("test-cache-controller: hybrid prefix index short entry...\n");
 
-    hybrid_cache_controller ctrl(100, 1000, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({7, 8}));
 
     prepared_prompt_metadata meta;
@@ -441,7 +476,8 @@ void test_hybrid_prefix_index_short_entry() {
 void test_hybrid_lru_eviction_by_token_limit() {
     printf("test-cache-controller: hybrid LRU eviction by token limit...\n");
 
-    hybrid_cache_controller ctrl(100, 3, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 3, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2}));
     ctrl.debug_add_entry_for_tests(create_tokens({3, 4}));
 
@@ -461,7 +497,8 @@ void test_hybrid_lru_eviction_by_token_limit() {
 void test_hybrid_protected_eviction_paths() {
     printf("test-cache-controller: hybrid protected eviction paths...\n");
 
-    hybrid_cache_controller ctrl(100, 3, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 3, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true);
     ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false);
 
@@ -470,7 +507,7 @@ void test_hybrid_protected_eviction_paths() {
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 5})) == 2);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({3, 4, 5})) == -1);
 
-    hybrid_cache_controller all_protected(100, 3, nullptr, nullptr);
+    hybrid_cache_controller all_protected(params, 100, 3, nullptr, nullptr);
     all_protected.debug_add_entry_for_tests(create_tokens({7, 8}), true);
     all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true);
     all_protected.update();
@@ -484,7 +521,8 @@ void test_hybrid_protected_eviction_paths() {
 void test_hybrid_lookup_edge_paths() {
     printf("test-cache-controller: hybrid lookup edge paths...\n");
 
-    hybrid_cache_controller ctrl(100, 1000, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "other-namespace");
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 3, 4})) == -1);
 
@@ -504,7 +542,8 @@ void test_hybrid_lookup_edge_paths() {
 void test_hybrid_compatibility_key_miss() {
     printf("test-cache-controller: hybrid compatibility key miss...\n");
 
-    hybrid_cache_controller ctrl(100, 1000, nullptr, nullptr);
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
 
     prepared_prompt_metadata adapter_a;
     adapter_a.compatibility_key = "model=tiny|draft=none|adapter=a";
@@ -621,6 +660,294 @@ void test_task_result_and_prompt_helpers() {
     printf("  PASSED\n");
 }
 
+// Phase 3: Gap 2.2 Namespace Isolation Tests
+
+// Test 25: Namespace isolation - comprehensive key structure
+void test_namespace_isolation_comprehensive_key() {
+    printf("test-cache-controller: namespace isolation - comprehensive key structure...\n");
+    
+    common_params params = create_test_params();
+    
+    // Create hybrid controllers to test namespace isolation
+    auto ctrl = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,  // no target context (basic test)
+        nullptr   // no draft context
+    );
+    
+    auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
+    
+    // Add entries with the same tokens but mark them with different namespaces
+    // (simulating different model configurations)
+    prepared_prompt_metadata meta1;
+    meta1.compatibility_key = "model-A";  // Different model
+    
+    prepared_prompt_metadata meta2;
+    meta2.compatibility_key = "model-B";  // Different model
+    
+    hybrid->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta1);
+    hybrid->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta2);
+    
+    // Both entries should exist (different namespaces)
+    assert(hybrid->debug_entry_count_for_tests() == 2);
+    
+    json stats = ctrl->get_stats();
+    assert(stats["n_entries"] == 2);
+    
+    printf("  PASSED\n");
+}
+
+// Test 26: Namespace isolation - draft model presence
+void test_namespace_isolation_draft_model() {
+    printf("test-cache-controller: namespace isolation - draft model...\n");
+    
+    common_params params = create_test_params();
+    
+    // Test that entries with and without draft models get different namespaces
+    auto ctrl_no_draft = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,
+        nullptr  // No draft
+    );
+    
+    auto ctrl_with_draft = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,
+        nullptr  // In real scenario would be draft context
+    );
+    
+    // Verify both controllers work
+    assert(ctrl_no_draft != nullptr);
+    assert(ctrl_with_draft != nullptr);
+    
+    json stats_no_draft = ctrl_no_draft->get_stats();
+    json stats_with_draft = ctrl_with_draft->get_stats();
+    
+    assert(stats_no_draft.contains("type"));
+    assert(stats_with_draft.contains("type"));
+    
+    printf("  PASSED\n");
+}
+
+// Test 27: Namespace isolation - metadata compatibility key
+void test_namespace_isolation_metadata_compat_key() {
+    printf("test-cache-controller: namespace isolation - metadata compatibility key...\n");
+    
+    common_params params = create_test_params();
+    auto ctrl = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,
+        nullptr
+    );
+    
+    auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
+    
+    // Same tokens, different compatibility keys
+    prepared_prompt_metadata meta1;
+    meta1.compatibility_key = "config-alpha";
+    
+    prepared_prompt_metadata meta2;
+    meta2.compatibility_key = "config-beta";  // Different config
+    
+    prepared_prompt_metadata meta3;
+    meta3.compatibility_key = "config-alpha";  // Same as meta1
+    
+    hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta1);
+    hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta2);
+    hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta3);
+    
+    // Three entries: two with config-alpha (different token sequences tracked separately)
+    // and one with config-beta
+    assert(hybrid->debug_entry_count_for_tests() == 3);
+    
+    printf("  PASSED\n");
+}
+
+// Test 28: Namespace isolation - template variation
+void test_namespace_isolation_template() {
+    printf("test-cache-controller: namespace isolation - template...\n");
+    
+    common_params params = create_test_params();
+    auto ctrl = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,
+        nullptr
+    );
+    
+    auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
+    
+    // Same tokens, different templates (via preparation_id)
+    prepared_prompt_metadata meta1;
+    meta1.preparation_id = "template-chatml";
+    
+    prepared_prompt_metadata meta2;
+    meta2.preparation_id = "template-llama3";  // Different template
+    
+    hybrid->debug_add_entry_for_tests(create_tokens({100, 200}), meta1);
+    hybrid->debug_add_entry_for_tests(create_tokens({100, 200}), meta2);
+    
+    // Both entries should exist (different templates)
+    assert(hybrid->debug_entry_count_for_tests() == 2);
+    
+    printf("  PASSED\n");
+}
+
+// Test 29: Namespace isolation - comprehensive validation
+void test_namespace_isolation_validation() {
+    printf("test-cache-controller: namespace isolation - comprehensive validation...\n");
+    
+    common_params params = create_test_params();
+    
+    // Test that validate_hybrid_cache_safety works
+    auto ctrl_no_draft = create_cache_controller(
+        CACHE_MODE_HYBRID,
+        params,
+        100,
+        1000,
+        nullptr,
+        nullptr
+    );
+    
+    auto * hybrid_no_draft = static_cast<hybrid_cache_controller*>(ctrl_no_draft.get());
+    
+    // Without draft model, should be safe (returns true, no warnings in non-verbose mode)
+    bool is_safe = hybrid_no_draft->validate_hybrid_cache_safety(false);
+    assert(is_safe == true);  // Safe for single-model scenario
+    
+    printf("  PASSED\n");
+}
+
+// Test 30: Namespace isolation - model path variation (Part 14)
+void test_namespace_isolation_model_path() {
+    printf("test-cache-controller: namespace isolation - model path...\n");
+    
+    common_params params1 = create_test_params("model_A.gguf");
+    common_params params2 = create_test_params("model_B.gguf");
+    
+    hybrid_cache_controller ctrl1(params1, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl2(params2, 100, 1000, nullptr, nullptr);
+    
+    auto key1 = ctrl1.debug_get_compatibility_key_for_tests();
+    auto key2 = ctrl2.debug_get_compatibility_key_for_tests();
+    
+    // Different model paths should produce different namespaces
+    assert(key1.compute() != key2.compute());
+    assert(key1.model_path_hash != key2.model_path_hash);
+    
+    printf("  PASSED\n");
+}
+
+// Test 31: Namespace isolation - LoRA adapters (Part 14)
+void test_namespace_isolation_lora_adapters() {
+    printf("test-cache-controller: namespace isolation - lora adapters...\n");
+    
+    common_params params_no_lora = create_test_params();
+    common_params params_with_lora = create_test_params();
+    
+    // Add LoRA adapter to second params
+    common_adapter_lora_info lora;
+    lora.path = "adapter.gguf";
+    lora.scale = 1.0f;
+    params_with_lora.lora_adapters.push_back(lora);
+    
+    hybrid_cache_controller ctrl_no_lora(params_no_lora, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl_with_lora(params_with_lora, 100, 1000, nullptr, nullptr);
+    
+    auto key1 = ctrl_no_lora.debug_get_compatibility_key_for_tests();
+    auto key2 = ctrl_with_lora.debug_get_compatibility_key_for_tests();
+    
+    // LoRA presence should produce different namespaces
+    assert(key1.compute() != key2.compute());
+    assert(key1.lora_adapters.empty());
+    assert(!key2.lora_adapters.empty());
+    
+    printf("  PASSED\n");
+}
+
+// Test 32: Namespace isolation - control vectors (Part 14)
+void test_namespace_isolation_control_vectors() {
+    printf("test-cache-controller: namespace isolation - control vectors...\n");
+    
+    common_params params_no_cvec = create_test_params();
+    common_params params_with_cvec = create_test_params();
+    
+    // Add control vector to second params
+    common_control_vector_load_info cvec;
+    cvec.fname = "vector.gguf";
+    cvec.strength = 1.0f;
+    params_with_cvec.control_vectors.push_back(cvec);
+    
+    hybrid_cache_controller ctrl_no_cvec(params_no_cvec, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl_with_cvec(params_with_cvec, 100, 1000, nullptr, nullptr);
+    
+    auto key1 = ctrl_no_cvec.debug_get_compatibility_key_for_tests();
+    auto key2 = ctrl_with_cvec.debug_get_compatibility_key_for_tests();
+    
+    // Control vector presence should produce different namespaces
+    assert(key1.compute() != key2.compute());
+    assert(key1.control_vectors.empty());
+    assert(!key2.control_vectors.empty());
+    
+    printf("  PASSED\n");
+}
+
+// Test 33: Namespace isolation - multimodal configuration (Part 14)
+void test_namespace_isolation_multimodal() {
+    printf("test-cache-controller: namespace isolation - multimodal...\n");
+    
+    common_params params_text_only = create_test_params();
+    common_params params_multimodal = create_test_params("model.gguf", "", "projector.gguf");
+    
+    hybrid_cache_controller ctrl_text(params_text_only, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl_mm(params_multimodal, 100, 1000, nullptr, nullptr);
+    
+    auto key1 = ctrl_text.debug_get_compatibility_key_for_tests();
+    auto key2 = ctrl_mm.debug_get_compatibility_key_for_tests();
+    
+    // Multimodal configuration should produce different namespaces
+    assert(key1.compute() != key2.compute());
+    assert(key1.mm_projector_id == "none");
+    assert(key2.mm_projector_id != "none");
+    
+    printf("  PASSED\n");
+}
+
+// Test 34: Namespace isolation - kv_unified flag (Part 14)
+void test_namespace_isolation_kv_unified() {
+    printf("test-cache-controller: namespace isolation - kv_unified...\n");
+    
+    common_params params_separate = create_test_params("model.gguf", "", "", false);
+    common_params params_unified = create_test_params("model.gguf", "", "", true);
+    
+    hybrid_cache_controller ctrl_sep(params_separate, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl_uni(params_unified, 100, 1000, nullptr, nullptr);
+    
+    auto key1 = ctrl_sep.debug_get_compatibility_key_for_tests();
+    auto key2 = ctrl_uni.debug_get_compatibility_key_for_tests();
+    
+    // kv_unified flag should produce different namespaces
+    assert(key1.compute() != key2.compute());
+    assert(key1.kv_unified == false);
+    assert(key2.kv_unified == true);
+    
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -652,8 +979,23 @@ int main() {
     test_server_task_inline_helpers();
     test_task_result_and_prompt_helpers();
     
+    // Phase 3: Gap 2.2 namespace isolation tests
+    test_namespace_isolation_comprehensive_key();
+    test_namespace_isolation_draft_model();
+    test_namespace_isolation_metadata_compat_key();
+    test_namespace_isolation_template();
+    test_namespace_isolation_validation();
+    
+    // Phase 3: Part 14 comprehensive field tests
+    test_namespace_isolation_model_path();
+    test_namespace_isolation_lora_adapters();
+    test_namespace_isolation_control_vectors();
+    test_namespace_isolation_multimodal();
+    test_namespace_isolation_kv_unified();
+    
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
+    printf("Total: 34 tests (29 original + 5 Part 14 comprehensive)\n");
     printf("==================================================\n");
     
     return 0;

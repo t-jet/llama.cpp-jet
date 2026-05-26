@@ -37,6 +37,8 @@ class hybrid_cache_controller : public cache_controller {
     std::multimap<...> lru_index;                  // For efficient eviction
     std::unordered_map<...> prefix_index;          // For efficient lookup
     
+    const common_params & params;                  // Configuration reference (for namespace keys)
+    
     // Statistics
     size_t n_hits = 0;
     size_t n_misses = 0;
@@ -53,6 +55,8 @@ class hybrid_cache_controller : public cache_controller {
     should_protect(...);   // Determines protection status
 };
 ```
+
+**Design Note**: The cache controller receives a reference to `common_params` to enable comprehensive namespace isolation. This provides access to all configuration parameters needed for the 14-field `cache_compatibility_key` structure (model path, LoRA adapters, control vectors, multimodal config, etc.).
 
 **Boundary metadata threading** (from Stage 2):
 - `prepared_prompt_metadata` populated in HTTP layer during chat template application
