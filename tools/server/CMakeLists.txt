@@ -20,6 +20,8 @@ add_library(${TARGET} STATIC
     server-cache-controller.cpp
     server-cache-controller.h
     server-cache-legacy.h
+    server-cache-policy-lru.cpp
+    server-cache-policy-lru.h
     server-cache-hybrid.cpp
     server-cache-hybrid.h
 )

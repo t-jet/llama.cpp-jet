@@ -4396,6 +4396,8 @@ void server_routes::init_routes() {
             write_cache_metric("counter", "llamacpp_cache_hits_total", "Successful cache restores by mode.", json_value(cache_stats, "n_hits", 0));
             write_cache_metric("counter", "llamacpp_cache_misses_total", "Cache lookup misses by mode.", json_value(cache_stats, "n_misses", 0));
             write_cache_metric("counter", "llamacpp_cache_evictions_total", "Cache evictions by mode.", json_value(cache_stats, "n_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_evictions_total", "Hot payload evictions by mode.", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_protected_root_decisions_total", "Protected-root cache policy decisions by mode.", json_value(cache_stats, "n_protected_root_decisions", 0));
             write_cache_metric("counter", "llamacpp_cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
@@ -5245,6 +5247,12 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
     const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
     const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
     const size_t total_size = state_size_tgt + state_size_dft;
+    const bool protected_root = !metadata.degraded() &&
+        (metadata.protect_system || metadata.protect_messages ||
+         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
+             return boundary.protect;
+         }));
+    const std::string namespace_id = compute_namespace_id(metadata);
 
     SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
             slot.id,
@@ -5253,35 +5261,36 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
             state_size_tgt / (1024.0 * 1024.0),
             state_size_dft / (1024.0 * 1024.0));
 
-    while (!entries.empty() &&
-           limit_size > 0 &&
-           calculate_total_size() + total_size > limit_size) {
-        evict_lru();
+    if (ctx_tgt && state_size_tgt == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
+        return false;
+    }
+
+    if (hot_payload_budget_enabled() && total_size > limit_size) {
+        if (protected_root) {
+            n_protected_root_decisions++;
+            n_protected_root_admission_rejections++;
+        }
+        SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
+                namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
+        return false;
     }
 
     hybrid_cache_entry entry;
-    entry.namespace_id = compute_namespace_id();
+    entry.namespace_id = namespace_id;
     entry.tokens = slot.prompt.tokens.clone();
-    entry.last_used_time = std::chrono::system_clock::now();
     entry.use_count = 0;
     entry.checkpoints = slot.prompt.checkpoints;
     entry.metadata = metadata;
-    entry.namespace_id = compute_namespace_id(entry.metadata);
-    entry.protected_root = false;
-    if (!metadata.degraded()) {
-        entry.protected_root = metadata.protect_system || metadata.protect_messages;
-        for (const auto & boundary : metadata.boundaries) {
-            entry.protected_root = entry.protected_root || boundary.protect;
-        }
-    }
+    entry.namespace_id = namespace_id;
+    entry.protected_root = protected_root;
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
 
     // Check for duplicate entry before expensive serialization (Phase 3 deduplication)
     auto existing = find_exact_match(entry.tokens, entry.namespace_id);
     if (existing != entries.end()) {
-        // Update existing entry instead of creating duplicate
-        const auto old_time = existing->last_used_time;
-        existing->mark_used();
-        update_lru_index(existing, old_time);
+        refresh_existing_entry(existing, protected_root);
         SRV_DBG(" - hybrid cache: updated existing entry with %zu tokens (namespace: %s)\n",
                 entry.tokens.size(), entry.namespace_id.c_str());
         return true;
@@ -5321,6 +5330,7 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
     auto it_new = std::prev(entries.end());
     add_to_lru_index(it_new);
     add_to_prefix_index(it_new);
+    evict_until_within_budget();
 
     SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
             slot.id, it_new->namespace_id.c_str(), entries.size());
@@ -5389,11 +5399,6 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         return false;
     }
 
-    // Update LRU tracking
-    auto old_time = it_best->last_used_time;
-    it_best->mark_used();
-    update_lru_index(it_best, old_time);
-
     // Restore target state
     if (ctx_tgt && !it_best->data.main.empty()) {
         const size_t n_tgt = llama_state_seq_set_data_ext(
@@ -5433,6 +5438,10 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         }
         SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
     }
+
+    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
+    it_best->mark_used(next_use_sequence());
+    update_lru_index(it_best, old_key);
 
     // Update slot state with restored data
     slot.prompt.tokens.clear();
@@ -5493,10 +5502,6 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
         return false;
     }
 
-    auto old_time = it_best->last_used_time;
-    it_best->mark_used();
-    update_lru_index(it_best, old_time);
-
     if (ctx_tgt && !it_best->data.main.empty()) {
         const size_t n_tgt = llama_state_seq_set_data_ext(
             ctx_tgt,
@@ -5530,6 +5535,10 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
         }
         SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
     }
+
+    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
+    it_best->mark_used(next_use_sequence());
+    update_lru_index(it_best, old_key);
 
     slot.prompt.tokens.clear();
     for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {

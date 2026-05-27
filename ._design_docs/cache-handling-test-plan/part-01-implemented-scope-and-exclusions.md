@@ -10,17 +10,19 @@ The test plan covers the implementation status described in the design documents
 - `cache-handling-phase1-verification.md`
 - `cache-handling-phase2-implementation.md`
 - `cache-handling-phase3-implementation.md` (Phase 3: Non-Destructive Exact Blob Cache - **COMPLETE**)
+- `cache-handling-phase4-implementation.md` (Stage 4: LRU eviction policy with protected roots - ready for QA)
 - `cache-handling-phase-1-and-2-adjustments.md`
 - `cache-handling-phases-1-and-2-implementation-gaps.md`
 
-**Phase 3 Status**: ✅ **PRODUCTION READY** (May 26, 2026)
+Stage 4 is the current QA gate. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics.
 
 - Non-destructive exact blob cache with LRU eviction
 - Comprehensive namespace isolation (14/14 fields populated)
 - State serialization and deserialization
-- Usage tracking (last_used_time, use_count)
+- Usage tracking through deterministic recency and hit counts
 - Multi-slot reuse capability
-- Test coverage: 34/34 tests passing (100% success rate, ≥95% coverage)
+- Resident payload byte budget enforcement through `--cache-ram`
+- Protected-root retention priority, fallback eviction, and protected admission rejection
 
 ## Report cross-check
 
@@ -29,7 +31,8 @@ The test plan covers the implementation status described in the design documents
 | `cache-handling-phase1-implementation.md` | Historical Phase 1 foundation record. It is still useful for mode selection, controller creation, legacy wrapper, initial metadata structs, and early hybrid LRU behavior. |
 | `cache-handling-phase1-verification.md` | Historical verification record. Its own 2026-05-25 note says the 85% coverage figure was estimated and hybrid mode was not production-ready. This plan keeps those caveats. |
 | `cache-handling-phase2-implementation.md` | Mixed current and superseded evidence. Use its later status notes and current testing requirements over older `/cache/stats`, `/health.cache`, and production-readiness claims. |
-| `cache-handling-phase3-implementation.md` | **Current production-ready implementation.** Phase 3 is COMPLETE with full Gap 2.2 compliance (14/14 namespace fields), non-destructive hits, state serialization, usage tracking, and multi-slot reuse. Use this as the primary source for hybrid cache behavior. |
+| `cache-handling-phase3-implementation.md` | Current base hybrid cache behavior. Use it for non-destructive hits, state serialization, namespace isolation, and multi-slot reuse. |
+| `cache-handling-phase4-implementation.md` | Current Stage 4 implementation record. Use Parts 6 and 7 for the review-fix evidence that equivalent-entry refresh enforces budget and protected eviction decisions are counted. |
 | `cache-handling-phase-1-and-2-adjustments.md` | Current upstream-scope correction. This is the source for stable `/health`, no `/cache/stats`, cache metrics in `/metrics`, hidden test helpers, degraded metadata, and minimal public CLI surface. |
 | `cache-handling-phases-1-and-2-implementation-gaps.md` | Current gap and corrective-action record. This is the source for open model-backed restore coverage and target/draft failure coverage. Its focused coverage notes belong to the separate unit-test plan. |
 
@@ -41,17 +44,18 @@ The current implemented cache surface is:
 | Controller path | The scheduler uses `cache_ctrl->save_slot()` and `cache_ctrl->load_slot()` for cache-enabled completion tasks. |
 | Legacy mode | Existing prompt-cache behavior remains behind `legacy_cache_controller`. |
 | Hybrid save/load | Hybrid mode saves exact full-state target payloads via `llama_state_get_data()`, optional draft payloads, tokens, checkpoints, and prompt metadata with full serialization. |
-| Hybrid restore | Hybrid restore is **non-destructive**: a hit updates LRU state (`last_used_time`, `use_count`) and **leaves the entry available** for subsequent hits. Multiple slots can reuse the same cache entry. |
+| Hybrid restore | Hybrid restore is non-destructive: a successful hit updates recency and leaves the entry available for subsequent hits. Failed restore does not refresh recency. Multiple slots can reuse the same cache entry. |
 | Exact-prefix rule | Hybrid restore accepts **only exact full matches** of cached token sequences. Divergent partial matches are rejected with `n_misses` increment. |
 | State serialization | Full `llama_context` state serialized and deserialized using `llama_state_get_size()`, `llama_state_get_data()`, and `llama_state_set_data()`. Serialization failures increment `n_restore_failures`. |
 | Multi-slot reuse | Multiple slots can load from the same cache entry over time. Each slot receives an independent copy of tokens and state. Entry remains in cache after each load. |
-| Usage tracking | Each cache hit increments `use_count` and updates `last_used_time`. Usage metadata affects LRU eviction ordering. |
-| LRU policy | Hybrid eviction uses an LRU multimap index (O(log n)) and enforces `--cache-ram` and token limits. Oldest unused entries evicted first. |
-| Protected entries | Entries with `protected_root=true` (system prompts) are skipped during eviction unless all entries are protected and budget is exceeded. |
+| Usage tracking | Each successful cache hit refreshes deterministic recency. Equivalent-entry save refreshes recency without duplicating the entry. |
+| LRU policy | Hybrid eviction uses deterministic LRU ordering and enforces `--cache-ram` against resident serialized payload bytes. Oldest eligible entries evict first. |
+| Budget enforcement | Resident payload bytes are target state bytes plus draft state bytes. Oversized entries are rejected, and refresh paths must also bring the cache back under budget. |
+| Protected entries | Entries with `protected_root=true` have higher retention priority. Unprotected entries evict first, then protected entries evict oldest-first if protected bytes alone exceed the budget. |
 | Namespace isolation | **Comprehensive isolation (Gap 2.2 complete):** 14/14 compatibility key fields populated including model_path_hash, template_id, lora_adapters, control_vectors, mm_projector_id, kv_unified, and context configuration. Prevents unsafe cross-restore. |
 | Metadata transport | `prepared_prompt_metadata` travels on `server_task`, child tasks, slots, and hybrid entries. Includes boundaries, compatibility keys, and degraded markers. |
-| Boundary extraction | Chat requests get best-effort rendered-text metadata and mark it degraded (`boundaries_native=false`, `degraded_reason` set); `/completion` gets minimal degraded prompt metadata when no richer metadata exists. |
-| Observability | `/metrics` exports cache counters (`llamacpp_cache_hits`, `llamacpp_cache_misses`, `llamacpp_cache_evictions`, `llamacpp_cache_restore_failures`) when metrics are enabled. `/health` returns `{"status":"ok"}` only. `/cache/stats` intentionally returns 404. |
+| Boundary extraction | Chat requests get best-effort rendered-text metadata and mark it degraded (`boundaries_native=false`, `degraded_reason` set); `/completion` gets minimal degraded prompt metadata when no richer metadata exists. Degraded public HTTP metadata is not a trusted protected-root creation path. |
+| Observability | `/metrics` exports cache counters (`llamacpp_cache_hits_total`, `llamacpp_cache_misses_total`, `llamacpp_cache_evictions_total`, `llamacpp_cache_restore_failures_total`, `llamacpp_cache_payload_evictions_total`, `llamacpp_cache_protected_root_decisions_total`) when metrics are enabled. `/health` returns `{"status":"ok"}` only. `/cache/stats` intentionally returns 404. |
 | Failure handling | Target restore failure resets slot prompt state. Missing paired draft payloads and draft restore failures count as restore failures. Deserialization errors logged and increment `n_restore_failures`. |
 
 ## Exclusions
@@ -63,6 +67,7 @@ Do not write acceptance tests for these features yet:
 - Shared branch graph traversal.
 - Checkpoint-first restore strategy.
 - Native Jinja boundary capture as a production contract.
+- Public request-controlled protected-root markers.
 - A public JSON `/cache/stats` endpoint.
 - Cache fields in `/health`.
 - Separate hot, metadata, and cold budget flags.

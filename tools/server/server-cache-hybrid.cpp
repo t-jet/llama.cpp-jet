@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <functional>
 #include <sstream>
 
@@ -17,19 +18,35 @@ hybrid_cache_controller::hybrid_cache_controller(
     , ctx_tgt(ctx_tgt)
     , ctx_dft(ctx_dft)
 {
-    this->limit_size = 1024ull * 1024ull * (limit_size_mib < 0 ? 0 : limit_size_mib);
+    this->limit_size_unlimited = limit_size_mib < 0;
+    this->limit_size = this->limit_size_unlimited ? 0 : 1024ull * 1024ull * limit_size_mib;
 }
 
 void hybrid_cache_controller::update() {
-    // Evict entries until within limits
-    while (!entries.empty() && 
-           ((limit_size > 0 && calculate_total_size() > limit_size) ||
-            (limit_tokens > 0 && calculate_total_tokens() > limit_tokens))) {
-        evict_lru();
+    evict_until_within_budget();
+
+    while (!entries.empty() && limit_tokens > 0 && calculate_total_tokens() > limit_tokens) {
+        auto candidates = build_policy_candidates();
+        size_t pseudo_bytes = 0;
+        for (auto & candidate : candidates) {
+            candidate.resident_payload_bytes = std::max<size_t>(1, candidate.resident_payload_bytes);
+            pseudo_bytes += candidate.resident_payload_bytes;
+        }
+
+        auto plan = eviction_policy.plan_evictions(
+            pseudo_bytes,
+            pseudo_bytes > 0 ? pseudo_bytes - 1 : 0,
+            false,
+            candidates);
+        if (plan.evictions.empty()) {
+            break;
+        }
+        evict_entry_by_id(plan.evictions.front().entry_id, plan.evictions.front().reason);
     }
-    
-    SRV_INF(" - hybrid cache state: %zu entries, %.3f MiB, %zu tokens (limits: %.3f MiB, %zu tokens)\n",
+
+    SRV_INF(" - hybrid cache state: %zu entries, %.3f MiB payload, %.3f MiB total, %zu tokens (limits: %.3f MiB payload, %zu tokens)\n",
             entries.size(),
+            calculate_resident_payload_bytes() / (1024.0 * 1024.0),
             calculate_total_size() / (1024.0 * 1024.0),
             calculate_total_tokens(),
             limit_size / (1024.0 * 1024.0),
@@ -52,11 +69,20 @@ json hybrid_cache_controller::get_stats() const {
         {"type",        "hybrid"},
         {"size_bytes",  calculate_total_size()},
         {"size_mib",    calculate_total_size() / (1024.0 * 1024.0)},
+        {"resident_payload_bytes", calculate_resident_payload_bytes()},
+        {"hot_payload_budget_bytes", limit_size_unlimited ? -1 : static_cast<int64_t>(limit_size)},
+        {"protected_payload_bytes", calculate_protected_payload_bytes()},
+        {"unprotected_payload_bytes", calculate_unprotected_payload_bytes()},
+        {"n_protected_entries", calculate_protected_entry_count()},
         {"n_tokens",    calculate_total_tokens()},
         {"n_entries",   entries.size()},
         {"n_hits",      n_hits},
         {"n_misses",    n_misses},
         {"n_evictions", n_evictions},
+        {"n_payload_evictions", n_payload_evictions},
+        {"n_protected_root_decisions", n_protected_root_decisions},
+        {"n_protected_root_evictions", n_protected_root_evictions},
+        {"n_protected_root_admission_rejections", n_protected_root_admission_rejections},
         {"n_restore_failures", n_restore_failures},
         {"namespaces",  namespaces},
     };
@@ -71,29 +97,39 @@ size_t hybrid_cache_controller::n_tokens() const {
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id) {
+    debug_add_entry_for_tests(std::move(tokens), protected_root, namespace_id, 0, 0);
+}
+
+void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes) {
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = namespace_id.empty() ? compute_namespace_id() : namespace_id;
-    entry.last_used_time = std::chrono::system_clock::now();
     entry.protected_root = protected_root;
+    entry.data.main.resize(target_bytes);
+    entry.data.drft.resize(draft_bytes);
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
 
     entries.push_back(std::move(entry));
     auto it = std::prev(entries.end());
     add_to_lru_index(it);
     add_to_prefix_index(it);
+    evict_until_within_budget();
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata) {
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = compute_namespace_id(metadata);
-    entry.last_used_time = std::chrono::system_clock::now();
     entry.metadata = metadata;
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
 
     entries.push_back(std::move(entry));
     auto it = std::prev(entries.end());
     add_to_lru_index(it);
     add_to_prefix_index(it);
+    evict_until_within_budget();
 }
 
 int hybrid_cache_controller::debug_find_match_tokens_for_tests(const server_tokens & tokens) {
@@ -108,6 +144,86 @@ int hybrid_cache_controller::debug_find_match_tokens_for_tests(
     return it == entries.end() ? -1 : it->n_tokens();
 }
 
+bool hybrid_cache_controller::debug_fail_restore_for_tests(
+        const server_tokens & tokens,
+        const prepared_prompt_metadata & metadata) {
+    auto it = find_best_match(tokens, metadata);
+    if (it == entries.end()) {
+        n_misses++;
+        return false;
+    }
+
+    n_restore_failures++;
+    return false;
+}
+
+bool hybrid_cache_controller::debug_try_admit_entry_for_tests(
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        size_t target_bytes,
+        size_t draft_bytes) {
+    if (tokens.empty() || target_bytes == 0) {
+        return false;
+    }
+
+    const bool protected_root = !metadata.degraded() &&
+        (metadata.protect_system || metadata.protect_messages ||
+         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
+             return boundary.protect;
+         }));
+    const size_t total_size = target_bytes + draft_bytes;
+
+    if (hot_payload_budget_enabled() && total_size > limit_size) {
+        if (protected_root) {
+            n_protected_root_decisions++;
+            n_protected_root_admission_rejections++;
+        }
+        return false;
+    }
+
+    hybrid_cache_entry entry;
+    entry.tokens = std::move(tokens);
+    entry.namespace_id = compute_namespace_id(metadata);
+    entry.metadata = metadata;
+    entry.protected_root = protected_root;
+    entry.data.main.resize(target_bytes);
+    entry.data.drft.resize(draft_bytes);
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
+
+    auto existing = find_exact_match(entry.tokens, entry.namespace_id);
+    if (existing != entries.end()) {
+        refresh_existing_entry(existing, protected_root);
+        return true;
+    }
+
+    entries.push_back(std::move(entry));
+    auto it = std::prev(entries.end());
+    add_to_lru_index(it);
+    add_to_prefix_index(it);
+    evict_until_within_budget();
+    return true;
+}
+
+bool hybrid_cache_controller::debug_refresh_entry_for_tests(
+        const server_tokens & tokens,
+        bool protected_root,
+        const std::string & namespace_id) {
+    const std::string effective_namespace_id = namespace_id.empty() ? compute_namespace_id() : namespace_id;
+    auto it = find_exact_match(tokens, effective_namespace_id);
+    if (it == entries.end()) {
+        return false;
+    }
+
+    refresh_existing_entry(it, protected_root);
+    return true;
+}
+
+void hybrid_cache_controller::debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited) {
+    limit_size = limit_size_bytes;
+    limit_size_unlimited = unlimited;
+}
+
 size_t hybrid_cache_controller::debug_entry_count_for_tests() const {
     return entries.size();
 }
@@ -118,9 +234,9 @@ void hybrid_cache_controller::debug_mark_first_entry_used_for_tests() {
     }
 
     auto it = entries.begin();
-    const auto old_time = it->last_used_time;
-    it->mark_used();
-    update_lru_index(it, old_time);
+    const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
+    it->mark_used(next_use_sequence());
+    update_lru_index(it, old_key);
 }
 
 cache_compatibility_key hybrid_cache_controller::debug_get_compatibility_key_for_tests() const {
@@ -204,51 +320,81 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_exact_matc
     return entries.end();
 }
 
-void hybrid_cache_controller::evict_lru() {
-    // Phase 2: Optimized LRU eviction using index
-    // O(log n) complexity using multimap
-    
-    if (lru_index.empty()) {
-        return;
-    }
-    
-    // Find oldest non-protected entry in O(log n)
-    for (auto lru_it = lru_index.begin(); lru_it != lru_index.end(); ++lru_it) {
-        auto entry_it = lru_it->second;
-        
-        // Skip protected entries
-        if (should_protect(*entry_it)) {
+bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason) {
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+        if (it->entry_id != entry_id) {
             continue;
         }
-        
-        SRV_WRN(" - hybrid cache: evicting LRU entry with %d tokens (namespace: %s, uses: %zu)\n",
-                entry_it->n_tokens(), entry_it->namespace_id.c_str(), entry_it->use_count);
-        
-        // Remove from indexes
-        remove_from_prefix_index(entry_it);
-        lru_index.erase(lru_it);  // Remove from LRU index
-        
-        // Remove from main list
-        entries.erase(entry_it);
+
+        const bool protected_root = should_protect(*it);
+        if (protected_root) {
+            n_protected_root_decisions++;
+            n_protected_root_evictions++;
+            SRV_WRN(" - hybrid cache: evicting protected root due to payload budget pressure (namespace: %s, tokens: %d, payload bytes: %zu, budget bytes: %zu, use sequence: %" PRIu64 ")\n",
+                    it->namespace_id.c_str(), it->n_tokens(), it->resident_payload_bytes(), limit_size, it->use_sequence);
+        } else {
+            SRV_DBG(" - hybrid cache: LRU eviction selected unprotected entry (namespace: %s, tokens: %d, payload bytes: %zu, budget bytes: %zu, use sequence: %" PRIu64 ")\n",
+                    it->namespace_id.c_str(), it->n_tokens(), it->resident_payload_bytes(), limit_size, it->use_sequence);
+        }
+
+        GGML_UNUSED(reason);
+        remove_from_lru_index(it);
+        remove_from_prefix_index(it);
+        entries.erase(it);
         n_evictions++;
+        n_payload_evictions++;
+        return true;
+    }
+
+    return false;
+}
+
+void hybrid_cache_controller::evict_until_within_budget() {
+    if (!hot_payload_budget_enabled()) {
         return;
     }
-    
-    // All entries are protected - evict oldest protected entry as fallback
-    SRV_WRN("%s", " - hybrid cache: all entries protected, evicting oldest protected entry\n");
-    
-    if (!lru_index.empty()) {
-        auto lru_it = lru_index.begin();
-        auto entry_it = lru_it->second;
-        
-        // Remove from indexes
-        remove_from_prefix_index(entry_it);
-        lru_index.erase(lru_it);
-        
-        // Remove from main list
-        entries.erase(entry_it);
-        n_evictions++;
+
+    const size_t resident_bytes = calculate_resident_payload_bytes();
+    if (resident_bytes <= limit_size) {
+        return;
     }
+
+    auto plan = eviction_policy.plan_evictions(
+        resident_bytes,
+        limit_size,
+        limit_size_unlimited,
+        build_policy_candidates());
+
+    if (plan.protected_entries_skipped) {
+        n_protected_root_decisions++;
+        SRV_DBG(" - hybrid cache: protected roots skipped while unprotected entries satisfy pressure (protected bytes: %zu, unprotected bytes: %zu, budget bytes: %zu)\n",
+                calculate_protected_payload_bytes(), calculate_unprotected_payload_bytes(), limit_size);
+    }
+
+    if (plan.protected_budget_pressure) {
+        n_protected_root_decisions++;
+        SRV_WRN(" - hybrid cache: protected-root budget pressure detected (protected bytes: %zu, resident bytes: %zu, protected entries: %zu, budget bytes: %zu)\n",
+                calculate_protected_payload_bytes(), resident_bytes, calculate_protected_entry_count(), limit_size);
+    }
+
+    for (const auto & eviction : plan.evictions) {
+        if (!evict_entry_by_id(eviction.entry_id, eviction.reason)) {
+            break;
+        }
+    }
+
+    if (plan.budget_unsatisfied && calculate_resident_payload_bytes() > limit_size) {
+        SRV_WRN(" - hybrid cache: eviction could not satisfy payload budget (resident bytes: %zu, budget bytes: %zu)\n",
+                calculate_resident_payload_bytes(), limit_size);
+    }
+}
+
+void hybrid_cache_controller::refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root) {
+    const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
+    it->protected_root = it->protected_root || protected_root;
+    it->mark_used(next_use_sequence());
+    update_lru_index(it, old_key);
+    evict_until_within_budget();
 }
 
 bool hybrid_cache_controller::should_protect(const hybrid_cache_entry & entry) const {
@@ -269,6 +415,76 @@ size_t hybrid_cache_controller::calculate_total_tokens() const {
         total += entry.n_tokens();
     }
     return total;
+}
+
+size_t hybrid_cache_controller::calculate_resident_payload_bytes() const {
+    size_t total = 0;
+    for (const auto & entry : entries) {
+        total += entry.resident_payload_bytes();
+    }
+    return total;
+}
+
+size_t hybrid_cache_controller::calculate_protected_payload_bytes() const {
+    size_t total = 0;
+    for (const auto & entry : entries) {
+        if (should_protect(entry)) {
+            total += entry.resident_payload_bytes();
+        }
+    }
+    return total;
+}
+
+size_t hybrid_cache_controller::calculate_unprotected_payload_bytes() const {
+    size_t total = 0;
+    for (const auto & entry : entries) {
+        if (!should_protect(entry)) {
+            total += entry.resident_payload_bytes();
+        }
+    }
+    return total;
+}
+
+size_t hybrid_cache_controller::calculate_protected_entry_count() const {
+    size_t total = 0;
+    for (const auto & entry : entries) {
+        if (should_protect(entry)) {
+            total++;
+        }
+    }
+    return total;
+}
+
+bool hybrid_cache_controller::hot_payload_budget_enabled() const {
+    return !limit_size_unlimited && limit_size > 0;
+}
+
+std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy_candidates() const {
+    std::vector<server_cache_policy_candidate> candidates;
+    candidates.reserve(entries.size());
+    for (const auto & entry : entries) {
+        candidates.push_back({
+            entry.entry_id,
+            entry.namespace_id,
+            entry.resident_payload_bytes(),
+            entry.n_tokens(),
+            entry.use_sequence,
+            entry.insertion_sequence,
+            should_protect(entry),
+            entry.has_target_payload(),
+            entry.has_draft_payload(),
+        });
+    }
+    return candidates;
+}
+
+uint64_t hybrid_cache_controller::next_use_sequence() {
+    return next_sequence++;
+}
+
+void hybrid_cache_controller::assign_entry_identity(hybrid_cache_entry & entry) {
+    entry.entry_id = next_entry_id++;
+    entry.insertion_sequence = entry.entry_id;
 }
 
 std::string hybrid_cache_controller::compute_namespace_id() const {
@@ -511,11 +727,11 @@ hybrid_cache_controller::token_prefix_t hybrid_cache_controller::get_token_prefi
 }
 
 void hybrid_cache_controller::add_to_lru_index(std::list<hybrid_cache_entry>::iterator it) {
-    lru_index.insert({it->last_used_time, it});
+    lru_index.insert({lru_key_t{it->use_sequence, it->insertion_sequence}, it});
 }
 
 void hybrid_cache_controller::remove_from_lru_index(std::list<hybrid_cache_entry>::iterator it) {
-    auto range = lru_index.equal_range(it->last_used_time);
+    auto range = lru_index.equal_range(lru_key_t{it->use_sequence, it->insertion_sequence});
     for (auto lru_it = range.first; lru_it != range.second; ++lru_it) {
         if (lru_it->second == it) {
             lru_index.erase(lru_it);
@@ -526,19 +742,19 @@ void hybrid_cache_controller::remove_from_lru_index(std::list<hybrid_cache_entry
 
 void hybrid_cache_controller::update_lru_index(
     std::list<hybrid_cache_entry>::iterator it,
-    std::chrono::system_clock::time_point old_time)
+    lru_key_t old_key)
 {
     // Remove old entry
-    auto range = lru_index.equal_range(old_time);
+    auto range = lru_index.equal_range(old_key);
     for (auto lru_it = range.first; lru_it != range.second; ++lru_it) {
         if (lru_it->second == it) {
             lru_index.erase(lru_it);
             break;
         }
     }
-    
+
     // Insert new entry
-    lru_index.insert({it->last_used_time, it});
+    lru_index.insert({lru_key_t{it->use_sequence, it->insertion_sequence}, it});
 }
 
 void hybrid_cache_controller::add_to_prefix_index(std::list<hybrid_cache_entry>::iterator it) {

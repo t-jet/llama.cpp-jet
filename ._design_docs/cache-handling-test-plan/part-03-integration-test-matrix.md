@@ -59,32 +59,32 @@ Each test should stop the server in `finally` cleanup and collect stderr, stdout
 | ID | Scenario | Mode | Expected result |
 | --- | --- | --- | --- |
 | B01 | Boundary extraction in degraded mode | hybrid | Verify `boundaries_native=false` flag in metadata. Check `degraded_reason` is set to "inferred_from_rendered_text". Verify inferred boundaries are plausible (within prompt token range). |
-| B02 | Boundary metadata threading | hybrid | Verify metadata flows from HTTP layer → `server_task` → `server_slot`. Check metadata survives task pipeline without corruption. |
+| B02 | Boundary metadata threading | hybrid | Verify metadata flows from HTTP layer to `server_task` to `server_slot`. Check metadata survives task pipeline without corruption. |
 | B03 | Missing boundary fallback | hybrid | `/completion` endpoint with minimal metadata. Verify degraded markers present in slot metadata. Server continues without boundary info. |
 | B04 | Repeated message content | hybrid | Chat with same text in multiple messages. Verify distinct boundary positions for each occurrence. Boundaries must not collapse to single span. |
 | B05 | Empty message handling | hybrid | Chat with empty user/assistant messages. Verify boundary extraction doesn't fail. Empty messages get zero-length or role-token-only spans. |
-| B06 | Protection flag propagation | hybrid | Chat with system prompt (should set `protected_root=true`). Verify protection flag reaches cache entry. Check entry skipped during eviction. |
+| B06 | Protection flag propagation | hybrid | Public chat with a system prompt may only prove degraded boundary metadata. Do not treat it as Stage 4 protected-entry evidence unless a stats-capable or code-level harness shows trusted, non-degraded protected markers reached the cache entry. |
 
 ## Phase 3: Hybrid Cache Integration Tests
 
 | ID | Scenario | Mode | Expected result |
 | --- | --- | --- | --- |
-| H01 | Non-destructive hit (single reuse) | hybrid | First request creates cache entry. Second identical request hits cache. `/metrics` shows `llamacpp_cache_hits{mode="hybrid"}` incremented. Both requests succeed. |
+| H01 | Non-destructive hit (single reuse) | hybrid | First request creates cache entry. Second identical request hits cache. `/metrics` shows `llamacpp_cache_hits_total{mode="hybrid"}` incremented. Both requests succeed. |
 | H02 | Multi-slot reuse | hybrid, `-np 2` | Send 2 identical requests in parallel. Both should hit same cache entry. `/metrics` shows `llamacpp_cache_hits` >= 1. Cache entry count remains 1. |
 | H03 | Sequential reuse (3x) | hybrid | Send same prompt 3 times sequentially. `/metrics` shows `llamacpp_cache_hits` = 2 (second and third requests). Entry persists in cache. |
 | H04 | Usage tracking increment | hybrid | Create cache entry, then load it twice. Verify logs show usage count incrementing (1, then 2). Timestamp updates on each hit. |
-| H05 | Cache miss tracking | hybrid | Send different prompts. `/metrics` shows `llamacpp_cache_misses{mode="hybrid"}` increments for each unique prompt. |
+| H05 | Cache miss tracking | hybrid | Send different prompts. `/metrics` shows `llamacpp_cache_misses_total{mode="hybrid"}` increments for each unique prompt. |
 | H06 | Exact match requirement | hybrid | Save entry with tokens [1,2,3,4,5]. Request with tokens [1,2,3] (prefix only). Should be **cache miss**, not partial hit. `/metrics` shows miss increment. |
 | H07 | Reject divergent sequence | hybrid | Save entry with tokens [1,2,3,4,5]. Request with tokens [1,2,3,99,100]. Should be cache miss. No partial match. |
 | H08 | State serialization round-trip | hybrid | First request generates 10 tokens. Second identical request should restore state and generate consistent output with same seed. Verify `timings.cache_n` > 0 for second request. |
 | H09 | Empty slot rejection | hybrid | Attempt to save slot with 0 tokens (edge case in code). Should log warning and not create entry. `/metrics` shows no hit/miss change. |
-| H10 | LRU eviction basic | hybrid, `--cache-ram 1` | Send 3 different prompts with small cache limit. Verify `/metrics` shows `llamacpp_cache_evictions{mode="hybrid"}` > 0. Oldest entry evicted. |
+| H10 | LRU eviction basic | hybrid, `--cache-ram 1` | Send enough different prompts to exceed the measured cache budget. Verify `/metrics` shows `llamacpp_cache_evictions_total{mode="hybrid"}` > 0. Oldest entry evicted. |
 | H11 | LRU eviction ordering | hybrid, `--cache-ram 1` | Save entries A, B, C. Access A (updates LRU). Send entry D (triggers eviction). Verify B evicted (oldest unused), not A (recently used). |
 | H12 | Namespace isolation (different models) | hybrid | Not testable in single-server run. Verify architecture enhancement allows model_path_hash in compatibility key. Check logs for namespace ID diversity. |
 | H13 | Namespace isolation (different templates) | hybrid | Start server with chat template A. Verify logs show template_id in compatibility key. Documentation check: different templates produce different namespace IDs. |
 | H14 | Metrics counter accuracy | hybrid | Perform sequence: miss, miss, hit, eviction. Verify `/metrics` shows exact counts: misses=2, hits=1, evictions>=1. |
-| H15 | Restore failure tracking | hybrid | Simulate restore failure (requires code-level test or corrupted state). Verify `llamacpp_cache_restore_failures{mode="hybrid"}` increments. |
-| H16 | Protected entry behavior | hybrid | Save entry with system prompt boundary (protected_root=true). Verify protected entries skipped during eviction until all entries protected. |
+| H15 | Restore failure tracking | hybrid | Simulate restore failure (requires code-level test or corrupted state). Verify `llamacpp_cache_restore_failures_total{mode="hybrid"}` increments. |
+| H16 | Protected entry behavior | hybrid | Use a stats-capable integration harness or focused C++ controller test that can create trusted protected entries. Public chat with degraded rendered-text metadata is not enough to prove protected eviction behavior. |
 | H17 | Multi-namespace entry count | hybrid | Run with different configurations (model A, then model B). Verify per-namespace entry counts separate in internal state (requires debug logs or test helpers). |
 | H18 | Concurrent access safety | hybrid, `-np 2` | Send 2 different prompts simultaneously. Both should complete without race conditions. Cache entries correct. No crashes. |
 
@@ -94,9 +94,26 @@ Each test should stop the server in `finally` cleanup and collect stderr, stdout
 | --- | --- | --- | --- |
 | H19 | Multiple evictions in one update | hybrid, `--cache-ram 1` | Cache with 5 entries, budget allows only 2. Add new entry triggering update. Verify exactly 4 entries evicted (5 existing - 2 that fit + 1 new = 4 evicted). Check `llamacpp_cache_evictions` increment. |
 | H20 | Eviction during active restore | hybrid, `-np 2`, `--cache-ram 1` | Slot A loading entry (slow operation). Slot B triggers eviction of different entry. Verify no race conditions, both operations complete successfully. |
-| H21 | Protected root exhaustion | hybrid, `--cache-ram 1` | All entries have `protected_root=true`, budget exceeded. Verify explicit diagnostic logged: "all entries protected, evicting oldest protected entry". Verify oldest protected entry evicted. |
-| H22 | Protected vs unprotected ordering | hybrid, `--cache-ram 5` | Mix of 3 protected and 3 unprotected entries. Trigger eviction. Verify all unprotected entries evicted before any protected entry. Check LRU ordering respected within each group. |
-| H23 | Eviction metrics accuracy | hybrid, `--cache-ram 1` | Perform sequence: add entry A, add B (evicts A), add C (evicts B), add D (evicts C). Verify `llamacpp_cache_evictions{mode="hybrid"}` = 3 exactly. |
+| H21 | Protected root exhaustion | hybrid, measured budget | Requires a stats-capable integration harness or focused C++ controller test that admits trusted protected-only entries. Verify protected entries evict oldest-first when protected bytes alone exceed the budget, with protected decision and eviction counters. |
+| H22 | Protected vs unprotected ordering | hybrid, measured budget | Requires a stats-capable integration harness or focused C++ controller test that admits both trusted protected and unprotected entries. Verify unprotected entries evict first and LRU order is respected within each class. |
+| H23 | Eviction metrics accuracy | hybrid, measured `--cache-ram` | Perform a measured sequence that causes known eviction pressure. Verify `llamacpp_cache_evictions_total{mode="hybrid"}` changes by the expected count. |
+
+## Stage 4: LRU Eviction Policy with Protected Roots
+
+Use integer MiB values for `--cache-ram`. Measure entry size first, then choose a budget and number of prompts that produce pressure without rejecting every entry.
+
+| ID | Scenario | Mode | Expected result |
+| --- | --- | --- | --- |
+| H30 | Resident payload byte budget | hybrid, measured `--cache-ram` | Cache pressure is calculated from serialized target plus draft payload bytes. `llamacpp_cache_payload_evictions_total{mode="hybrid"}` increments when resident payload bytes exceed the budget. |
+| H31 | Deterministic LRU ordering | hybrid, measured small budget or stats-capable harness | Choose prompts and budget so A and B are both resident before refresh. Refresh A through a successful hit, then add C. B evicts before A because A is now more recent. Public HTTP runs must prove the pre-pressure hit with `timings.cache_n > 0`; entry-state assertions may come from a stats-capable harness. Do not use sleeps to prove ordering. |
+| H32 | Successful restore refreshes recency | hybrid, measured small budget or stats-capable harness | Choose prompts and budget so A and B are both resident. Restore A successfully, then add pressure and verify A survives longer than the older unrefreshed B. Public HTTP runs must prove the pre-pressure restore with `timings.cache_n > 0`; entry-state assertions may come from a stats-capable harness. |
+| H33 | Failed restore does not refresh recency | hybrid with simulated or harnessed restore failure | A failed restore increments `llamacpp_cache_restore_failures_total{mode="hybrid"}` and the failed candidate remains eligible as the old entry during the next eviction. |
+| H34 | Equivalent-entry refresh enforces budget | hybrid, budget reduced or pressure introduced before refresh | Refreshing an equivalent entry updates recency, does not create a duplicate, and runs budget enforcement before the operation returns. |
+| H35 | Protected-root priority | hybrid, mixed protected and unprotected entries | If Stage 4 has no public trusted protected-entry creation path, use `tests/test-cache-controller.cpp` protected eviction coverage or a stats-capable integration harness. PASS requires both classes resident, unprotected entries evict before protected entries, and protected decision evidence from JSON stats, Prometheus metrics, or controller stats. If no trusted protected entry can be created, mark `BLOCKED`. |
+| H36 | Protected-root fallback eviction | hybrid, protected-only over-budget working set | If Stage 4 has no public trusted protected-entry creation path, use focused C++ controller coverage or a stats-capable harness that can admit protected-only entries. PASS requires protected entries to evict oldest-first until bytes fit, with protected decision and protected eviction counters. If no trusted protected entry can be created, mark `BLOCKED`. |
+| H37 | Protected admission rejection | hybrid, one trusted protected entry larger than budget | PASS requires these preconditions: the request or harness reaches cache admission, the entry has trusted non-degraded protected metadata, the serialized target plus draft payload is larger than the configured resident byte budget, and HTTP/parser validation did not reject the input first. Evidence must show no entry was admitted plus protected admission rejection diagnostics or controller stats. An HTTP 400 before admission is `BLOCKED`, not Stage 4 protected admission evidence. |
+| H38 | Stage 4 metrics export | hybrid, `--metrics` | `/metrics` includes `llamacpp_cache_payload_evictions_total{mode="hybrid"}` and `llamacpp_cache_protected_root_decisions_total{mode="hybrid"}`. Existing cache metric names remain unchanged. |
+| H39 | Legacy mode compatibility after Stage 4 | legacy | Legacy mode starts, serves requests, and exports legacy-labelled metrics without requiring Stage 4 hybrid decisions or protected-root behavior. |
 
 ## Namespace Isolation Tests (Phase 3)
 
@@ -125,18 +142,28 @@ Prefer stable signals:
 
 - HTTP status codes.
 - `timings.cache_n` (number of cached tokens reused).
-- Prometheus cache counters (`llamacpp_cache_hits`, `llamacpp_cache_misses`, `llamacpp_cache_evictions`, `llamacpp_cache_restore_failures`).
+- Prometheus cache counters (`llamacpp_cache_hits_total`, `llamacpp_cache_misses_total`, `llamacpp_cache_evictions_total`, `llamacpp_cache_restore_failures_total`, `llamacpp_cache_payload_evictions_total`, `llamacpp_cache_protected_root_decisions_total`).
 - Log messages for cache mode, hit, miss, eviction, and restore failure.
 
 Avoid assertions on exact generated text. Cache tests only need successful generation and cache state evidence.
 
-## Phase 3 Observable Signals
+## Observable signals
 
-For hybrid mode tests (H01-H18), verify:
+For hybrid mode tests, verify:
 
-- **Metrics counters**: Check `/metrics` for exact counts of hits, misses, evictions, restore failures with `mode="hybrid"` label.
-- **Usage tracking**: Debug logs should show `use_count` and `last_used_time` updates (requires DEBUG build or server with verbose logging).
-- **Non-destructive behavior**: Multiple hits to same entry should not remove it from cache. Verify via multiple identical requests succeeding with cache hits.
-- **State restoration**: Second request should have `timings.cache_n` > 0 and faster `timings.prompt_ms` than first request.
-- **Namespace isolation**: Different configuration fingerprints in logs (model_path_hash, template_id, lora_adapters, etc.).
-- **Entry persistence**: Cache entry count should remain stable across reuses (monitor via logs or test helpers).
+- Metrics counters with `mode="hybrid"` or `mode="legacy"` labels.
+- Successful restore evidence such as `timings.cache_n` greater than zero.
+- Debug logs for recency, payload bytes, protected state, budget pressure, and eviction decisions.
+- Non-destructive behavior through repeated identical requests that continue to hit.
+- Namespace isolation through configuration fingerprints in logs.
+- Entry count and byte counters that change in the expected direction around save, refresh, and eviction.
+
+## Protected-root evidence paths
+
+Public chat requests currently produce degraded rendered-text metadata. They must not be used by themselves to pass H35, H36, or H37 because the cache only treats non-degraded protected metadata as trusted.
+
+Acceptable evidence sources for Stage 4 protected-root rows are:
+
+- A stats-capable integration harness that can create trusted protected entries and expose protected, unprotected, decision, eviction, and admission counters.
+- Focused C++ controller tests that use the existing debug helpers to create protected entries with known payload sizes and then verify controller stats and eviction order.
+- A `BLOCKED` result that states the missing precondition: no public protected-entry creation path, no stats-capable harness, or parser/HTTP rejection before cache admission.

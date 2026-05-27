@@ -3,11 +3,19 @@
 
 param(
     [string] $BuildDir = "build",
-    [string] $Model = "d:\source\llama.cpp-jet\._test_models\Qwen2.5-VL-3B-Instruct-GGUF\Qwen2.5-VL-3B-Instruct-Q6_K.gguf",
+    [string] $Model = "",
     [int] $StartPort = 8120
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($Model)) {
+    if (-not [string]::IsNullOrWhiteSpace($env:LLAMA_CACHE_TEST_MODEL)) {
+        $Model = $env:LLAMA_CACHE_TEST_MODEL
+    } else {
+        $Model = "d:\source\llama.cpp-jet\._test_models\Qwen2.5-VL-3B-Instruct-GGUF\Qwen2.5-VL-3B-Instruct-Q6_K.gguf"
+    }
+}
 
 # Test configuration
 $ServerPath = Join-Path $BuildDir "bin\Release\llama-server.exe"
@@ -150,10 +158,13 @@ function Get-CacheMetrics {
         
         $Metrics = @{}
         foreach ($Line in $Lines) {
-            if ($Line -match 'llamacpp_cache_(\w+)\{.*mode="([^"]+)".*\}\s+(\d+)') {
+            if ($Line -match '^(llamacpp_cache_\w+)\{.*mode="([^"]+)".*\}\s+(-?\d+(?:\.\d+)?)') {
                 $MetricName = $Matches[1]
                 $Mode = $Matches[2]
-                $Value = [int]$Matches[3]
+                $Value = [double]$Matches[3]
+                if ($MetricName.StartsWith("llamacpp_cache_")) {
+                    $MetricName = $MetricName.Substring("llamacpp_cache_".Length)
+                }
                 $Metrics["${MetricName}_${Mode}"] = $Value
             }
         }

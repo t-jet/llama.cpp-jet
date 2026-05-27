@@ -2,9 +2,9 @@
 
 Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
 
-## Current test coverage
+## Current scripted coverage
 
-The implemented test suite covers:
+The implemented PowerShell runner currently covers:
 
 - **R01-R04:** Regression prevention (legacy unchanged, default mode, opt-in, dependencies)
 - **C01-C06:** Mode selection (default, legacy, hybrid, invalid, HTTP endpoints)
@@ -12,10 +12,13 @@ The implemented test suite covers:
 - **C11-C15:** Concurrent access safety (save, load, metrics under concurrency)
 - **B01-B06:** Stage 2 boundary metadata (extraction, threading, fallbacks, edge cases)
 - **H01-H29:** Phase 3 hybrid cache (non-destructive hits, LRU eviction, namespace isolation)
-- **D01-D05:** Draft model paired save/restore
+- Stage 4 metric-export and protected-root checks only where the current harness can verify them directly
+- **D01-D05:** skipped unless a draft model is configured; do not treat the placeholder branch as acceptance evidence
 - **N01-N13:** Edge and negative scenarios (validation, failures, oversized entries)
 
 See Parts 3 and 4 of this test plan for the complete test matrix.
+
+Stage 4 H30-H39 remain acceptance scenarios in Part 3. A test report may mark those rows `PASS` only when it captures the Stage 4 evidence listed in Part 5, including measured resident payload size, budget choice, recency order, equivalent refresh behavior, protected priority or fallback evidence, and metrics, stats-capable harness evidence, or focused C++ controller stats. A script result that only proves requests completed is not enough. Public chat with degraded metadata is not protected-root evidence for H35-H37.
 
 ## Future enhancements
 
@@ -24,9 +27,8 @@ The current runner does not yet implement:
 - `-SkipBuild` switch (build must be done separately)
 - `-IncludeDraft` switch (draft model tests not yet implemented)
 - `-IncludeStress` switch (stress tests not yet implemented)
-- Environment variable for model path override (path is hardcoded)
-- Cache hit/miss counter validation from `/metrics`
-- Multi-prompt cache behavior tests
+- Complete automation for every Stage 4 protected-root branch
+- Direct public JSON stats collection, because `/cache/stats` is intentionally absent
 
 These features should be added as the cache implementation matures and the test scope expands.
 
@@ -58,10 +60,10 @@ Run these only under `-IncludeStress` flag. Each stress test must run to complet
 **Success Criteria:**
 
 - Peak memory (working set) remains stable (< 5% growth over 30 minutes)
-- Cache memory stays within `--cache-ram` limit (10 MiB)
+- Resident payload pressure stays within `--cache-ram` after legal evictions
 - No process crashes or hangs
-- Eviction metrics show expected churn
-- No memory leaks detected (final memory ≈ initial memory after GC)
+- Payload eviction metrics show expected churn
+- No memory leaks detected (final memory near initial memory after GC)
 
 ### S02: High concurrency
 
@@ -111,7 +113,8 @@ Run these only under `-IncludeStress` flag. Each stress test must run to complet
 - Eviction count ~970 (1000 requests - 3 initial fills - ~27 cache hits from LRU)
 - No cache corruption or invalid state
 - Memory usage stable (cache size oscillates but doesn't grow)
-- LRU policy maintains correct ordering (most recent 3 entries retained)
+- LRU policy maintains correct ordering (most recent entries retained)
+- Protected-root priority remains visible when the prompt mix includes system roots
 
 ### S04: Long-running stability
 
@@ -138,7 +141,7 @@ Run these only under `-IncludeStress` flag. Each stress test must run to complet
 - Process runs 6 hours without crash or hang
 - Memory usage stable (< 10% growth over 6 hours)
 - Metrics remain accurate throughout (spot-check samples)
-- No memory leaks (final memory ≈ stabilized memory after 1 hour)
+- No memory leaks (final memory near stabilized memory after 1 hour)
 - Cache hit rate ~60% as expected
 - Response times consistent (no degradation over time)
 
@@ -174,6 +177,7 @@ For each run, record:
 - Test command lines.
 - Test summary with pass, fail, skip counts.
 - Metrics snapshots around cache save, hit, miss, eviction, and restore failure cases.
+- Stage 4 snapshots around payload eviction and protected-root decisions.
 - Known gaps with references to implementation gap documents.
 
 Do not report focused cache-controller line coverage here. Integration evidence should describe server runs, model paths, HTTP requests, and metrics changes.

@@ -49,7 +49,7 @@ function Test-BinaryFreshness {
     Write-Host "  Timestamp: $($Binary.LastWriteTime)" -ForegroundColor White
     Write-Host "  Build age: $([Math]::Round($BuildAge.TotalMinutes, 1)) minutes" -ForegroundColor White
     
-    if ($BuildAge.TotalMinutes -gt 30) {
+    if ($BuildAge.TotalMinutes -gt 10) {
         Write-Host ""
         Write-Host "FAILED: Binary is stale (built $([Math]::Round($BuildAge.TotalMinutes, 1)) minutes ago)" -ForegroundColor Red
         Write-Host "Test plan requires binary within 10 minutes of test execution" -ForegroundColor Yellow
@@ -69,7 +69,7 @@ function Test-BinaryFreshness {
 }
 
 # Validate binary before starting tests
-$BinaryPath = Join-Path $PSScriptRoot "..\..\build\bin\Release\llama-server.exe"
+$BinaryPath = $ServerPath
 if (-not (Test-BinaryFreshness -BinaryPath $BinaryPath)) {
     Write-Host "Test execution aborted - binary validation failed" -ForegroundColor Red
     exit 1
@@ -79,18 +79,50 @@ if (-not (Test-BinaryFreshness -BinaryPath $BinaryPath)) {
 # Test Report Initialization
 ################################################################################
 
+function Get-NextTestReportPath {
+    param([string]$ReportDir)
+
+    New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
+
+    $DatePart = Get-Date -Format "yyyyMMdd"
+    for ($i = 1; $i -le 99; $i++) {
+        $Candidate = Join-Path $ReportDir ("test-report-{0}-{1:D2}.md" -f $DatePart, $i)
+        if (-not (Test-Path $Candidate)) {
+            return $Candidate
+        }
+    }
+
+    throw "No available test report filename for $DatePart"
+}
+
+function Get-GitEvidence {
+    try {
+        $Commit = (& git rev-parse HEAD 2>$null).Trim()
+        $Dirty = (& git status --short 2>$null)
+        if ($Dirty) {
+            return "$Commit (working tree dirty)"
+        }
+        return $Commit
+    }
+    catch {
+        return "unavailable"
+    }
+}
+
 # Initialize test report header
-$ReportFile = Join-Path $PSScriptRoot "..\\.test_reports\test-report-20260526-04.md"
+$ReportDir = Join-Path $PSScriptRoot "..\.test_reports"
+$ReportFile = Get-NextTestReportPath -ReportDir $ReportDir
+$GitEvidence = Get-GitEvidence
 $ReportHeader = @"
 # Cache Handling Integration Test Report
 
 **Test Date:** $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")  
 **Test Environment:** Windows 11, PowerShell  
-**Git Commit:** 626096745b45d75fb1e0cceaa611c5a719c4c4dc
-**Server Binary:** build\bin\Release\llama-server.exe  
-**Test Model:** ._test_models\Qwen2.5-VL-3B-Instruct-GGUF\Qwen2.5-VL-3B-Instruct-Q6_K.gguf  
-**Scope:** Integration tests excluding long-running stress tests (S01-S04)
-**Note:** Fixed metric name patterns (added _total suffix to match actual Prometheus metric names)
+**Git Commit:** $GitEvidence  
+**Server Binary:** $BinaryPath  
+**Test Model:** $Model  
+**Scope:** Integration tests excluding long-running stress tests (S01-S04)  
+**Evidence Format:** Reusable session report, not tied to a prior run
 
 ## Test Execution Log
 
@@ -2491,13 +2523,21 @@ Write-Host "=========================================="
 
 $PassCount = ($Global:TestResults | Where-Object { $_.Status -eq "PASS" }).Count
 $FailCount = ($Global:TestResults | Where-Object { $_.Status -eq "FAIL" }).Count
+$SkipCount = ($Global:TestResults | Where-Object { $_.Status -eq "SKIP" }).Count
+$BlockedCount = ($Global:TestResults | Where-Object { $_.Status -eq "BLOCKED" }).Count
 $TotalCount = $Global:TestResults.Count
 
-Write-Host "Total: $TotalCount | Pass: $PassCount | Fail: $FailCount"
+Write-Host "Total: $TotalCount | Pass: $PassCount | Fail: $FailCount | Skip: $SkipCount | Blocked: $BlockedCount"
 Write-Host ""
 
 foreach ($Result in $Global:TestResults) {
-    $StatusSymbol = if ($Result.Status -eq "PASS") { "[PASS]" } else { "[FAIL]" }
+    $StatusSymbol = switch ($Result.Status) {
+        "PASS" { "[PASS]" }
+        "FAIL" { "[FAIL]" }
+        "SKIP" { "[SKIP]" }
+        "BLOCKED" { "[BLOCKED]" }
+        default { "[UNKNOWN]" }
+    }
     Write-Host "$StatusSymbol $($Result.TestId): $($Result.Description)"
 }
 
@@ -2509,6 +2549,8 @@ $Summary = @"
 **Total Tests:** $TotalCount  
 **Passed:** $PassCount  
 **Failed:** $FailCount  
+**Skipped:** $SkipCount  
+**Blocked:** $BlockedCount  
 
 ### Test Results Table
 

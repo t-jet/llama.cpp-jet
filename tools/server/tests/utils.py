@@ -136,7 +136,16 @@ class ServerProcess:
         elif "LLAMA_SERVER_BIN_PATH" in os.environ:
             server_path = os.environ["LLAMA_SERVER_BIN_PATH"]
         elif os.name == "nt":
-            server_path = "../../../build/bin/Release/llama-server.exe"
+            server_path = os.path.abspath(os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "build",
+                "bin",
+                "Release",
+                "llama-server.exe",
+            ))
         else:
             server_path = "../../../build/bin/llama-server"
         server_args = [

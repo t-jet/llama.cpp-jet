@@ -1,13 +1,13 @@
 #pragma once
 
 #include "server-cache-controller.h"
+#include "server-cache-policy-lru.h"
 #include "server-task.h"
 
 #include <list>
 #include <map>
 #include <unordered_map>
 #include <vector>
-#include <chrono>
 #include <string>
 #include <functional>
 
@@ -58,9 +58,10 @@ struct hybrid_cache_entry {
     std::list<common_prompt_checkpoint> checkpoints; // Checkpoints for this entry
     prepared_prompt_metadata metadata;             // Prompt boundary metadata for this entry
     std::string namespace_id;                      // Namespace (model + config identifier)
-    
-    // LRU tracking (Phase 1)
-    std::chrono::system_clock::time_point last_used_time;  // Last access time
+
+    uint64_t entry_id = 0;                         // Stable identifier for policy plans
+    uint64_t insertion_sequence = 0;               // Stable tie-breaker for equal recency
+    uint64_t use_sequence = 0;                     // Deterministic LRU recency key
     size_t use_count = 0;                          // Number of times used
     bool protected_root = false;                   // Protected from eviction
 
@@ -85,9 +86,21 @@ struct hybrid_cache_entry {
         return tokens.size();
     }
 
+    size_t resident_payload_bytes() const {
+        return data.main.size() + data.drft.size();
+    }
+
+    bool has_target_payload() const {
+        return !data.main.empty();
+    }
+
+    bool has_draft_payload() const {
+        return !data.drft.empty();
+    }
+
     // Mark this entry as used (update LRU metadata)
-    void mark_used() {
-        last_used_time = std::chrono::system_clock::now();
+    void mark_used(uint64_t sequence) {
+        use_sequence = sequence;
         use_count++;
     }
 };
@@ -131,9 +144,14 @@ public:
 #ifdef LLAMA_SERVER_CACHE_TESTS
     // Test helpers for pure lookup/index coverage without a llama context.
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
+    void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
+    bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");
+    void debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited = false);
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
@@ -142,9 +160,14 @@ public:
 private:
 #ifndef LLAMA_SERVER_CACHE_TESTS
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
+    void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
+    bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");
+    void debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited = false);
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
@@ -153,13 +176,9 @@ private:
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
     std::list<hybrid_cache_entry> entries;
 
-    // Phase 2: Performance indexes
-    // LRU index: sorted by last_used_time for O(log n) eviction
-    using lru_entry_t = std::pair<
-        std::chrono::system_clock::time_point,
-        std::list<hybrid_cache_entry>::iterator
-    >;
-    std::multimap<std::chrono::system_clock::time_point,
+    // LRU index: sorted by deterministic use sequence for stable tests.
+    using lru_key_t = std::pair<uint64_t, uint64_t>;
+    std::multimap<lru_key_t,
                   std::list<hybrid_cache_entry>::iterator> lru_index;
 
     // Token prefix index: hash map for O(m) lookup where m << n
@@ -183,14 +202,22 @@ private:
     // Configuration
     const common_params & params; // runtime parameters for comprehensive namespace keys
     size_t limit_size;       // size limit in bytes, 0 = no limit
+    bool limit_size_unlimited = false;
     size_t limit_tokens;     // token limit, 0 = no limit
     llama_context * ctx_tgt; // target context
     llama_context * ctx_dft; // draft context (may be null)
+    server_cache_policy_lru eviction_policy;
+    uint64_t next_entry_id = 1;
+    uint64_t next_sequence = 1;
 
     // Statistics
     size_t n_hits = 0;
     size_t n_misses = 0;
     size_t n_evictions = 0;
+    size_t n_payload_evictions = 0;
+    size_t n_protected_root_decisions = 0;
+    size_t n_protected_root_evictions = 0;
+    size_t n_protected_root_admission_rejections = 0;
     size_t n_restore_failures = 0;
 
     // Find best matching entry for given tokens and metadata
@@ -205,8 +232,9 @@ private:
         const server_tokens & tokens,
         const std::string & namespace_id);
 
-    // Evict least recently used entry (respects protected_root flag)
-    void evict_lru();
+    bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
+    void evict_until_within_budget();
+    void refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root);
 
     // Check if entry should be protected from eviction
     bool should_protect(const hybrid_cache_entry & entry) const;
@@ -217,6 +245,15 @@ private:
     // Calculate total tokens of all entries
     size_t calculate_total_tokens() const;
 
+    size_t calculate_resident_payload_bytes() const;
+    size_t calculate_protected_payload_bytes() const;
+    size_t calculate_unprotected_payload_bytes() const;
+    size_t calculate_protected_entry_count() const;
+    bool hot_payload_budget_enabled() const;
+    std::vector<server_cache_policy_candidate> build_policy_candidates() const;
+    uint64_t next_use_sequence();
+    void assign_entry_identity(hybrid_cache_entry & entry);
+
     // Compute namespace ID from current context and request compatibility state.
     std::string compute_namespace_id() const;
     std::string compute_namespace_id(const prepared_prompt_metadata & metadata) const;
@@ -224,8 +261,7 @@ private:
     // Phase 2: Index maintenance helpers
     void add_to_lru_index(std::list<hybrid_cache_entry>::iterator it);
     void remove_from_lru_index(std::list<hybrid_cache_entry>::iterator it);
-    void update_lru_index(std::list<hybrid_cache_entry>::iterator it,
-                         std::chrono::system_clock::time_point old_time);
+    void update_lru_index(std::list<hybrid_cache_entry>::iterator it, lru_key_t old_key);
     void add_to_prefix_index(std::list<hybrid_cache_entry>::iterator it);
     void remove_from_prefix_index(std::list<hybrid_cache_entry>::iterator it);
     token_prefix_t get_token_prefix(const server_tokens & tokens) const;

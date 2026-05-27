@@ -135,6 +135,9 @@ void test_hybrid_controller_interface() {
     assert(stats.contains("n_hits"));
     assert(stats.contains("n_misses"));
     assert(stats.contains("n_evictions"));
+    assert(stats.contains("resident_payload_bytes"));
+    assert(stats.contains("n_payload_evictions"));
+    assert(stats.contains("n_protected_root_decisions"));
     assert(stats.contains("namespaces"));
     
     printf("  PASSED\n");
@@ -223,11 +226,13 @@ void test_hybrid_cache_entry() {
     assert(entry.namespace_id.empty());
     
     // Test mark_used
-    entry.mark_used();
+    entry.mark_used(1);
     assert(entry.use_count == 1);
-    
-    entry.mark_used();
+    assert(entry.use_sequence == 1);
+
+    entry.mark_used(2);
     assert(entry.use_count == 2);
+    assert(entry.use_sequence == 2);
 
     entry.metadata.add_boundary(prompt_boundary::MESSAGE_START, 0, "user");
     assert(entry.metadata.has_boundaries());
@@ -364,22 +369,17 @@ void test_protected_root() {
     printf("  PASSED\n");
 }
 
-// Test 14: LRU timestamp tracking
-void test_lru_timestamp() {
-    printf("test-cache-controller: LRU timestamp tracking...\n");
-    
+// Test 14: LRU sequence tracking
+void test_lru_sequence() {
+    printf("test-cache-controller: LRU sequence tracking...\n");
+
     hybrid_cache_entry entry;
-    
-    auto time1 = entry.last_used_time;
-    
+
     // Mark as used
-    entry.mark_used();
-    
-    auto time2 = entry.last_used_time;
-    
-    // Time should have been updated (or at least not less than before)
-    assert(time2 >= time1);
-    
+    entry.mark_used(42);
+    assert(entry.use_sequence == 42);
+    assert(entry.use_count == 1);
+
     printf("  PASSED\n");
 }
 
@@ -517,7 +517,267 @@ void test_hybrid_protected_eviction_paths() {
     printf("  PASSED\n");
 }
 
-// Test 21: Hybrid lookup handles namespace misses, empty queries, and LRU updates
+// Test 21: Hybrid payload budget uses resident payload bytes and protection priority
+void test_hybrid_payload_budget_eviction() {
+    printf("test-cache-controller: hybrid payload budget eviction...\n");
+
+    common_params params = create_test_params();
+
+    hybrid_cache_controller lru_ctrl(params, 1, 1000, nullptr, nullptr);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
+
+    assert(lru_ctrl.debug_entry_count_for_tests() == 1);
+    assert(lru_ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
+    assert(lru_ctrl.debug_find_match_tokens_for_tests(create_tokens({3, 4, 9})) == 2);
+    json lru_stats = lru_ctrl.get_stats();
+    assert(lru_stats["resident_payload_bytes"] == 700 * 1024);
+    assert(lru_stats["n_payload_evictions"] == 1);
+
+    hybrid_cache_controller protected_ctrl(params, 1, 1000, nullptr, nullptr);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 700 * 1024, 0);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "ns", 500 * 1024, 0);
+
+    assert(protected_ctrl.debug_entry_count_for_tests() == 1);
+    assert(protected_ctrl.debug_find_match_tokens_for_tests(create_tokens({5, 6, 9})) == 2);
+    assert(protected_ctrl.debug_find_match_tokens_for_tests(create_tokens({7, 8, 9})) == -1);
+    json protected_stats = protected_ctrl.get_stats();
+    assert(protected_stats["protected_payload_bytes"] == 700 * 1024);
+    assert(protected_stats["unprotected_payload_bytes"] == 0);
+    assert(protected_stats["n_protected_root_decisions"] >= 1);
+
+    hybrid_cache_controller all_protected(params, 1, 1000, nullptr, nullptr);
+    all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true, "ns", 700 * 1024, 0);
+    all_protected.debug_add_entry_for_tests(create_tokens({11, 12}), true, "ns", 700 * 1024, 0);
+    assert(all_protected.debug_entry_count_for_tests() == 1);
+    json all_protected_stats = all_protected.get_stats();
+    assert(all_protected_stats["n_protected_root_evictions"] == 1);
+
+    hybrid_cache_controller unlimited(params, -1, 1000, nullptr, nullptr);
+    unlimited.debug_add_entry_for_tests(create_tokens({13, 14}), false, "ns", 900 * 1024, 0);
+    unlimited.debug_add_entry_for_tests(create_tokens({15, 16}), false, "ns", 900 * 1024, 0);
+    assert(unlimited.debug_entry_count_for_tests() == 2);
+    assert(unlimited.get_stats()["resident_payload_bytes"] == 1800 * 1024);
+
+    printf("  PASSED\n");
+}
+
+// Test 22: Equivalent-entry refresh enforces an updated payload budget
+void test_hybrid_refresh_enforces_payload_budget() {
+    printf("test-cache-controller: hybrid refresh enforces payload budget...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({3, 4}), false, "ns"));
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 1);
+    assert(stats["resident_payload_bytes"] == 700 * 1024);
+    assert(stats["n_payload_evictions"] == 1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({3, 4, 9})) == 2);
+
+    printf("  PASSED\n");
+}
+
+// Test 23: Multiple protected evictions count as protected decisions
+void test_hybrid_multiple_protected_evictions_count_decisions() {
+    printf("test-cache-controller: hybrid multiple protected evictions count decisions...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 3, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true, "ns", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), true, "ns", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 900 * 1024, 0);
+    assert(ctrl.debug_entry_count_for_tests() == 3);
+
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({5, 6}), true, "ns"));
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 1);
+    assert(stats["resident_payload_bytes"] == 900 * 1024);
+    assert(stats["n_protected_root_evictions"] == 2);
+    assert(stats["n_protected_root_decisions"] >= 3);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({3, 4, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({5, 6, 9})) == 2);
+
+    printf("  PASSED\n");
+}
+
+// Test 24: H31 deterministic LRU ordering with entry-state evidence
+void test_h31_lru_entry_state_ordering() {
+    printf("test-cache-controller: H31 LRU entry-state ordering...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr);
+
+    const auto tokens_a = create_tokens({101, 102});
+    const auto tokens_b = create_tokens({201, 202});
+    const auto tokens_c = create_tokens({301, 302});
+
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h31", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h31", 400 * 1024, 0);
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(ctrl.get_stats()["resident_payload_bytes"] == 800 * 1024);
+
+    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h31"));
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h31", 400 * 1024, 0);
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(stats["resident_payload_bytes"] == 800 * 1024);
+    assert(stats["n_payload_evictions"] == 1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({101, 102, 9})) == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({201, 202, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({301, 302, 9})) == 2);
+
+    printf("  PASSED\n");
+}
+
+// Test 25: H32 successful restore refreshes recency before pressure
+void test_h32_successful_restore_refreshes_recency() {
+    printf("test-cache-controller: H32 successful-restore recency...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr);
+
+    const auto tokens_a = create_tokens({111, 112});
+    const auto tokens_b = create_tokens({211, 212});
+    const auto tokens_c = create_tokens({311, 312});
+
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h32", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h32", 400 * 1024, 0);
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({111, 112, 9})) == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({211, 212, 9})) == 2);
+
+    const bool restored_a = ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h32");
+    assert(restored_a);
+
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h32", 400 * 1024, 0);
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(stats["resident_payload_bytes"] == 800 * 1024);
+    assert(stats["n_payload_evictions"] == 1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({111, 112, 9})) == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({211, 212, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({311, 312, 9})) == 2);
+
+    printf("  PASSED\n");
+}
+
+// Test 24: Failed restore does not refresh LRU recency
+void test_hybrid_failed_restore_does_not_refresh_recency() {
+    printf("test-cache-controller: hybrid failed restore does not refresh recency...\n");
+
+    common_params params = create_test_params();
+    prepared_prompt_metadata meta;
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+
+    assert(ctrl.debug_try_admit_entry_for_tests(create_tokens({1, 2}), meta, 400 * 1024, 0));
+    assert(ctrl.debug_try_admit_entry_for_tests(create_tokens({3, 4}), meta, 400 * 1024, 0));
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == 2);
+
+    assert(!ctrl.debug_fail_restore_for_tests(create_tokens({1, 2, 9}), meta));
+    json failed_stats = ctrl.get_stats();
+    assert(failed_stats["n_restore_failures"] == 1);
+    assert(failed_stats["n_hits"] == 0);
+
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
+    assert(ctrl.debug_try_admit_entry_for_tests(create_tokens({5, 6}), meta, 400 * 1024, 0));
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 2);
+    assert(stats["resident_payload_bytes"] == 800 * 1024);
+    assert(stats["n_payload_evictions"] == 1);
+    assert(stats["n_restore_failures"] == 1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({3, 4, 9})) == 2);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({5, 6, 9})) == 2);
+
+    printf("  PASSED\n");
+}
+
+// Test 25: Oversized trusted protected admission is rejected and counted
+void test_hybrid_protected_admission_rejection_stats() {
+    printf("test-cache-controller: hybrid protected admission rejection stats...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata protected_meta;
+    protected_meta.compatibility_key = "trusted-protected";
+    protected_meta.protect_system = true;
+    protected_meta.add_span(prompt_boundary::SYSTEM_START, 0, 2, 77, true, "system");
+
+    assert(!ctrl.debug_try_admit_entry_for_tests(
+        create_tokens({7, 8}),
+        protected_meta,
+        2 * 1024 * 1024,
+        0));
+
+    json stats = ctrl.get_stats();
+    assert(ctrl.debug_entry_count_for_tests() == 0);
+    assert(stats["resident_payload_bytes"] == 0);
+    assert(stats["protected_payload_bytes"] == 0);
+    assert(stats["n_protected_entries"] == 0);
+    assert(stats["n_protected_root_decisions"] == 1);
+    assert(stats["n_protected_root_admission_rejections"] == 1);
+
+    protected_meta.degraded_reason = "untrusted";
+    assert(!ctrl.debug_try_admit_entry_for_tests(
+        create_tokens({9, 10}),
+        protected_meta,
+        2 * 1024 * 1024,
+        0));
+
+    json degraded_stats = ctrl.get_stats();
+    assert(degraded_stats["n_protected_root_decisions"] == 1);
+    assert(degraded_stats["n_protected_root_admission_rejections"] == 1);
+
+    printf("  PASSED\n");
+}
+
+// Test 26: LRU policy plans deterministic protected-root eviction
+void test_lru_policy_planning() {
+    printf("test-cache-controller: LRU policy planning...\n");
+
+    server_cache_policy_lru policy;
+    std::vector<server_cache_policy_candidate> candidates = {
+        {1, "ns", 400, 4, 1, 1, true, true, false},
+        {2, "ns", 400, 4, 2, 2, false, true, false},
+        {3, "ns", 400, 4, 3, 3, false, true, false},
+    };
+
+    auto plan = policy.plan_evictions(1200, 800, false, candidates);
+    assert(plan.evictions.size() == 1);
+    assert(plan.evictions[0].entry_id == 2);
+    assert(plan.protected_entries_skipped);
+    assert(!plan.protected_budget_pressure);
+
+    auto protected_plan = policy.plan_evictions(1200, 300, false, candidates);
+    assert(protected_plan.evictions.size() == 3);
+    assert(protected_plan.evictions[0].entry_id == 2);
+    assert(protected_plan.evictions[1].entry_id == 3);
+    assert(protected_plan.evictions[2].entry_id == 1);
+    assert(protected_plan.protected_budget_pressure);
+
+    auto unlimited_plan = policy.plan_evictions(1200, 300, true, candidates);
+    assert(unlimited_plan.evictions.empty());
+
+    printf("  PASSED\n");
+}
+
+// Test 23: Hybrid lookup handles namespace misses, empty queries, and LRU updates
 void test_hybrid_lookup_edge_paths() {
     printf("test-cache-controller: hybrid lookup edge paths...\n");
 
@@ -538,7 +798,7 @@ void test_hybrid_lookup_edge_paths() {
     printf("  PASSED\n");
 }
 
-// Test 22: Hybrid lookup isolates entries by structured compatibility metadata
+// Test 24: Hybrid lookup isolates entries by structured compatibility metadata
 void test_hybrid_compatibility_key_miss() {
     printf("test-cache-controller: hybrid compatibility key miss...\n");
 
@@ -967,13 +1227,21 @@ int main() {
     test_hybrid_statistics();
     test_namespace_computation();
     test_protected_root();
-    test_lru_timestamp();
+    test_lru_sequence();
     test_metadata_queries();
     test_metadata_spans();
     test_hybrid_rejects_partial_blob_match();
     test_hybrid_prefix_index_short_entry();
     test_hybrid_lru_eviction_by_token_limit();
     test_hybrid_protected_eviction_paths();
+    test_hybrid_payload_budget_eviction();
+    test_hybrid_refresh_enforces_payload_budget();
+    test_hybrid_multiple_protected_evictions_count_decisions();
+    test_h31_lru_entry_state_ordering();
+    test_h32_successful_restore_refreshes_recency();
+    test_hybrid_failed_restore_does_not_refresh_recency();
+    test_hybrid_protected_admission_rejection_stats();
+    test_lru_policy_planning();
     test_hybrid_lookup_edge_paths();
     test_hybrid_compatibility_key_miss();
     test_server_task_inline_helpers();
@@ -995,7 +1263,7 @@ int main() {
     
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 34 tests (29 original + 5 Part 14 comprehensive)\n");
+    printf("Total: 40 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused)\n");
     printf("==================================================\n");
     
     return 0;

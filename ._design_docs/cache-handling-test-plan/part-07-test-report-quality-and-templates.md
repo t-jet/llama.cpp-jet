@@ -148,50 +148,6 @@ Each bug report MUST include verified technical details:
 **Impact Assessment:**
 [Describe impact on production readiness]
 
-### Example Bug Report
-
-**BUG-001: LRU Eviction Not Triggering**
-
-**Severity:** CRITICAL
-
-**Affected Tests:** H10, H19, H23
-
-**Description:**
-Cache eviction does not trigger when entries exceed `--cache-ram` limit. Metrics show `llamacpp_cache_evictions_total` remains at 0 even when cache size exceeds configured budget.
-
-**Suspected Root Causes:**
-1. Eviction trigger logic in `update()` may not be checking budget correctly
-2. `update()` may not be called after cache entry addition
-3. Size calculation may have unit conversion errors (MB vs bytes)
-4. Metrics counter `n_evictions` may not be incrementing properly
-
-**Code References:**
-- [server-cache-hybrid.cpp:23](../tools/server/server-cache-hybrid.cpp#L23) - Check `update()` eviction trigger condition: `(limit_size > 0 && calculate_total_size() > limit_size)`
-- [server-cache-hybrid.cpp:207](../tools/server/server-cache-hybrid.cpp#L207) - Review `evict_lru()` implementation using multimap index
-- [server-context.cpp:898](../tools/server/server-context.cpp#L898) - Verify `cache_ctrl->update()` is called after cache save operations
-
-**Evidence:**
-```
-Test H10 execution with --cache-ram 0.5 (512 KB limit):
-- Entry 1 size: ~330 KB (should fit within limit)
-- Entry 2 size: ~330 KB (total 660 KB, should trigger eviction)
-- Metrics snapshot:
-  llamacpp_cache_entries{mode="hybrid"} 2
-  llamacpp_cache_evictions_total{mode="hybrid"} 0  # Expected: ≥1
-  llamacpp_cache_bytes{mode="hybrid"} 660000       # Exceeds 512 KB limit
-```
-
-**Reproduction Steps:**
-```powershell
-cd ._design_docs\cache-handling-test-scripts
-.\execute_tests.ps1 -TestFilter "H10" -Verbose
-# Check metrics at http://localhost:8120/metrics
-# Look for llamacpp_cache_evictions_total
-```
-
-**Impact Assessment:**
-CRITICAL - Blocks production deployment. Cache will grow unbounded despite configured limits, causing out-of-memory conditions in production environments. Must be fixed before any production release.
-
 ## Test Execution Workflow
 
 1. **Preparation:**
@@ -232,8 +188,7 @@ Before finalizing any test report, verify:
 - [ ] No assumptions documented without verification
 - [ ] Log verbosity flags use numeric values (0-5), not strings like "debug"
 
-**If any item cannot be verified, add explicit disclaimer:**
-> ⚠️ **Unverified claim**: Function name `xyz()` assumed but not confirmed in codebase
+If any item cannot be verified, mark the affected test or claim as `BLOCKED` and explain what evidence is missing.
 
 ## Test Evidence Requirements
 

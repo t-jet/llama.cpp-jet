@@ -25,6 +25,11 @@ Model-backed integration tests must cover behavior that depends on real `llama_c
 - restore failure after target or draft restore begins
 - idle-slot save/load through the scheduler path
 - metrics changing after real cache save, hit, miss, eviction, and restore failure
+- resident payload byte pressure from `--cache-ram`
+- deterministic LRU ordering after successful restore and equivalent-entry refresh
+- no recency refresh after failed restore
+- protected-root priority, protected fallback eviction, and protected admission rejection
+- Stage 4 metrics for payload eviction and protected-root decisions
 - stable public HTTP surface: `/health`, `/metrics`, and missing `/cache/stats`
 
 ## Coverage reporting

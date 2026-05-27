@@ -52,6 +52,8 @@ def assert_cache_metrics_shape(body, expected_type):
     assert f'llamacpp_cache_entries{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_bytes{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_tokens{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_payload_evictions_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_protected_root_decisions_total{{mode="{expected_type}"}}' in body
 
 
 def server_binary_path():
