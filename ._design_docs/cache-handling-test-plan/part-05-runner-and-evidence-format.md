@@ -87,6 +87,11 @@ llamacpp_cache_evictions_total{mode="hybrid"} 0
 llamacpp_cache_restore_failures_total{mode="hybrid"} 0
 llamacpp_cache_payload_evictions_total{mode="hybrid"} 0
 llamacpp_cache_protected_root_decisions_total{mode="hybrid"} 0
+llamacpp_cache_descriptor_validation_failures_total{mode="hybrid"} 0
+llamacpp_cache_pairing_violations_total{mode="hybrid"} 0
+llamacpp_cache_fallback_restores_total{mode="hybrid"} 0
+llamacpp_cache_hot_payload_descriptors{mode="hybrid"} 0
+llamacpp_cache_evicted_payload_descriptors{mode="hybrid"} 0
 
 --- Metrics: After Operation 1 (cache miss) ---
 llamacpp_cache_hits_total{mode="hybrid"} 0
@@ -173,3 +178,25 @@ H33 requires fault injection or a code-level harness that can corrupt or replace
 H35 and H36 require trusted protected entries. If public HTTP cannot create them because metadata is degraded, use focused C++ controller tests or a stats-capable harness. If neither is available in the session, mark the rows `BLOCKED` and state that no trusted protected-entry precondition was created.
 
 H37 requires an oversized trusted protected entry to reach cache admission. The focused controller test `hybrid protected admission rejection stats` is acceptable evidence when it passes. A parser or HTTP validation rejection before `save_slot()` is not protected admission evidence and must be reported as `BLOCKED`.
+
+### 9. Stage 5 evidence
+
+For Stage 5 rows, include the evidence source because not every branch is reachable from public HTTP:
+
+- Public HTTP evidence can cover normal target-only save/restore, model-backed hit evidence with `timings.cache_n > 0`, `/metrics` shape, legacy compatibility, missing `/cache/stats`, and measured eviction pressure.
+- Draft-mode public HTTP evidence must name the runtime shape: no draft, normal separate draft model, target-derived `draft-mtp`, or separate-model `draft-mtp`. Include the exact startup flags and model paths. For normal separate draft mode, prove that `--model-draft` and `--spec-draft-model` are aliases. For MTP modes, include startup evidence that the selected model or model pair actually created an MTP draft context.
+- Focused controller or fault-injection evidence is required for corrupted descriptors, checksum or size mismatch, owner mismatch, store-ref mismatch, evicted or cold residency, pair-state/runtime mismatch, target or draft apply failure, commit failure, rollback failure, empty-preimage rollback, and unsupported clear preflight.
+- Draft-model integration evidence is required before marking target-plus-draft public restore rows as `PASS`; otherwise mark them `SKIP` if the session has no draft model or `BLOCKED` if the required fixture should have been available.
+- Cross-mode isolation evidence must show that a cache entry saved in one runtime mode is not reused in a different runtime mode. If the implementation lacks a compatibility-key field for MTP versus non-MTP draft contexts, record a Developer handoff instead of weakening the expected result.
+
+Capture these Stage 5 metric names when `/metrics` is enabled:
+
+```text
+llamacpp_cache_descriptor_validation_failures_total{mode="hybrid"}
+llamacpp_cache_pairing_violations_total{mode="hybrid"}
+llamacpp_cache_fallback_restores_total{mode="hybrid"}
+llamacpp_cache_hot_payload_descriptors{mode="hybrid"}
+llamacpp_cache_evicted_payload_descriptors{mode="hybrid"}
+```
+
+For focused controller evidence, map each `PASS` claim to the exact focused test name or source location. Acceptable focused evidence includes descriptor creation, target-plus-draft descriptor validation, pair mismatch, checksum failure, evicted descriptor rejection, paired byte accounting, transaction failure counters, and empty-preimage rollback. Do not mark a Stage 5 failure row as `PASS` from a script that only proves the server started or requests completed.

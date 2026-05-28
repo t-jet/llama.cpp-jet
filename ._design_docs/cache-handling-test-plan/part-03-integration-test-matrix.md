@@ -115,6 +115,32 @@ Use integer MiB values for `--cache-ram`. Measure entry size first, then choose 
 | H38 | Stage 4 metrics export | hybrid, `--metrics` | `/metrics` includes `llamacpp_cache_payload_evictions_total{mode="hybrid"}` and `llamacpp_cache_protected_root_decisions_total{mode="hybrid"}`. Existing cache metric names remain unchanged. |
 | H39 | Legacy mode compatibility after Stage 4 | legacy | Legacy mode starts, serves requests, and exports legacy-labelled metrics without requiring Stage 4 hybrid decisions or protected-root behavior. |
 
+## Stage 5: Descriptor Separation and Target/Draft Restore
+
+Use public HTTP where it can prove model-backed behavior. Use focused controller tests or a fault-injection harness for descriptor corruption, owner/store-ref mismatch, non-hot residency, unsupported clear, and restore-applier failure phases.
+
+| ID | Scenario | Mode | Expected result |
+| --- | --- | --- | --- |
+| H40 | Descriptor-backed target-only save and restore | hybrid, no draft flags | A default no-draft request saves exact-blob bytes through a `target_only` descriptor and hot payload record. A repeated request restores successfully with `timings.cache_n > 0`, increments hit metrics, and keeps `llamacpp_cache_hot_payload_descriptors{mode="hybrid"}` nonzero. |
+| H41 | Descriptor validation rejects malformed metadata | hybrid with focused harness | Validation rejects unsupported descriptor version or kind, target size zero, target checksum mismatch, target size mismatch, bad `store_ref`, owner entry mismatch, non-hot residency, and missing hot payload record. Each failed restore path increments descriptor validation failures and fallback restores without reporting a hit. |
+| H42 | Pair-state/runtime mismatch | hybrid with focused harness or draft fixture | A runtime without a draft context rejects a `target_and_draft` descriptor, and a runtime with a draft context rejects a `target_only` descriptor. Pairing violation and fallback counters increment. No hit or recency refresh occurs. |
+| H43 | Separate draft model paired save and restore | hybrid with `--model-draft` or `--spec-draft-model` | Saving with a normal separate draft model creates one `target_and_draft` descriptor with target and draft byte sizes, checksums, and hot residency. Restore succeeds only when both sides validate and apply. `timings.cache_n > 0` proves the public restore precondition when using HTTP. `--model-draft` and `--spec-draft-model` must behave as aliases. |
+| H44 | Target/draft transactional failure | hybrid with fault injection | Validation failure, target apply failure, draft apply failure after target success, commit failure, and rollback failure are whole-restore failures. The live slot returns to the exact pre-restore state when rollback succeeds. Hit, usage, and recency counters do not refresh for the failed candidate. |
+| H45 | Empty-preimage rollback | hybrid with focused harness | If the target or draft side had no serialized pre-restore bytes, rollback clears that side with the whole-sequence clear path. A draft failure after target apply leaves neither side half-restored, records fallback, and records no hit. |
+| H46 | Unsupported empty-side clear preflight | hybrid with fault injection | If empty-side rollback cannot clear the required sequence, restore fails before cached target bytes are applied. Failure and fallback counters increment, and live state remains untouched. |
+| H47 | Paired eviction and byte accounting | hybrid, measured budget or focused harness | A `target_and_draft` descriptor accounts resident bytes as target plus draft. Eviction removes both payload sides together, never one side, and changes hot/evicted descriptor counts consistently. |
+| H48 | Evicted or cold descriptor rejection | hybrid with focused harness | A descriptor with `evicted` residency or Stage 5 unsupported `cold` residency is not restorable. The controller records descriptor validation failure and fallback restore, with no hit or recency refresh. |
+| H49 | Stage 5 metrics export | hybrid and legacy, `--metrics` | `/metrics` includes `llamacpp_cache_descriptor_validation_failures_total`, `llamacpp_cache_pairing_violations_total`, `llamacpp_cache_fallback_restores_total`, `llamacpp_cache_hot_payload_descriptors`, and `llamacpp_cache_evicted_payload_descriptors` for both `mode="hybrid"` and `mode="legacy"`. |
+| H50 | Legacy compatibility after Stage 5 | legacy | Legacy mode starts, serves requests, preserves legacy prompt-cache behavior, keeps `/health` unchanged, and exports the Stage 5 metric names without requiring descriptor-backed hybrid behavior. |
+| H51 | Stage 4 regression after Stage 5 | hybrid | Re-run H30-H39 evidence paths. Descriptor ownership must not weaken byte budget enforcement, LRU ordering, protected-root priority, failed-restore recency semantics, equivalent refresh budget enforcement, or Stage 4 metric export. |
+| H52 | Public surface remains stable | both modes | Stage 5 does not add `/cache/stats`, cache fields in `/health`, cold-store CLI flags, or public JSON descriptor endpoints. |
+| H53 | Target-derived MTP save and restore | hybrid with `--spec-type draft-mtp`, no draft model | When startup creates an MTP draft context from the target model, save uses `target_and_draft`, restore validates the target-derived MTP namespace, and a repeated request restores with `timings.cache_n > 0`. If this public row is in scope and the selected local model cannot create that runtime, mark `BLOCKED` with the startup evidence. |
+| H54 | Separate-model MTP save and restore | hybrid with `--spec-type draft-mtp` plus `--model-draft` or `--spec-draft-model` | When startup creates an MTP draft context from the separate draft model, save uses `target_and_draft`, restore validates both draft model identity and the MTP runtime discriminator, and a repeated request restores with `timings.cache_n > 0`. If this public row is in scope and the selected model pair cannot create that runtime, mark `BLOCKED` with the startup evidence. |
+| H55 | No-draft versus draft namespace isolation | hybrid, cross-run or focused harness | A target-only entry is not reused by any active draft-context runtime, and a `target_and_draft` entry is not reused by a no-draft runtime. Pairing violation or namespace miss evidence is acceptable; no hit or recency refresh may occur. |
+| H56 | Normal draft alias compatibility | hybrid with separate draft model | Save with `--model-draft` and restore with `--spec-draft-model` using the same target and draft files, then reverse the order. The alias spelling must not create a different namespace by itself. |
+| H57 | Normal draft versus MTP namespace isolation | hybrid, cross-run or focused harness | A normal separate draft-model entry must not restore under target-derived `draft-mtp` or separate-model `draft-mtp`. An MTP entry must not restore under normal separate draft mode. The compatibility key must include a context-type or equivalent runtime discriminator beyond `ctx_dft` presence and draft model dimensions. |
+| H58 | Draft-mode legacy isolation | legacy and hybrid | Draft flags must not make legacy mode use descriptor-owned hybrid cache behavior. Existing legacy prompt-cache behavior remains unchanged, and hybrid-only descriptor counters do not become acceptance evidence for legacy cache semantics. |
+
 ## Namespace Isolation Tests (Phase 3)
 
 | ID | Scenario | Mode | Expected result |
@@ -126,15 +152,18 @@ Use integer MiB values for `--cache-ram`. Measure entry size first, then choose 
 | H28 | Template isolation | hybrid | Start with custom `--chat-template`. Verify compatibility key includes `template_id` hash. Different templates = different namespaces (prevents cross-template cache hits). |
 | H29 | KV mode isolation | hybrid | Compare run with `--kv-unified` vs without. Verify compatibility key includes `kv_unified` flag. Different KV modes = different namespaces. |
 
-## Draft Model Tests (Phase 3)
+## Draft Runtime Mode Tests (Phase 3 and Stage 5)
 
 | ID | Scenario | Mode | Expected result |
 | --- | --- | --- | --- |
-| D01 | Draft model paired save | hybrid, `--model-draft <draft.gguf>` | First request saves cache entry. Verify logs show both target and draft states serialized. Entry size accounts for both contexts. |
-| D02 | Draft model paired restore | hybrid, draft model | Second identical request hits cache. Verify both target and draft contexts restored. Check `timings.cache_n` > 0. Generation uses draft model. |
+| D01 | Normal separate draft paired save | hybrid, `--model-draft <draft.gguf>` | First request saves cache entry. Verify logs show both target and draft states serialized. Entry size accounts for both contexts. |
+| D02 | Normal separate draft paired restore | hybrid, draft model | Second identical request hits cache. Verify both target and draft contexts restored. Check `timings.cache_n` > 0. Generation uses draft model. |
 | D03 | Draft restore failure handling | hybrid, draft model | Simulate draft deserialization failure (requires test harness or corrupted cache). Verify `llamacpp_cache_restore_failures` increments. Slot state reset, request continues without cache. |
 | D04 | Draft-only mismatch | hybrid, draft model | Cache entry has target state but missing draft payload. Verify atomic failure: neither target nor draft restored. Increment `n_restore_failures`. Log warning. |
 | D05 | Target/draft compatibility | hybrid | Run with model A + draft A, save cache. Restart with model A + draft B. Verify different `draft_model_hash` in compatibility key = cache miss. No unsafe cross-draft restore. |
+| D06 | Target-derived MTP compatibility | hybrid, `--spec-type draft-mtp` | If the model supports target-derived MTP, verify the namespace identifies MTP separately from no-draft and normal separate draft-model runs. |
+| D07 | Separate-model MTP compatibility | hybrid, `--spec-type draft-mtp --model-draft <draft.gguf>` | If the model pair supports separate-model MTP, verify the namespace includes both draft model identity and the MTP context discriminator. |
+| D08 | Cross-mode reuse rejection | hybrid, cross-run or focused harness | Save in one draft runtime mode and attempt restore in each other mode. Only the same runtime mode and compatible model identity may produce a hit. |
 
 ## Notes on observable assertions
 

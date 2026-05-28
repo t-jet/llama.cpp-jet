@@ -1,0 +1,30 @@
+{
+  "model": "D:\\source\\llama.cpp-jet\\._test_models\\Qwen2.5-VL-3B-Instruct-GGUF\\Qwen2.5-VL-3B-Instruct-Q6_K.gguf",
+  "server": "D:\\source\\llama.cpp-jet\\build\\bin\\Release\\llama-server.exe",
+  "buildAgeMinutesAtStart": 2.04,
+  "hybrid": {
+    "port": 59906,
+    "health": {
+      "status": "ok"
+    },
+    "firstStatus": 200,
+    "secondStatus": 200,
+    "cacheN": 10,
+    "cacheStatsStatus": 404,
+    "cacheHits": 1.0,
+    "hotDescriptors": 1.0,
+    "descriptorValidationFailures": 0.0,
+    "pairingViolations": 0.0,
+    "fallbackRestores": 0.0,
+    "evictedDescriptors": 0.0
+  },
+  "legacy": {
+    "port": 59915,
+    "health": {
+      "status": "ok"
+    },
+    "completionStatus": 200,
+    "cacheStatsStatus": 404,
+    "stage5MetricNamesPresent": true
+  }
+}

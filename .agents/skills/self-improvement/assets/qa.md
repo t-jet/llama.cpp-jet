@@ -11,18 +11,18 @@ Action:
 ## Improvement: verify automation coverage claims
 
 Condition:
-- When reviewing a QA plan that claims scripted coverage for named test IDs or scenario ranges
+- When reviewing a QA plan that claims scripted coverage for named test IDs, broad scenario ranges, or negative-test ranges
 
 Action:
-- Do search the runner scripts and focused test sources for those exact IDs or required behaviors, compare the implemented assertions with the plan, and map every PASS claim to specific test names or source lines; when a public harness cannot create a required precondition, update the plan, README, and runner PASS/BLOCKED logic so the invalid path cannot be reported as pass-capable evidence.
+- Do search the runner scripts and focused test sources for those exact IDs or required behaviors, compare the implemented assertions with the plan, and split public-harness coverage from acceptance rows that need focused, draft-fixture, stats-capable, or fault-injection evidence; map every PASS claim to specific test names or source lines, and update runner PASS/BLOCKED logic only when the current task requires automation changes.
 
 ## Improvement: reconcile runner summaries with evidence
 
 Condition:
-- When a test runner emits conflicting console output, exit codes, generated reports, or skip/fail summaries
+- When a test runner emits conflicting console output, exit codes, generated reports, skip/fail summaries, blank/UNKNOWN rows, or inflated totals
 
 Action:
-- Do inspect the generated report and raw logs, rerun narrow direct checks for disputed cases when possible, and base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence rather than the runner exit code or summary alone.
+- Do inspect the generated report and raw logs, rerun narrow direct checks for disputed cases or truncated startup logs when possible, count only real test rows, and base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence rather than the runner exit code or summary alone.
 
 ## Improvement: suppress PowerShell helper output
 
@@ -47,3 +47,43 @@ Condition:
 
 Action:
 - Do assign the next suffix after the highest existing same-day report, not the first missing gap, so the newest report is also the lexically latest handoff artifact.
+
+## Improvement: reserve report artifacts under final suffix
+
+Condition:
+- When a QA execution session will create ad hoc artifact directories and may also run scripts that generate their own reports
+
+Action:
+- Do decide the final session report suffix before collecting ad hoc artifacts, and store those artifacts under a path named for that final report so evidence links do not point at a different report number.
+
+## Improvement: separate plan updates from product handoffs
+
+Condition:
+- When a QA planning task uncovers a product-code prerequisite or incompatibility that would block planned rows
+
+Action:
+- Do leave product code untouched, make the planned expectation explicit, and record a Developer handoff with the verified source evidence instead of weakening or omitting the blocked QA scenario.
+
+## Improvement: classify startup-only mode failures
+
+Condition:
+- When a public model-mode QA row cannot reach `/health` before cache behavior is observable
+
+Action:
+- Do classify the row as `BLOCKED` for cache acceptance, preserve startup logs and exit codes, and create a separate bug handoff when the process crashes or exits without a clear unsupported-mode diagnostic.
+
+## Improvement: discard stale harness flag failures
+
+Condition:
+- When a QA execution uses plan default server flags and startup fails before model loading with an invalid-argument error
+
+Action:
+- Do treat that attempt as a harness setup error, remove or correct only the unsupported flag, rerun the same row, and base the row outcome on the rerun rather than the stale default failure.
+
+## Improvement: avoid automatic-variable names in PowerShell harnesses
+
+Condition:
+- When writing or running inline PowerShell QA helpers that pass CLI arguments to a server process
+
+Action:
+- Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`; use explicit names like `ServerArgs`, preserve the discarded harness logs if a collision starts the wrong mode, and rerun before classifying product behavior.

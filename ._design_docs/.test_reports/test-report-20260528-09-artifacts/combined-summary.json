@@ -1,0 +1,92 @@
+[
+  {
+    "name": "h53-target-derived-mtp",
+    "port": 18153,
+    "startup_seconds": 3.136,
+    "health": {
+      "status": "ok"
+    },
+    "command": "D:\\source\\llama.cpp-jet\\build\\bin\\Release\\llama-server.exe --model D:\\source\\llama.cpp-jet\\._test_models\\Qwen3.5-4B-MTP-GGUF\\Qwen3.5-4B-Q4_K_M.gguf --host 127.0.0.1 --port 18153 --ctx-size 512 --parallel 1 --cont-batching --kv-unified --cache-ram 100 --temp 0 --seed 42 --metrics --cache-mode hybrid --spec-type draft-mtp --log-verbosity 5",
+    "prompt": "QA cache MTP probe. Answer with one word: ready",
+    "request1_ms": 275.399,
+    "request2_ms": 252.1,
+    "response1": {
+      "cache_n": 0,
+      "prompt_n": 12,
+      "predicted_n": 1,
+      "tokens_evaluated": 12,
+      "content": "."
+    },
+    "response2": {
+      "cache_n": 11,
+      "prompt_n": 1,
+      "predicted_n": 1,
+      "tokens_evaluated": 12,
+      "content": "."
+    },
+    "metrics": {
+      "hits": 1.0,
+      "misses": 1.0,
+      "restore_failures": 0.0,
+      "descriptor_validation_failures": 0.0,
+      "pairing_violations": 0.0,
+      "fallback_restores": 0.0,
+      "hot_payload_descriptors": 1.0,
+      "evicted_payload_descriptors": 0.0
+    },
+    "files": {
+      "stdout": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.out.log",
+      "stderr": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.err.log",
+      "metrics_before": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.metrics.before.txt",
+      "metrics_after": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.metrics.after.txt",
+      "response1": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.response1.json",
+      "response2": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.response2.json",
+      "summary": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h53-target-derived-mtp.summary.json"
+    }
+  },
+  {
+    "name": "h54-separate-model-mtp",
+    "port": 18154,
+    "startup_seconds": 3.539,
+    "health": {
+      "status": "ok"
+    },
+    "command": "D:\\source\\llama.cpp-jet\\build\\bin\\Release\\llama-server.exe --model D:\\source\\llama.cpp-jet\\._test_models\\Qwen3.5-4B-GGUF\\Qwen3.5-4B-Q4_1.gguf --model-draft D:\\source\\llama.cpp-jet\\._test_models\\Qwen3.5-4B-MTP-GGUF\\Qwen3.5-4B-Q4_K_M.gguf --host 127.0.0.1 --port 18154 --ctx-size 512 --parallel 1 --cont-batching --kv-unified --cache-ram 100 --temp 0 --seed 42 --metrics --cache-mode hybrid --spec-type draft-mtp --log-verbosity 5",
+    "prompt": "QA cache separate MTP probe. Answer with one word: ready",
+    "request1_ms": 334.026,
+    "request2_ms": 254.141,
+    "response1": {
+      "cache_n": 0,
+      "prompt_n": 13,
+      "predicted_n": 1,
+      "tokens_evaluated": 13,
+      "content": "."
+    },
+    "response2": {
+      "cache_n": 12,
+      "prompt_n": 1,
+      "predicted_n": 1,
+      "tokens_evaluated": 13,
+      "content": "."
+    },
+    "metrics": {
+      "hits": 1.0,
+      "misses": 1.0,
+      "restore_failures": 0.0,
+      "descriptor_validation_failures": 0.0,
+      "pairing_violations": 0.0,
+      "fallback_restores": 0.0,
+      "hot_payload_descriptors": 1.0,
+      "evicted_payload_descriptors": 0.0
+    },
+    "files": {
+      "stdout": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.out.log",
+      "stderr": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.err.log",
+      "metrics_before": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.metrics.before.txt",
+      "metrics_after": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.metrics.after.txt",
+      "response1": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.response1.json",
+      "response2": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.response2.json",
+      "summary": "D:\\source\\llama.cpp-jet\\._design_docs\\.test_reports\\test-report-20260528-09-artifacts\\h54-separate-model-mtp.summary.json"
+    }
+  }
+]

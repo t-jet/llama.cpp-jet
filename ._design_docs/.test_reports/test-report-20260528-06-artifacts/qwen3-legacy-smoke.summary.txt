@@ -1,0 +1,49 @@
+NAME=qwen3-legacy-smoke
+PORT=53022
+COMMAND=& "D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe" --model D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf --host 127.0.0.1 --port 53022 --ctx-size 512 --parallel 1 --cache-ram 100 --temp 0 --seed 42 --metrics --log-verbosity 5 --cache-mode legacy
+START=2026-05-28T16:38:57.0873700+03:00
+READY=True
+EXITED_BEFORE_READY=False
+EXIT_CODE_BEFORE_READY=running
+READY_TIME=2026-05-28T16:38:59.6360021+03:00
+HEALTH_STATUS=200
+HEALTH_BODY={"status":"ok"}
+METRICS_BEFORE_BEGIN
+llamacpp_cache_entries{mode="legacy"} 0
+llamacpp_cache_bytes{mode="legacy"} 0
+llamacpp_cache_tokens{mode="legacy"} 0
+llamacpp_cache_hits_total{mode="legacy"} 0
+llamacpp_cache_misses_total{mode="legacy"} 0
+llamacpp_cache_evictions_total{mode="legacy"} 0
+llamacpp_cache_payload_evictions_total{mode="legacy"} 0
+llamacpp_cache_protected_root_decisions_total{mode="legacy"} 0
+llamacpp_cache_restore_failures_total{mode="legacy"} 0
+llamacpp_cache_descriptor_validation_failures_total{mode="legacy"} 0
+llamacpp_cache_pairing_violations_total{mode="legacy"} 0
+llamacpp_cache_fallback_restores_total{mode="legacy"} 0
+llamacpp_cache_hot_payload_descriptors{mode="legacy"} 0
+llamacpp_cache_evicted_payload_descriptors{mode="legacy"} 0
+METRICS_BEFORE_END
+REQUEST_1_STATUS=200
+REQUEST_1_CACHE_N=0
+REQUEST_1_PROMPT_N=10
+REQUEST_1_PREDICTED_N=1
+REQUEST_1_CONTENT= or
+METRICS_AFTER_BEGIN
+llamacpp_cache_entries{mode="legacy"} 1
+llamacpp_cache_bytes{mode="legacy"} 1475568
+llamacpp_cache_tokens{mode="legacy"} 10
+llamacpp_cache_hits_total{mode="legacy"} 0
+llamacpp_cache_misses_total{mode="legacy"} 0
+llamacpp_cache_evictions_total{mode="legacy"} 0
+llamacpp_cache_payload_evictions_total{mode="legacy"} 0
+llamacpp_cache_protected_root_decisions_total{mode="legacy"} 0
+llamacpp_cache_restore_failures_total{mode="legacy"} 0
+llamacpp_cache_descriptor_validation_failures_total{mode="legacy"} 0
+llamacpp_cache_pairing_violations_total{mode="legacy"} 0
+llamacpp_cache_fallback_restores_total{mode="legacy"} 0
+llamacpp_cache_hot_payload_descriptors{mode="legacy"} 0
+llamacpp_cache_evicted_payload_descriptors{mode="legacy"} 0
+METRICS_AFTER_END
+END=2026-05-28T16:39:00.3733406+03:00
+FINAL_EXIT_CODE=-1

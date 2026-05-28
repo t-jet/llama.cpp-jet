@@ -1,8 +1,8 @@
 # Cache handling test plan
 
-Status: Active  
-Last updated: 2026-05-27  
-Scope: server integration tests for implemented cache behavior  
+Status: Active
+Last updated: 2026-05-28
+Scope: server integration tests and focused evidence mapping for implemented cache behavior
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -52,12 +52,17 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, read:
+Use [document-index.md](./document-index.md) first. For Stage 4 and Stage 5, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
 - [cache-handling-phase4-implementation/part-06-review-fixes.md](./cache-handling-phase4-implementation/part-06-review-fixes.md)
 - [cache-handling-phase4-implementation/part-07-implementation-re-review.md](./cache-handling-phase4-implementation/part-07-implementation-re-review.md)
+- [cache-handling-phase5-design.md](./cache-handling-phase5-design.md)
+- [cache-handling-phase5-implementation.md](./cache-handling-phase5-implementation.md)
+- [cache-handling-phase5-implementation/part-06-implementation-evidence.md](./cache-handling-phase5-implementation/part-06-implementation-evidence.md)
+- [cache-handling-phase5-implementation/part-08-review-fix-evidence.md](./cache-handling-phase5-implementation/part-08-review-fix-evidence.md)
+- [cache-handling-phase5-implementation/part-09-implementation-re-review.md](./cache-handling-phase5-implementation/part-09-implementation-re-review.md)
 
 ## Test coverage summary
 
@@ -67,6 +72,7 @@ The integration plan covers:
 - Stage 2 boundary metadata and protected-root propagation.
 - Stage 3 non-destructive exact blob cache behavior, restore metrics, namespace isolation, and draft-model pairing.
 - Stage 4 resident payload byte budget enforcement, deterministic LRU behavior, restore recency semantics, protected-root eviction priority and fallback, protected admission rejection, and Stage 4 metrics.
+- Stage 5 payload descriptor separation, hot payload ownership, descriptor validation, target/draft pair validation, draft runtime mode namespace isolation, transactional restore rollback, paired eviction and byte accounting, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -84,6 +90,13 @@ Implemented behavior that must be covered:
 - Unprotected entries evict before protected entries; protected entries evict oldest-first when they are the only way to satisfy budget.
 - Metrics expose existing counters plus Stage 4 payload eviction and protected-root decision counters.
 - `/cache/stats` is still absent in the public HTTP surface.
+- Exact-blob payload bytes are descriptor-owned and stored in the hot payload store instead of directly in cache entries.
+- Descriptor validation rejects unsupported version or kind, pair-state/runtime mismatch, checksum mismatch, size mismatch, bad store references, owner mismatch, non-hot residency, missing target bytes, and invalid draft presence.
+- Target and draft payloads restore, evict, and account for resident bytes as one pair.
+- Draft compatibility separates no draft, normal separate draft model, target-derived `draft-mtp`, and separate-model `draft-mtp` modes. `--model-draft` and `--spec-draft-model` are aliases for the normal separate draft model path unless `--spec-type draft-mtp` selects MTP.
+- A failed target or draft restore is transactional: no hit is counted, no usage or recency refresh happens, and the slot returns to its pre-restore state, including the empty-preimage rollback case.
+- Unsupported empty-side clear is checked before applying cached target bytes.
+- Metrics expose Stage 5 descriptor validation, pairing violation, fallback restore, hot descriptor, and evicted descriptor signals.
 
 Do not treat cold storage, metadata-only branch nodes, shared branch graphs, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
 
@@ -102,6 +115,7 @@ This document is split into smaller part files. Read the parts in order when you
 ## Review reports
 
 - [Stage 4 test-plan review: 2026-05-27](./cache-handling-test-plan/stage-4-test-plan-review-20260527.md)
+- [Stage 5 test-plan review: 2026-05-28](./cache-handling-test-plan/stage-5-test-plan-review-20260528.md)
 
 ## Test scripts
 

@@ -1,0 +1,21 @@
+Name: qwen3-normal-separate-draft-control-rerun
+PreExistingHealthOnPort: False
+Command: & "D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe" 
+--model D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf --host 127.0.0.1 --port 54066 --ctx-size 512 --parallel 1 --cache-ram 100 --temp 0 --seed 42 --metrics --log-verbosity 5 --cache-mode hybrid --model-draft D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf
+Started: 2026-05-28T16:56:51.7233800+03:00
+ReachedHealth: True
+Health: {"status":"ok"}
+ExitCodeAfterStop: -1
+HybridMetricSample:
+llamacpp_cache_entries{mode="hybrid"} 0
+llamacpp_cache_bytes{mode="hybrid"} 0
+llamacpp_cache_tokens{mode="hybrid"} 0
+llamacpp_cache_hits_total{mode="hybrid"} 0
+llamacpp_cache_misses_total{mode="hybrid"} 0
+llamacpp_cache_evictions_total{mode="hybrid"} 0
+llamacpp_cache_payload_evictions_total{mode="hybrid"} 0
+llamacpp_cache_protected_root_decisions_total{mode="hybrid"} 0
+llamacpp_cache_restore_failures_total{mode="hybrid"} 0
+llamacpp_cache_descriptor_validation_failures_total{mode="hybrid"} 0
+llamacpp_cache_pairing_violations_total{mode="hybrid"} 0
+llamacpp_cache_fallback_restores_total{mode="hybrid"} 0

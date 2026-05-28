@@ -54,6 +54,11 @@ def assert_cache_metrics_shape(body, expected_type):
     assert f'llamacpp_cache_tokens{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_payload_evictions_total{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_protected_root_decisions_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_descriptor_validation_failures_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_pairing_violations_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_fallback_restores_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_hot_payload_descriptors{{mode="{expected_type}"}}' in body
+    assert f'llamacpp_cache_evicted_payload_descriptors{{mode="{expected_type}"}}' in body
 
 
 def server_binary_path():
@@ -105,7 +110,7 @@ def test_cache_metrics_default_legacy():
 
 
 @pytest.mark.xfail(
-    reason="Hybrid exact-blob restore is implemented below the controller, but server-slot reuse does not expose a cache hit yet.",
+    reason="Explicit id_slot requests do not enter the hybrid restore lookup path.",
 )
 def test_hybrid_cache_metrics_and_repeated_restore():
     global server
@@ -168,3 +173,27 @@ def test_hybrid_cache_metrics_and_repeated_restore():
     after_second_restore = server.make_request("GET", "/metrics")
     assert after_second_restore.status_code == 200
     assert 'llamacpp_cache_entries{mode="hybrid"} 0' not in after_second_restore.body
+
+
+def test_hybrid_cache_restore_without_request_cache_prompt_reports_cache_n():
+    global server
+    server.cache_mode = "hybrid"
+    server.server_metrics = True
+    server.n_slots = 1
+    server.start()
+
+    first = server.make_request("POST", "/completion", data={
+        "prompt": LONG_PROMPT,
+    })
+    assert first.status_code == 200
+
+    restored = server.make_request("POST", "/completion", data={
+        "prompt": LONG_PROMPT,
+    })
+    assert restored.status_code == 200
+    assert restored.body["timings"]["cache_n"] > 0
+    assert restored.body["timings"]["prompt_n"] < restored.body["tokens_evaluated"]
+
+    metrics = server.make_request("GET", "/metrics")
+    assert metrics.status_code == 200
+    assert 'llamacpp_cache_hits_total{mode="hybrid"} 0' not in metrics.body

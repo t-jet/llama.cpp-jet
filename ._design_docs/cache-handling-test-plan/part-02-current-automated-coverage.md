@@ -15,13 +15,16 @@ Do not use this document to track:
 
 Those tests are useful, but they are not integration coverage.
 
+For Stage 5, focused controller or fault-injection tests may be cited as supplemental evidence for internal failure preconditions that public HTTP cannot create. Report them as focused evidence, not as model-backed integration coverage.
+
 ## Integration coverage needed
 
 Model-backed integration tests must cover behavior that depends on real `llama_context` state and the server scheduler:
 
 - target-only save/load round trip
 - repeated hybrid restore from the same cached entry
-- target/draft paired save/load when a draft model is configured
+- target/draft paired save/load when a normal separate draft model is configured
+- draft context mode namespace isolation for no draft, normal separate draft model, target-derived `draft-mtp`, and separate-model `draft-mtp`
 - restore failure after target or draft restore begins
 - idle-slot save/load through the scheduler path
 - metrics changing after real cache save, hit, miss, eviction, and restore failure
@@ -30,7 +33,18 @@ Model-backed integration tests must cover behavior that depends on real `llama_c
 - no recency refresh after failed restore
 - protected-root priority, protected fallback eviction, and protected admission rejection
 - Stage 4 metrics for payload eviction and protected-root decisions
+- descriptor-owned exact blob payload save/load shape
+- descriptor validation for version, kind, size, checksum, store reference, owner, residency, and target/draft pair state
+- pair-state/runtime mismatch rejection
+- paired target/draft eviction and byte accounting
+- transactional restore failure behavior: no hit, no usage or recency refresh, fallback counted, and pre-restore state restored
+- exact empty-preimage rollback and unsupported clear preflight
+- Stage 5 metrics for descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors
 - stable public HTTP surface: `/health`, `/metrics`, and missing `/cache/stats`
+
+Some Stage 5 rows need focused controller evidence or another fault-injection harness. Public HTTP can prove normal model-backed save, hit, metrics shape, budget pressure, and legacy compatibility, but it cannot directly corrupt a descriptor, change a hot-store reference, force a draft apply failure after target apply, or make the memory clear primitive unsupported.
+
+The current public runner still treats draft-model rows as placeholders unless a session adds a draft-capable command path. Public HTTP evidence can pass a draft-mode row only when the server actually starts in that runtime mode and the repeated request proves a restore with `timings.cache_n > 0`. If code inspection shows that the compatibility key does not include a runtime discriminator for MTP versus non-MTP draft contexts, report the cross-mode isolation rows as `BLOCKED` and hand the gap to Developer.
 
 ## Coverage reporting
 

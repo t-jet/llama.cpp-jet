@@ -1,0 +1,123 @@
+{%- set template_markup = namespace(features=[]) -%}
+{%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+    {%- set template_markup.features = template_markup.features + ['cache_boundary=1'] -%}
+{%- endif -%}
+{%- macro cache_mark(kind, label='') -%}
+    {%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+        {{- '<|cache_boundary:' ~ kind ~ (':' ~ label if label else '') ~ '|>' -}}
+    {%- endif -%}
+{%- endmacro -%}
+{%- if template_markup.features|length > 0 -%}
+    {{- '<|template_markup:v1:' ~ template_markup.features|join(',') ~ '|>' -}}
+{%- endif -%}
+{%- if tools %}
+    {{- cache_mark('system_start', 'tools') }}
+    {{- cache_mark('message_start', 'system') }}
+    {{- '<|im_start|>system\n' }}
+    {%- if messages[0].role == 'system' %}
+        {{- messages[0].content + '\n\n' }}
+    {%- endif %}
+    {{- "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}
+    {%- for tool in tools %}
+        {{- "\n" }}
+        {{- tool | tojson }}
+    {%- endfor %}
+    {{- "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n" }}
+    {{- cache_mark('message_end', 'system') }}
+    {{- cache_mark('system_end', 'tools') }}
+{%- else %}
+    {%- if messages[0].role == 'system' %}
+        {{- cache_mark('system_start', 'system') }}
+        {{- cache_mark('message_start', 'system') }}
+        {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+        {{- cache_mark('message_end', 'system') }}
+        {{- cache_mark('system_end', 'system') }}
+    {%- endif %}
+{%- endif %}
+{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
+{%- for index in range(ns.last_query_index, -1, -1) %}
+    {%- set message = messages[index] %}
+    {%- if ns.multi_step_tool and message.role == "user" and not('<tool_response>' in message.content and '</tool_response>' in message.content) %}
+        {%- set ns.multi_step_tool = false %}
+        {%- set ns.last_query_index = index %}
+    {%- endif %}
+{%- endfor %}
+{%- for message in messages %}
+    {%- if (message.role == "user") or (message.role == "system" and not loop.first) %}
+        {%- if message.role == 'system' %}
+            {{- cache_mark('system_start', message.role) }}
+        {%- endif %}
+        {{- cache_mark('message_start', message.role) }}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+        {{- cache_mark('message_end', message.role) }}
+        {%- if message.role == 'system' %}
+            {{- cache_mark('system_end', message.role) }}
+        {%- endif %}
+    {%- elif message.role == "assistant" %}
+        {%- set content = message.content %}
+        {%- set reasoning_content = '' %}
+        {%- if message.reasoning_content is defined and message.reasoning_content is not none %}
+            {%- set reasoning_content = message.reasoning_content %}
+        {%- else %}
+            {%- if '</think>' in message.content %}
+                {%- set content = message.content.split('</think>')[-1].lstrip('\n') %}
+                {%- set reasoning_content = message.content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
+            {%- endif %}
+        {%- endif %}
+        {{- cache_mark('message_start', message.role) }}
+        {%- if loop.index0 > ns.last_query_index %}
+            {%- if loop.last or (not loop.last and reasoning_content) %}
+                {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content.strip('\n') + '\n</think>\n\n' + content.lstrip('\n') }}
+            {%- else %}
+                {{- '<|im_start|>' + message.role + '\n' + content }}
+            {%- endif %}
+        {%- else %}
+            {{- '<|im_start|>' + message.role + '\n' + content }}
+        {%- endif %}
+        {%- if message.tool_calls %}
+            {%- for tool_call in message.tool_calls %}
+                {%- if tool_call.function %}
+                    {%- set tool_call = tool_call.function %}
+                {%- endif %}
+                {{- cache_mark('tool_call_start', tool_call.name) }}
+                {%- if (loop.first and content) or (not loop.first) %}
+                    {{- '\n' }}
+                {%- endif %}
+                {{- '<tool_call>\n{"name": "' }}
+                {{- tool_call.name }}
+                {{- '", "arguments": ' }}
+                {%- if tool_call.arguments is string %}
+                    {{- tool_call.arguments }}
+                {%- else %}
+                    {{- tool_call.arguments | tojson }}
+                {%- endif %}
+                {{- '}\n</tool_call>' }}
+                {{- cache_mark('tool_call_end', tool_call.name) }}
+            {%- endfor %}
+        {%- endif %}
+        {{- '<|im_end|>\n' }}
+        {{- cache_mark('message_end', message.role) }}
+    {%- elif message.role == "tool" %}
+        {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}
+            {{- cache_mark('message_start', 'tool_response') }}
+            {{- '<|im_start|>user' }}
+        {%- endif %}
+        {{- cache_mark('tool_response_start', message.name if message.name is defined else 'tool') }}
+        {{- '\n<tool_response>\n' }}
+        {{- message.content }}
+        {{- '\n</tool_response>' }}
+        {{- cache_mark('tool_response_end', message.name if message.name is defined else 'tool') }}
+        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
+            {{- '<|im_end|>\n' }}
+            {{- cache_mark('message_end', 'tool_response') }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- cache_mark('generation_prompt_start', 'assistant') }}
+    {{- '<|im_start|>assistant\n' }}
+    {%- if enable_thinking is defined and enable_thinking is false %}
+        {{- '<think>\n\n</think>\n\n' }}
+    {%- endif %}
+    {{- cache_mark('generation_prompt_end', 'assistant') }}
+{%- endif %}

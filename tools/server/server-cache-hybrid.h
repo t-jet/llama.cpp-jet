@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <cstdint>
 
 // Forward declarations
 struct server_slot;
@@ -22,7 +23,8 @@ struct cache_compatibility_key {
     std::string model_params_hash;            // Hash of key model hyperparameters
     
     // Draft model (for speculative decoding)
-    std::string draft_model_hash;             // Hash of draft model params or "none"
+    std::string draft_context_mode;           // none, separate draft model, target MTP, or separate-model MTP
+    std::string draft_model_hash;             // Hash of draft model identity or "none"
     
     // Tokenizer and template
     std::string tokenizer_id;                 // Tokenizer identifier from model
@@ -51,19 +53,81 @@ struct cache_compatibility_key {
     std::string compute() const;
 };
 
+enum class payload_kind {
+    exact_blob,
+    checkpoint,
+};
+
+enum class payload_pair_state {
+    target_only,
+    target_and_draft,
+};
+
+enum class payload_residency_state {
+    hot,
+    evicted,
+    cold,
+};
+
+enum class payload_debug_fault {
+    unsupported_version,
+    unsupported_kind,
+    zero_target_size,
+    target_size_mismatch,
+    missing_target_bytes,
+    bad_store_ref,
+    missing_hot_record,
+    owner_mismatch,
+    cold_residency,
+    unexpected_draft_for_target_only,
+    missing_draft_for_pair,
+    draft_size_mismatch,
+    draft_checksum_mismatch,
+};
+
+struct payload_store_ref {
+    uint64_t id = 0;
+};
+
+struct payload_descriptor {
+    uint64_t payload_id = 0;
+    payload_kind kind = payload_kind::exact_blob;
+    payload_pair_state pair_state = payload_pair_state::target_only;
+    uint32_t format_version = 1;
+    size_t target_size_bytes = 0;
+    size_t draft_size_bytes = 0;
+    size_t resident_payload_bytes = 0;
+    uint64_t target_checksum = 0;
+    uint64_t draft_checksum = 0;
+    payload_store_ref store_ref;
+    payload_residency_state residency = payload_residency_state::hot;
+    uint64_t owner_entry_id = 0;
+    uint64_t created_sequence = 0;
+    uint64_t last_validated_sequence = 0;
+};
+
+struct hot_payload_record {
+    uint64_t payload_id = 0;
+    std::vector<uint8_t> target;
+    std::vector<uint8_t> draft;
+};
+
 // Phase 1 hybrid cache entry with LRU tracking
 struct hybrid_cache_entry {
     server_tokens tokens;                          // Token sequence for this cache entry
-    server_prompt_data data;                       // Serialized state (target + draft)
     std::list<common_prompt_checkpoint> checkpoints; // Checkpoints for this entry
     prepared_prompt_metadata metadata;             // Prompt boundary metadata for this entry
     std::string namespace_id;                      // Namespace (model + config identifier)
+    uint64_t payload_id = 0;                       // Descriptor-owned exact-blob payload
 
     uint64_t entry_id = 0;                         // Stable identifier for policy plans
     uint64_t insertion_sequence = 0;               // Stable tie-breaker for equal recency
     uint64_t use_sequence = 0;                     // Deterministic LRU recency key
     size_t use_count = 0;                          // Number of times used
     bool protected_root = false;                   // Protected from eviction
+    size_t resident_payload_bytes_cached = 0;      // Descriptor byte fields cached for policy sorting
+    bool has_target_payload_cached = false;
+    bool has_draft_payload_cached = false;
 
     hybrid_cache_entry() = default;
 
@@ -71,8 +135,7 @@ struct hybrid_cache_entry {
     size_t size() const {
         size_t sz = 0;
         sz += tokens.size() * sizeof(llama_token);  // token storage
-        sz += data.main.size();                     // target state blob
-        sz += data.drft.size();                     // draft state blob
+        sz += resident_payload_bytes_cached;         // descriptor-owned exact blob bytes
         for (const auto & cp : checkpoints) {
             sz += cp.data_tgt.size();
             sz += cp.data_dft.size();
@@ -87,15 +150,15 @@ struct hybrid_cache_entry {
     }
 
     size_t resident_payload_bytes() const {
-        return data.main.size() + data.drft.size();
+        return resident_payload_bytes_cached;
     }
 
     bool has_target_payload() const {
-        return !data.main.empty();
+        return has_target_payload_cached;
     }
 
     bool has_draft_payload() const {
-        return !data.drft.empty();
+        return has_draft_payload_cached;
     }
 
     // Mark this entry as used (update LRU metadata)
@@ -155,6 +218,15 @@ public:
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
+    cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft) const;
+    bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
+    bool debug_corrupt_first_payload_for_tests();
+    bool debug_evict_first_payload_for_tests();
+    bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
+    bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
+    bool debug_empty_preimage_draft_failure_for_tests();
+    bool debug_unsupported_empty_clear_for_tests();
+    bool debug_rollback_failure_for_tests();
 #endif
 
 private:
@@ -171,10 +243,21 @@ private:
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
+    cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft) const;
+    bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
+    bool debug_corrupt_first_payload_for_tests();
+    bool debug_evict_first_payload_for_tests();
+    bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
+    bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
+    bool debug_empty_preimage_draft_failure_for_tests();
+    bool debug_unsupported_empty_clear_for_tests();
+    bool debug_rollback_failure_for_tests();
 #endif
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
     std::list<hybrid_cache_entry> entries;
+    std::unordered_map<uint64_t, payload_descriptor> payload_descriptors;
+    std::unordered_map<uint64_t, hot_payload_record> hot_payloads;
 
     // LRU index: sorted by deterministic use sequence for stable tests.
     using lru_key_t = std::pair<uint64_t, uint64_t>;
@@ -209,6 +292,7 @@ private:
     server_cache_policy_lru eviction_policy;
     uint64_t next_entry_id = 1;
     uint64_t next_sequence = 1;
+    uint64_t next_payload_id = 1;
 
     // Statistics
     size_t n_hits = 0;
@@ -219,6 +303,13 @@ private:
     size_t n_protected_root_evictions = 0;
     size_t n_protected_root_admission_rejections = 0;
     size_t n_restore_failures = 0;
+    size_t n_descriptor_validation_failures = 0;
+    size_t n_pairing_violations = 0;
+    size_t n_fallback_restores = 0;
+    size_t n_restore_target_apply_failures = 0;
+    size_t n_restore_draft_apply_failures = 0;
+    size_t n_restore_commit_failures = 0;
+    size_t n_restore_rollback_failures = 0;
 
     // Find best matching entry for given tokens and metadata
     // Returns iterator to best match, or entries.end() if no suitable match
@@ -235,6 +326,30 @@ private:
     bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
     void evict_until_within_budget();
     void refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root);
+    void remove_payload(uint64_t payload_id);
+    void mark_payload_evicted(hybrid_cache_entry & entry);
+    bool attach_payload(
+        hybrid_cache_entry & entry,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr);
+    const hot_payload_record * resolve_hot_payload(const hybrid_cache_entry & entry, std::string * failure_reason) const;
+    bool validate_payload_for_restore(
+        const hybrid_cache_entry & entry,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr,
+        const hot_payload_record ** record_out = nullptr);
+    bool validate_descriptor_against_record(
+        const hybrid_cache_entry & entry,
+        const payload_descriptor & descriptor,
+        const hot_payload_record & record,
+        bool runtime_has_draft,
+        bool require_hot,
+        std::string * failure_reason = nullptr) const;
+    void record_payload_validation_failure(const std::string & reason);
+    uint64_t payload_checksum(const std::vector<uint8_t> & bytes) const;
+    bool runtime_pair_matches(payload_pair_state pair_state, bool runtime_has_draft, std::string * failure_reason) const;
 
     // Check if entry should be protected from eviction
     bool should_protect(const hybrid_cache_entry & entry) const;
@@ -257,6 +372,7 @@ private:
     // Compute namespace ID from current context and request compatibility state.
     std::string compute_namespace_id() const;
     std::string compute_namespace_id(const prepared_prompt_metadata & metadata) const;
+    cache_compatibility_key build_compatibility_key(bool runtime_has_draft) const;
 
     // Phase 2: Index maintenance helpers
     void add_to_lru_index(std::list<hybrid_cache_entry>::iterator it);

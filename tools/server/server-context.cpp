@@ -90,6 +90,7 @@ struct server_slot {
 
     int32_t n_prompt_tokens_cache     = 0;
     int32_t n_prompt_tokens_processed = 0;
+    bool    hybrid_cache_restored     = false;
 
     size_t last_nl_pos = 0;
 
@@ -305,6 +306,7 @@ struct server_slot {
 
         prompt.tokens.clear();
         prompt_metadata.clear();
+        hybrid_cache_restored = false;
     }
 
     std::vector<common_adapter_lora_info> lora;
@@ -337,6 +339,7 @@ struct server_slot {
         SLT_DBG(*this, "%s", "\n");
 
         n_prompt_tokens_cache = 0;
+        hybrid_cache_restored = false;
 
         last_nl_pos    = 0;
         generated_text = "";
@@ -1019,6 +1022,10 @@ private:
             //       the extra memory for small models is likely negligible?
             cparams.n_rs_seq = 0;
             ctx_dft.reset(llama_init_from_model(model_dft.get(), cparams));
+            if (ctx_dft == nullptr) {
+                SRV_ERR("failed to create draft context for model '%s'\n", params_dft.model.path.c_str());
+                return false;
+            }
 
             ctx_dft_seq_rm_type = common_context_can_seq_rm(ctx_dft.get());
 
@@ -2932,7 +2939,7 @@ private:
                                 continue;
                             }
 
-                            if (slot.task->params.cache_prompt) {
+                            if (slot.task->params.cache_prompt || slot.hybrid_cache_restored) {
                                 // reuse any previously computed tokens that are common with the new prompt
                                 n_past = slot.prompt.tokens.get_common_prefix(input_tokens);
 
@@ -3016,7 +3023,7 @@ private:
                             // the largest pos_min required for a checkpoint to be useful
                             const auto pos_min_thold = std::max(0, pos_next - n_swa - 1);
 
-                            if (n_past > 0 && n_past <= slot.prompt.n_tokens()) {
+                            if (!slot.hybrid_cache_restored && n_past > 0 && n_past <= slot.prompt.n_tokens()) {
                                 const auto pos_min = llama_memory_seq_pos_min(llama_get_memory(ctx_tgt), slot.id);
                                 if (pos_min == -1) {
                                     SLT_ERR(slot, "n_past = %d, slot.prompt.tokens.size() = %d, seq_id = %d, pos_min = %d\n", n_past, (int) slot.prompt.tokens.size(), slot.id, pos_min);
@@ -4399,6 +4406,11 @@ void server_routes::init_routes() {
             write_cache_metric("counter", "llamacpp_cache_payload_evictions_total", "Hot payload evictions by mode.", json_value(cache_stats, "n_payload_evictions", 0));
             write_cache_metric("counter", "llamacpp_cache_protected_root_decisions_total", "Protected-root cache policy decisions by mode.", json_value(cache_stats, "n_protected_root_decisions", 0));
             write_cache_metric("counter", "llamacpp_cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_descriptor_validation_failures_total", "Payload descriptor validation failures by mode.", json_value(cache_stats, "n_descriptor_validation_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_pairing_violations_total", "Payload target and draft pairing violations by mode.", json_value(cache_stats, "n_pairing_violations", 0));
+            write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
@@ -5261,8 +5273,16 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
             state_size_tgt / (1024.0 * 1024.0),
             state_size_dft / (1024.0 * 1024.0));
 
+    const bool runtime_has_draft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+
     if (ctx_tgt && state_size_tgt == 0) {
         SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
+        return false;
+    }
+
+    if (runtime_has_draft && state_size_dft == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
+        n_pairing_violations++;
         return false;
     }
 
@@ -5296,15 +5316,18 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
         return true;
     }
 
+    std::vector<uint8_t> target_payload;
+    std::vector<uint8_t> draft_payload;
+
     if (ctx_tgt && state_size_tgt > 0) {
         try {
-            entry.data.main.resize(state_size_tgt);
+            target_payload.resize(state_size_tgt);
         } catch (const std::bad_alloc & e) {
             SRV_ERR(" - hybrid cache: failed to allocate target state buffer (%zu bytes): %s\n", state_size_tgt, e.what());
             return false;
         }
 
-        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, entry.data.main.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_payload.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
         if (n_tgt != state_size_tgt) {
             SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
             return false;
@@ -5313,17 +5336,23 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
 
     if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
         try {
-            entry.data.drft.resize(state_size_dft);
+            draft_payload.resize(state_size_dft);
         } catch (const std::bad_alloc & e) {
             SRV_ERR(" - hybrid cache: failed to allocate draft state buffer (%zu bytes): %s\n", state_size_dft, e.what());
             return false;
         }
 
-        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, entry.data.drft.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_payload.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
         if (n_dft != state_size_dft) {
             SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
             return false;
         }
+    }
+
+    std::string descriptor_failure;
+    if (!attach_payload(entry, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+        SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
+        return false;
     }
 
     entries.push_back(std::move(entry));
@@ -5383,57 +5412,120 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
             match_len, it_best->namespace_id.c_str(), it_best->use_count);
 
-    const bool need_tgt = ctx_tgt != nullptr;
     const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-
-    // Validate payloads exist
-    if (need_tgt && it_best->data.main.empty()) {
-        SRV_ERR("%s", " - hybrid cache: try_restore - rejecting entry without target payload\n");
-        n_restore_failures++;
+    const bool runtime_has_draft = need_dft;
+    const hot_payload_record * payload = nullptr;
+    std::string restore_failure;
+    if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: try_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
         return false;
     }
 
-    if (need_dft && it_best->data.drft.empty()) {
-        SRV_ERR("%s", " - hybrid cache: try_restore - rejecting paired restore without draft payload\n");
+    server_prompt prompt_before = slot.prompt.clone();
+    const int cache_before = slot.n_prompt_tokens_cache;
+    const int processed_before = slot.n_prompt_tokens_processed;
+    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
+    std::vector<uint8_t> target_before;
+    std::vector<uint8_t> draft_before;
+    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    if (state_size_tgt_before > 0) {
+        target_before.resize(state_size_tgt_before);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt_before) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot target state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+    if (state_size_dft_before > 0) {
+        draft_before.resize(state_size_dft_before);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft_before) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot draft state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+
+    const auto clear_live_state = [&](llama_context * ctx) {
+        llama_memory_t mem = llama_get_memory(ctx);
+        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
+    };
+    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore target state\n");
         n_restore_failures++;
+        n_fallback_restores++;
         return false;
     }
+    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore draft state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    const auto rollback_restore = [&]() {
+        bool ok = true;
+        if (ctx_tgt) {
+            if (!target_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_tgt) && ok;
+            }
+        }
+        if (ctx_dft && slot.ctx_dft) {
+            if (!draft_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_dft) && ok;
+            }
+        }
+        slot.prompt = prompt_before.clone();
+        slot.n_prompt_tokens_cache = cache_before;
+        slot.n_prompt_tokens_processed = processed_before;
+        slot.prompt_metadata = metadata_before;
+        if (!ok) {
+            n_restore_rollback_failures++;
+        }
+    };
 
     // Restore target state
-    if (ctx_tgt && !it_best->data.main.empty()) {
+    if (ctx_tgt && !payload->target.empty()) {
         const size_t n_tgt = llama_state_seq_set_data_ext(
             ctx_tgt,
-            it_best->data.main.data(),
-            it_best->data.main.size(),
+            payload->target.data(),
+            payload->target.size(),
             slot.id,
             LLAMA_STATE_SEQ_FLAGS_NONE);
 
-        if (n_tgt != it_best->data.main.size()) {
+        if (n_tgt != payload->target.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore target state\n");
-            slot.prompt_clear(false);
-            slot.n_prompt_tokens_cache = 0;
-            slot.n_prompt_tokens_processed = 0;
+            rollback_restore();
             n_restore_failures++;
+            n_restore_target_apply_failures++;
+            n_fallback_restores++;
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored target state (%zu bytes)\n", n_tgt);
     }
 
     // Restore draft state
-    if (ctx_dft && slot.ctx_dft && !it_best->data.drft.empty()) {
+    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
         const size_t n_dft = llama_state_seq_set_data_ext(
             ctx_dft,
-            it_best->data.drft.data(),
-            it_best->data.drft.size(),
+            payload->draft.data(),
+            payload->draft.size(),
             slot.id,
             LLAMA_STATE_SEQ_FLAGS_NONE);
 
-        if (n_dft != it_best->data.drft.size()) {
+        if (n_dft != payload->draft.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore draft state\n");
-            slot.prompt_clear(false);
-            slot.n_prompt_tokens_cache = 0;
-            slot.n_prompt_tokens_processed = 0;
+            rollback_restore();
             n_restore_failures++;
+            n_restore_draft_apply_failures++;
+            n_fallback_restores++;
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
@@ -5452,6 +5544,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     slot.prompt.checkpoints = it_best->checkpoints;
     slot.n_prompt_tokens_cache = match_len;
     slot.n_prompt_tokens_processed = match_len;
+    slot.hybrid_cache_restored = true;
     slot.prompt_metadata = it_best->metadata;
     
     n_hits++;
@@ -5482,55 +5575,118 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
         return false;
     }
 
-    const bool need_tgt = ctx_tgt != nullptr;
     const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-    const auto reset_after_restore_failure = [&slot]() {
-        slot.prompt_clear(false);
-        slot.n_prompt_tokens_cache = 0;
-        slot.n_prompt_tokens_processed = 0;
+    const bool runtime_has_draft = need_dft;
+    const hot_payload_record * payload = nullptr;
+    std::string restore_failure;
+    if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
+        return false;
+    }
+
+    server_prompt prompt_before = slot.prompt.clone();
+    const int cache_before = slot.n_prompt_tokens_cache;
+    const int processed_before = slot.n_prompt_tokens_processed;
+    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
+    std::vector<uint8_t> target_before;
+    std::vector<uint8_t> draft_before;
+    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    if (state_size_tgt_before > 0) {
+        target_before.resize(state_size_tgt_before);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot target state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+    if (state_size_dft_before > 0) {
+        draft_before.resize(state_size_dft_before);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot draft state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+
+    const auto clear_live_state = [&](llama_context * ctx) {
+        llama_memory_t mem = llama_get_memory(ctx);
+        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
+    };
+    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore target state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore draft state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    const auto rollback_restore = [&]() {
+        bool ok = true;
+        if (ctx_tgt) {
+            if (!target_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_tgt) && ok;
+            }
+        }
+        if (ctx_dft && slot.ctx_dft) {
+            if (!draft_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_dft) && ok;
+            }
+        }
+        slot.prompt = prompt_before.clone();
+        slot.n_prompt_tokens_cache = cache_before;
+        slot.n_prompt_tokens_processed = processed_before;
+        slot.prompt_metadata = metadata_before;
+        if (!ok) {
+            n_restore_rollback_failures++;
+        }
     };
 
-    if (need_tgt && it_best->data.main.empty()) {
-        SRV_ERR("%s", " - hybrid cache: rejecting entry without target payload\n");
-        n_restore_failures++;
-        return false;
-    }
-
-    if (need_dft && it_best->data.drft.empty()) {
-        SRV_ERR("%s", " - hybrid cache: rejecting paired restore without draft payload\n");
-        n_restore_failures++;
-        return false;
-    }
-
-    if (ctx_tgt && !it_best->data.main.empty()) {
+    if (ctx_tgt && !payload->target.empty()) {
         const size_t n_tgt = llama_state_seq_set_data_ext(
             ctx_tgt,
-            it_best->data.main.data(),
-            it_best->data.main.size(),
+            payload->target.data(),
+            payload->target.size(),
             slot.id,
             LLAMA_STATE_SEQ_FLAGS_NONE);
 
-        if (n_tgt != it_best->data.main.size()) {
+        if (n_tgt != payload->target.size()) {
             SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
-            reset_after_restore_failure();
+            rollback_restore();
             n_restore_failures++;
+            n_restore_target_apply_failures++;
+            n_fallback_restores++;
             return false;
         }
         SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
     }
 
-    if (ctx_dft && slot.ctx_dft && !it_best->data.drft.empty()) {
+    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
         const size_t n_dft = llama_state_seq_set_data_ext(
             ctx_dft,
-            it_best->data.drft.data(),
-            it_best->data.drft.size(),
+            payload->draft.data(),
+            payload->draft.size(),
             slot.id,
             LLAMA_STATE_SEQ_FLAGS_NONE);
 
-        if (n_dft != it_best->data.drft.size()) {
+        if (n_dft != payload->draft.size()) {
             SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
-            reset_after_restore_failure();
+            rollback_restore();
             n_restore_failures++;
+            n_restore_draft_apply_failures++;
+            n_fallback_restores++;
             return false;
         }
         SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);

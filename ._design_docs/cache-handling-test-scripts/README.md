@@ -1,14 +1,16 @@
 # Cache handling test scripts
 
-Location: `._design_docs/cache-handling-test-scripts/`  
-Last updated: 2026-05-27  
+Location: `._design_docs/cache-handling-test-scripts/`
+Last updated: 2026-05-28
 Status: Active reusable integration runner
 
 ## Scope
 
 These PowerShell scripts support the integration scenarios in [cache-handling-test-plan.md](../cache-handling-test-plan.md). They cover the reusable server harness, report creation, metrics parsing, and scripted cache checks for the current cache implementation.
 
-The Stage 4 plan now includes resident payload byte budget enforcement, deterministic LRU ordering, successful and failed restore recency behavior, equivalent-entry refresh budget enforcement, protected-root priority and fallback eviction, protected admission rejection, metrics, legacy compatibility, and reusable evidence capture.
+The Stage 4 plan includes resident payload byte budget enforcement, deterministic LRU ordering, successful and failed restore recency behavior, equivalent-entry refresh budget enforcement, protected-root priority and fallback eviction, protected admission rejection, metrics, legacy compatibility, and reusable evidence capture.
+
+The Stage 5 plan adds descriptor separation, hot payload ownership, descriptor validation, target/draft pair-state checks, draft runtime mode isolation, paired eviction and byte accounting, transactional rollback, empty-preimage rollback, unsupported clear preflight, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage. Most descriptor-corruption and restore-failure branches need focused controller or fault-injection evidence; public HTTP alone cannot create those preconditions.
 
 ## Scripts
 
@@ -46,6 +48,11 @@ Main helpers:
 - `llamacpp_cache_payload_evictions_total`
 - `llamacpp_cache_protected_root_decisions_total`
 - `llamacpp_cache_restore_failures_total`
+- `llamacpp_cache_descriptor_validation_failures_total`
+- `llamacpp_cache_pairing_violations_total`
+- `llamacpp_cache_fallback_restores_total`
+- `llamacpp_cache_hot_payload_descriptors`
+- `llamacpp_cache_evicted_payload_descriptors`
 
 ### `execute_tests.ps1`
 
@@ -67,6 +74,8 @@ Implemented scripted categories include:
 - D-series draft-model placeholders where a draft model is not configured
 
 Stage 4 H30-H39 scenarios are part of the plan. The main runner does not implement the full H30-H39 matrix. Some budget, protected-root, equivalent-refresh, and failed-restore recency branches still need focused harness support, focused C++ controller evidence, or stats-capable evidence. Do not mark them `PASS` from scripts that only prove requests completed.
+
+Stage 5 H40-H58 scenarios are part of the plan. The main runner does not implement the full Stage 5 descriptor, draft runtime mode, and transactional restore matrix. Normal target-only HTTP save/restore, metrics shape, legacy compatibility, and public surface checks are script-friendly. Descriptor version or kind corruption, checksum or size mismatch, owner/store-ref mismatch, non-hot or cold residency, pair-state/runtime mismatch, cross-mode draft namespace isolation, target/draft apply failures, empty-preimage rollback, and unsupported clear preflight require focused controller tests, cross-run cache persistence, or another fault-injection harness.
 
 ### `run_stage4_h30_h37.ps1`
 
@@ -136,6 +145,33 @@ $env:LLAMA_CACHE_TEST_MODEL = "D:\models\test-model.gguf"
 & "._design_docs\cache-handling-test-scripts\execute_tests.ps1"
 ```
 
+Local Qwen3 draft-mode fixture paths currently present in this workspace:
+
+```powershell
+$TargetModel = "D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf"
+$DraftModel  = "D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf"
+```
+
+The main runner does not yet wire those paths into D-series automation. For manual model-backed probes, use Qwen3-8B as `--model` and Qwen3-0.6B as the separate draft model:
+
+```powershell
+& ".\build\bin\Release\llama-server.exe" `
+  --model $TargetModel `
+  --model-draft $DraftModel `
+  --cache-mode hybrid `
+  --ctx-size 512 `
+  --parallel 2 `
+  --cont-batching `
+  --kv-unified `
+  --cache-ram 100 `
+  --temp 0 `
+  --seed 42 `
+  --metrics `
+  --log-verbosity 5
+```
+
+Repeat the same normal separate draft coverage with `--spec-draft-model $DraftModel`; the alias spelling should not change the cache namespace. For MTP probes, add `--spec-type draft-mtp` only after the selected model or model pair is known to support that runtime. If an in-scope public MTP row cannot create an MTP draft context, report it as `BLOCKED` with the startup log.
+
 Run stress tests:
 
 ```powershell
@@ -154,6 +190,8 @@ Run stress tests:
 --seed 42              # fixed seed
 --ctx-size 512         # small test context
 --log-verbosity 5      # debug logging
+--model-draft FNAME    # alias of --spec-draft-model for separate draft model
+--spec-type draft-mtp  # MTP draft context when supported by the model/runtime
 ```
 
 `--cache-ram` uses integer MiB values. Do not write fractional values such as `0.5`; the argument parser accepts an integer.
@@ -180,6 +218,16 @@ For Stage 4 cases, also capture:
 - payload eviction metrics
 - protected-root decision metrics or stats-capable harness evidence
 - legacy mode compatibility evidence when applicable
+
+For Stage 5 cases, also capture:
+
+- descriptor validation and fallback metrics before and after the operation
+- pair-state and runtime shape used by the test
+- target and draft payload byte accounting when a draft model or focused harness is used
+- hot and evicted descriptor counts
+- whether evidence came from public HTTP, focused controller tests, or fault injection
+- proof that failed restore did not report a hit or refresh recency
+- empty-preimage rollback or unsupported clear preflight evidence when those rows are in scope
 
 ## Maintenance
 

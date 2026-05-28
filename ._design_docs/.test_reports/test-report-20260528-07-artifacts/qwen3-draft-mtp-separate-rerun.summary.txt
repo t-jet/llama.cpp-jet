@@ -1,0 +1,34 @@
+Name: qwen3-draft-mtp-separate-rerun
+Command: & "D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe" --model D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf --host 127.0.0.1 --port 54062 --ctx-size 512 --parallel 1 --cache-ram 100 --temp 0 --seed 42 --metrics --log-verbosity 5 --cache-mode hybrid --spec-type draft-mtp --model-draft D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf
+Started: 2026-05-28T16:55:03.5782437+03:00
+ReachedHealth: False
+Health: <none>
+TimedOut: False
+ExitCode: 1
+MatchedLogLines:
+StderrTail:
+0.00.188.230 D create_tensor: loading tensor blk.24.attn_q.weight
+0.00.188.237 D create_tensor: loading tensor blk.24.attn_k.weight
+0.00.188.244 D create_tensor: loading tensor blk.24.attn_v.weight
+0.00.188.259 D create_tensor: loading tensor blk.24.attn_output.weight
+0.00.188.266 D create_tensor: loading tensor blk.24.attn_k_norm.weight
+0.00.188.273 D create_tensor: loading tensor blk.24.attn_q_norm.weight
+0.00.188.280 D create_tensor: loading tensor blk.24.ffn_norm.weight
+0.00.188.287 D create_tensor: loading tensor blk.24.ffn_gate.weight
+0.00.188.294 D create_tensor: loading tensor blk.24.ffn_down.weight
+0.00.188.301 D create_tensor: loading tensor blk.24.ffn_up.weight
+0.00.188.308 D create_tensor: loading tensor blk.25.attn_norm.weight
+0.00.188.318 D create_tensor: loading tensor blk.25.attn_q.weight
+0.00.188.325 D create_tensor: loading tensor blk.25.attn_k.weight
+0.00.188.332 D create_tensor: loading tensor blk.25.attn_v.weight
+0.00.188.348 D create_tensor: loading tensor blk.25.attn_output.weight
+0.00.188.354 D create_tensor: loading tensor blk.25.attn_k_norm.weight
+0.00.188.361 D create_tensor: loading tensor blk.25.attn_q_norm.weight
+0.00.188.368 D create_tensor: loading tensor blk.25.ffn_norm.weight
+0.00.188.375 D create_tensor: loading tensor blk.25.ffn_gate.weight
+0.00.188.382 D create_tensor: loading tensor blk.25.ffn_down.weight
+0.00.188.389 D create_tensor: loading tensor blk.25.ffn_up.weight
+0.00.188.397 D create_tensor: loading tensor blk.26.attn_norm.weight
+0.00.188.407 D create_tensor: loading tensor blk.26.attn_q.weight
+0.00.188.415 D create_tensor: loading tensor blk.26.attn_k.weight
+0.00.188.422 D create_tensor: loading tensor blk.26.attn_v.weight

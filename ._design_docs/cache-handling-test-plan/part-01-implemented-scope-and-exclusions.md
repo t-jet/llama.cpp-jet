@@ -10,11 +10,13 @@ The test plan covers the implementation status described in the design documents
 - `cache-handling-phase1-verification.md`
 - `cache-handling-phase2-implementation.md`
 - `cache-handling-phase3-implementation.md` (Phase 3: Non-Destructive Exact Blob Cache - **COMPLETE**)
-- `cache-handling-phase4-implementation.md` (Stage 4: LRU eviction policy with protected roots - ready for QA)
+- `cache-handling-phase4-implementation.md` (Stage 4: LRU eviction policy with protected roots - closed)
+- `cache-handling-phase5-implementation.md` (Stage 5: descriptor separation and target/draft transactional restore - closed)
+- `cache-handling-architecture/part-06-stage-5-draft-context-modes-and-pairing.md` (Stage 5 draft context mode compatibility)
 - `cache-handling-phase-1-and-2-adjustments.md`
 - `cache-handling-phases-1-and-2-implementation-gaps.md`
 
-Stage 4 is the current QA gate. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics.
+Stage 5 is closed. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics. Stage 5 adds descriptor-owned payloads, hot payload records, pair-state validation, transactional target/draft restore behavior, and draft context mode compatibility. The Stage 5 rows remain useful for regression checks and for the residual external draft-model fixture follow-up.
 
 - Non-destructive exact blob cache with LRU eviction
 - Comprehensive namespace isolation (14/14 fields populated)
@@ -23,6 +25,11 @@ Stage 4 is the current QA gate. Phase 3 remains the base cache behavior; Stage 4
 - Multi-slot reuse capability
 - Resident payload byte budget enforcement through `--cache-ram`
 - Protected-root retention priority, fallback eviction, and protected admission rejection
+- Payload descriptor separation from cache entries
+- Descriptor and hot-store validation before admission and restore
+- Target-only and target-plus-draft pair enforcement
+- Compatibility isolation across no-draft, normal separate draft model, target-derived `draft-mtp`, and separate-model `draft-mtp` runtimes
+- Transactional restore rollback for target and draft apply failures
 
 ## Report cross-check
 
@@ -33,6 +40,7 @@ Stage 4 is the current QA gate. Phase 3 remains the base cache behavior; Stage 4
 | `cache-handling-phase2-implementation.md` | Mixed current and superseded evidence. Use its later status notes and current testing requirements over older `/cache/stats`, `/health.cache`, and production-readiness claims. |
 | `cache-handling-phase3-implementation.md` | Current base hybrid cache behavior. Use it for non-destructive hits, state serialization, namespace isolation, and multi-slot reuse. |
 | `cache-handling-phase4-implementation.md` | Current Stage 4 implementation record. Use Parts 6 and 7 for the review-fix evidence that equivalent-entry refresh enforces budget and protected eviction decisions are counted. |
+| `cache-handling-phase5-implementation.md` | Closed Stage 5 implementation record. Use Parts 6, 8, 9, 10, and 11 for descriptor validation, pair-state checks, Stage 5 metrics, accepted exact empty-side rollback behavior, focused QA evidence closure, and manager closure. |
 | `cache-handling-phase-1-and-2-adjustments.md` | Current upstream-scope correction. This is the source for stable `/health`, no `/cache/stats`, cache metrics in `/metrics`, hidden test helpers, degraded metadata, and minimal public CLI surface. |
 | `cache-handling-phases-1-and-2-implementation-gaps.md` | Current gap and corrective-action record. This is the source for open model-backed restore coverage and target/draft failure coverage. Its focused coverage notes belong to the separate unit-test plan. |
 
@@ -57,6 +65,12 @@ The current implemented cache surface is:
 | Boundary extraction | Chat requests get best-effort rendered-text metadata and mark it degraded (`boundaries_native=false`, `degraded_reason` set); `/completion` gets minimal degraded prompt metadata when no richer metadata exists. Degraded public HTTP metadata is not a trusted protected-root creation path. |
 | Observability | `/metrics` exports cache counters (`llamacpp_cache_hits_total`, `llamacpp_cache_misses_total`, `llamacpp_cache_evictions_total`, `llamacpp_cache_restore_failures_total`, `llamacpp_cache_payload_evictions_total`, `llamacpp_cache_protected_root_decisions_total`) when metrics are enabled. `/health` returns `{"status":"ok"}` only. `/cache/stats` intentionally returns 404. |
 | Failure handling | Target restore failure resets slot prompt state. Missing paired draft payloads and draft restore failures count as restore failures. Deserialization errors logged and increment `n_restore_failures`. |
+| Payload descriptors | Hybrid entries refer to descriptor-owned exact-blob payloads by `payload_id`. Descriptors track pair state, size, checksum, store reference, owner entry, and residency. |
+| Descriptor validation | Admission and restore validation reject unsupported descriptor version or kind, target/draft pair mismatch, checksum mismatch, size mismatch, missing or mismatched store records, owner mismatch, non-hot residency, missing target bytes, and invalid draft presence. |
+| Target/draft transactions | Target-only and target-plus-draft restore validate all descriptor and payload fields before live mutation. Failed validation, target apply, draft apply, commit, or rollback does not report a hit or refresh recency. |
+| Draft runtime compatibility | Pair state remains binary: no draft context requires `target_only`; any active draft context requires `target_and_draft`. The compatibility namespace must still distinguish no draft, normal separate draft model through `--model-draft` or `--spec-draft-model`, target-derived `--spec-type draft-mtp`, and separate-model `--spec-type draft-mtp`. |
+| Empty-preimage rollback | If a pre-restore target or draft side has no serialized bytes, rollback clears that sequence. Unsupported clear paths fail before target payload application. |
+| Stage 5 observability | `/metrics` exports descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors in addition to the Stage 4 counters. |
 
 ## Exclusions
 
@@ -73,18 +87,28 @@ Do not write acceptance tests for these features yet:
 - Separate hot, metadata, and cold budget flags.
 - Cache policy selection such as `--cache-eviction-policy`.
 - Namespace fairness or per-namespace quotas.
+- Stage 6 cold residency or cold-store restore. Stage 5 must reject cold descriptors rather than treating them as restorable.
 
 Tests may mention these as future work only when they verify that the current build does not expose the feature.
 
 ## Test model assumptions
 
-Integration tests need a real GGUF model, not a vocabulary-only fixture. The default local path should be:
+Integration tests need a real GGUF model, not a vocabulary-only fixture. The default target-only local path should be:
 
 ```text
 ._test_models/Qwen2.5-VL-3B-Instruct-GGUF/Qwen2.5-VL-3B-Instruct-Q6_K.gguf
 ```
 
 Allow `LLAMA_CACHE_TEST_MODEL` to override this path. Keep tests small: `-np 2`, deterministic sampling, and short `n_predict` values are enough to prove cache behavior.
+
+The local Qwen3 model-suite paths available for draft-mode planning are:
+
+```text
+._test_models/Qwen3-8B-GGUF/Qwen3-8B-Q6_K.gguf
+._test_models/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf
+```
+
+Use the Qwen3-8B file as the target and the Qwen3-0.6B file as the separate draft model for normal `--model-draft` or `--spec-draft-model` coverage. Treat `draft-mtp` rows as supported only after startup proves that the selected model or model pair can create an MTP draft context.
 
 ## Minimum build targets
 

@@ -1,0 +1,15 @@
+{
+  "name": "h53-target-derived-mtp-after-fix",
+  "ready": true,
+  "exitCode": -1,
+  "request1_cache_n": 0,
+  "request1_prompt_n": 12,
+  "request1_tokens_evaluated": 12,
+  "request2_cache_n": 0,
+  "request2_prompt_n": 12,
+  "request2_tokens_evaluated": 12,
+  "metrics_hits": "1",
+  "metrics_misses": "1",
+  "metrics_restore_failures": "0",
+  "metrics_hot_descriptors": "1"
+}

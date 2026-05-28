@@ -138,6 +138,12 @@ void test_hybrid_controller_interface() {
     assert(stats.contains("resident_payload_bytes"));
     assert(stats.contains("n_payload_evictions"));
     assert(stats.contains("n_protected_root_decisions"));
+    assert(stats.contains("n_descriptor_validation_failures"));
+    assert(stats.contains("n_pairing_violations"));
+    assert(stats.contains("n_fallback_restores"));
+    assert(stats.contains("n_hot_payload_descriptors"));
+    assert(stats.contains("n_target_only_payload_descriptors"));
+    assert(stats.contains("n_target_and_draft_payload_descriptors"));
     assert(stats.contains("namespaces"));
     
     printf("  PASSED\n");
@@ -707,6 +713,175 @@ void test_hybrid_failed_restore_does_not_refresh_recency() {
     printf("  PASSED\n");
 }
 
+// Test 25: Stage 5 descriptor creation and restore validation
+void test_hybrid_payload_descriptor_validation() {
+    printf("test-cache-controller: hybrid payload descriptor validation...\n");
+
+    common_params params = create_test_params();
+
+    hybrid_cache_controller target_only(params, 2, 1000, nullptr, nullptr);
+    target_only.debug_add_entry_for_tests(create_tokens({1, 2}), false, "p5", 128, 0);
+    assert(target_only.debug_validate_first_payload_for_tests(false));
+    json target_only_stats = target_only.get_stats();
+    assert(target_only_stats["n_hot_payload_descriptors"] == 1);
+    assert(target_only_stats["n_target_only_payload_descriptors"] == 1);
+    assert(target_only_stats["resident_payload_bytes"] == 128);
+
+    hybrid_cache_controller paired(params, 2, 1000, nullptr, nullptr);
+    paired.debug_add_entry_for_tests(create_tokens({3, 4}), false, "p5", 128, 64);
+    assert(paired.debug_validate_first_payload_for_tests(true));
+    json paired_stats = paired.get_stats();
+    assert(paired_stats["n_target_and_draft_payload_descriptors"] == 1);
+    assert(paired_stats["resident_payload_bytes"] == 192);
+
+    assert(!paired.debug_validate_first_payload_for_tests(false));
+    json mismatch_stats = paired.get_stats();
+    assert(mismatch_stats["n_descriptor_validation_failures"] == 1);
+    assert(mismatch_stats["n_pairing_violations"] == 1);
+    assert(mismatch_stats["n_fallback_restores"] == 1);
+
+    assert(paired.debug_corrupt_first_payload_for_tests());
+    assert(!paired.debug_validate_first_payload_for_tests(true));
+    json corrupt_stats = paired.get_stats();
+    assert(corrupt_stats["n_descriptor_validation_failures"] == 2);
+
+    printf("  PASSED\n");
+}
+
+void test_hybrid_payload_descriptor_fault_injection() {
+    printf("test-cache-controller: hybrid payload descriptor fault injection...\n");
+
+    common_params params = create_test_params();
+
+    const auto expect_descriptor_fault =
+        [&params](payload_debug_fault fault, bool runtime_has_draft, size_t target_bytes, size_t draft_bytes) {
+            hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+            ctrl.debug_add_entry_for_tests(create_tokens({21, 22}), false, "p5-fault", target_bytes, draft_bytes);
+            assert(ctrl.debug_inject_first_payload_fault_for_tests(fault));
+            assert(!ctrl.debug_validate_first_payload_for_tests(runtime_has_draft));
+            json stats = ctrl.get_stats();
+            assert(stats["n_descriptor_validation_failures"] == 1);
+            assert(stats["n_restore_failures"] == 1);
+            assert(stats["n_fallback_restores"] == 1);
+            assert(stats["n_hits"] == 0);
+        };
+
+    expect_descriptor_fault(payload_debug_fault::unsupported_version, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::unsupported_kind, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::zero_target_size, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::target_size_mismatch, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::missing_target_bytes, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::bad_store_ref, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::missing_hot_record, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::owner_mismatch, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::cold_residency, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::unexpected_draft_for_target_only, false, 128, 0);
+    expect_descriptor_fault(payload_debug_fault::missing_draft_for_pair, true, 128, 64);
+    expect_descriptor_fault(payload_debug_fault::draft_size_mismatch, true, 128, 64);
+    expect_descriptor_fault(payload_debug_fault::draft_checksum_mismatch, true, 128, 64);
+
+    hybrid_cache_controller target_only_runtime_with_draft(params, 2, 1000, nullptr, nullptr);
+    target_only_runtime_with_draft.debug_add_entry_for_tests(create_tokens({23, 24}), false, "p5-fault", 128, 0);
+    assert(!target_only_runtime_with_draft.debug_validate_first_payload_for_tests(true));
+    json pair_stats = target_only_runtime_with_draft.get_stats();
+    assert(pair_stats["n_descriptor_validation_failures"] == 1);
+    assert(pair_stats["n_pairing_violations"] == 1);
+    assert(pair_stats["n_fallback_restores"] == 1);
+    assert(pair_stats["n_hits"] == 0);
+
+    printf("  PASSED\n");
+}
+
+// Test 26: Stage 5 evicted descriptors are non-restorable
+void test_hybrid_evicted_payload_descriptor_rejected() {
+    printf("test-cache-controller: hybrid evicted payload descriptor rejected...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), false, "p5", 200, 100);
+
+    assert(ctrl.debug_evict_first_payload_for_tests());
+    json evicted_stats = ctrl.get_stats();
+    assert(evicted_stats["resident_payload_bytes"] == 0);
+    assert(evicted_stats["n_evicted_payload_descriptors"] == 1);
+
+    assert(!ctrl.debug_validate_first_payload_for_tests(true));
+    json rejected_stats = ctrl.get_stats();
+    assert(rejected_stats["n_descriptor_validation_failures"] == 1);
+    assert(rejected_stats["n_fallback_restores"] == 1);
+
+    printf("  PASSED\n");
+}
+
+// Test 27: Stage 5 transaction failures do not count as hits
+void test_hybrid_restore_transaction_failures() {
+    printf("test-cache-controller: hybrid restore transaction failures...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller target_fail(params, 2, 1000, nullptr, nullptr);
+    target_fail.debug_add_entry_for_tests(create_tokens({7, 8}), false, "p5", 32, 16);
+    assert(!target_fail.debug_transaction_for_tests(true, true, false, false));
+    json target_stats = target_fail.get_stats();
+    assert(target_stats["n_restore_failures"] == 1);
+    assert(target_stats["n_restore_target_apply_failures"] == 1);
+    assert(target_stats["n_fallback_restores"] == 1);
+    assert(target_stats["n_hits"] == 0);
+
+    hybrid_cache_controller draft_fail(params, 2, 1000, nullptr, nullptr);
+    draft_fail.debug_add_entry_for_tests(create_tokens({9, 10}), false, "p5", 32, 16);
+    assert(!draft_fail.debug_transaction_for_tests(true, false, true, false));
+    json draft_stats = draft_fail.get_stats();
+    assert(draft_stats["n_restore_failures"] == 1);
+    assert(draft_stats["n_restore_draft_apply_failures"] == 1);
+    assert(draft_stats["n_fallback_restores"] == 1);
+    assert(draft_stats["n_hits"] == 0);
+
+    hybrid_cache_controller empty_preimage_draft_fail(params, 2, 1000, nullptr, nullptr);
+    empty_preimage_draft_fail.debug_add_entry_for_tests(create_tokens({15, 16}), false, "p5", 32, 16);
+    assert(!empty_preimage_draft_fail.debug_empty_preimage_draft_failure_for_tests());
+    json empty_preimage_stats = empty_preimage_draft_fail.get_stats();
+    assert(empty_preimage_stats["n_restore_failures"] == 1);
+    assert(empty_preimage_stats["n_restore_draft_apply_failures"] == 1);
+    assert(empty_preimage_stats["n_restore_rollback_failures"] == 0);
+    assert(empty_preimage_stats["n_fallback_restores"] == 1);
+    assert(empty_preimage_stats["n_hits"] == 0);
+
+    hybrid_cache_controller commit_fail(params, 2, 1000, nullptr, nullptr);
+    commit_fail.debug_add_entry_for_tests(create_tokens({11, 12}), false, "p5", 32, 16);
+    assert(!commit_fail.debug_transaction_for_tests(true, false, false, true));
+    json commit_stats = commit_fail.get_stats();
+    assert(commit_stats["n_restore_failures"] == 1);
+    assert(commit_stats["n_restore_commit_failures"] == 1);
+    assert(commit_stats["n_fallback_restores"] == 1);
+    assert(commit_stats["n_hits"] == 0);
+
+    hybrid_cache_controller rollback_fail(params, 2, 1000, nullptr, nullptr);
+    rollback_fail.debug_add_entry_for_tests(create_tokens({17, 18}), false, "p5", 32, 16);
+    assert(!rollback_fail.debug_rollback_failure_for_tests());
+    json rollback_stats = rollback_fail.get_stats();
+    assert(rollback_stats["n_restore_failures"] == 1);
+    assert(rollback_stats["n_restore_draft_apply_failures"] == 1);
+    assert(rollback_stats["n_restore_rollback_failures"] == 1);
+    assert(rollback_stats["n_fallback_restores"] == 1);
+    assert(rollback_stats["n_hits"] == 0);
+
+    hybrid_cache_controller unsupported_clear(params, 2, 1000, nullptr, nullptr);
+    unsupported_clear.debug_add_entry_for_tests(create_tokens({19, 20}), false, "p5", 32, 16);
+    assert(!unsupported_clear.debug_unsupported_empty_clear_for_tests());
+    json clear_stats = unsupported_clear.get_stats();
+    assert(clear_stats["n_restore_failures"] == 1);
+    assert(clear_stats["n_restore_rollback_failures"] == 1);
+    assert(clear_stats["n_fallback_restores"] == 1);
+    assert(clear_stats["n_hits"] == 0);
+
+    hybrid_cache_controller success(params, 2, 1000, nullptr, nullptr);
+    success.debug_add_entry_for_tests(create_tokens({13, 14}), false, "p5", 32, 16);
+    assert(success.debug_transaction_for_tests(true, false, false, false));
+    assert(success.get_stats()["n_restore_failures"] == 0);
+
+    printf("  PASSED\n");
+}
+
 // Test 25: Oversized trusted protected admission is rejected and counted
 void test_hybrid_protected_admission_rejection_stats() {
     printf("test-cache-controller: hybrid protected admission rejection stats...\n");
@@ -998,6 +1173,62 @@ void test_namespace_isolation_draft_model() {
     printf("  PASSED\n");
 }
 
+void test_namespace_isolation_draft_context_modes() {
+    printf("test-cache-controller: namespace isolation - draft context modes...\n");
+
+    const std::string target_path = "target-qwen3-8b.gguf";
+    const std::string draft_path = "draft-qwen3-0.6b.gguf";
+
+    common_params no_draft = create_test_params(target_path);
+
+    common_params normal_draft = create_test_params(target_path);
+    normal_draft.speculative.draft.mparams.path = draft_path;
+
+    common_params mtp_target = create_test_params(target_path);
+    mtp_target.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+
+    common_params mtp_separate = create_test_params(target_path);
+    mtp_separate.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+    mtp_separate.speculative.draft.mparams.path = draft_path;
+
+    hybrid_cache_controller no_draft_ctrl(no_draft, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller normal_draft_ctrl(normal_draft, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller mtp_target_ctrl(mtp_target, 100, 1000, nullptr, nullptr);
+    hybrid_cache_controller mtp_separate_ctrl(mtp_separate, 100, 1000, nullptr, nullptr);
+
+    auto no_draft_key = no_draft_ctrl.debug_get_compatibility_key_for_tests(false);
+    auto normal_draft_key = normal_draft_ctrl.debug_get_compatibility_key_for_tests(true);
+    auto mtp_target_key = mtp_target_ctrl.debug_get_compatibility_key_for_tests(true);
+    auto mtp_separate_key = mtp_separate_ctrl.debug_get_compatibility_key_for_tests(true);
+
+    assert(no_draft_key.draft_context_mode == "none");
+    assert(normal_draft_key.draft_context_mode == "separate-draft-model");
+    assert(mtp_target_key.draft_context_mode == "mtp-target-model");
+    assert(mtp_separate_key.draft_context_mode == "mtp-separate-model");
+
+    assert(no_draft_key.draft_model_hash == "none");
+    assert(normal_draft_key.draft_model_hash != "none");
+    assert(mtp_target_key.draft_model_hash != "none");
+    assert(mtp_separate_key.draft_model_hash != "none");
+
+    std::vector<std::string> namespaces = {
+        no_draft_key.compute(),
+        normal_draft_key.compute(),
+        mtp_target_key.compute(),
+        mtp_separate_key.compute(),
+    };
+
+    for (size_t i = 0; i < namespaces.size(); ++i) {
+        for (size_t j = i + 1; j < namespaces.size(); ++j) {
+            assert(namespaces[i] != namespaces[j]);
+        }
+    }
+
+    assert(normal_draft_key.draft_model_hash != mtp_separate_key.draft_model_hash);
+
+    printf("  PASSED\n");
+}
+
 // Test 27: Namespace isolation - metadata compatibility key
 void test_namespace_isolation_metadata_compat_key() {
     printf("test-cache-controller: namespace isolation - metadata compatibility key...\n");
@@ -1240,6 +1471,10 @@ int main() {
     test_h31_lru_entry_state_ordering();
     test_h32_successful_restore_refreshes_recency();
     test_hybrid_failed_restore_does_not_refresh_recency();
+    test_hybrid_payload_descriptor_validation();
+    test_hybrid_payload_descriptor_fault_injection();
+    test_hybrid_evicted_payload_descriptor_rejected();
+    test_hybrid_restore_transaction_failures();
     test_hybrid_protected_admission_rejection_stats();
     test_lru_policy_planning();
     test_hybrid_lookup_edge_paths();
@@ -1250,6 +1485,7 @@ int main() {
     // Phase 3: Gap 2.2 namespace isolation tests
     test_namespace_isolation_comprehensive_key();
     test_namespace_isolation_draft_model();
+    test_namespace_isolation_draft_context_modes();
     test_namespace_isolation_metadata_compat_key();
     test_namespace_isolation_template();
     test_namespace_isolation_validation();
@@ -1263,7 +1499,7 @@ int main() {
     
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 40 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused)\n");
+    printf("Total: 44 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused)\n");
     printf("==================================================\n");
     
     return 0;

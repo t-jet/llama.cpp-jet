@@ -1,0 +1,4 @@
+READY=True
+HEALTH_STATUS=ok
+EXIT_AFTER_STOP=-1
+STDERR_TAIL=0.00.339.862 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden | 0.00.713.124 W llama_context: n_ctx_seq (512) < n_ctx_train (40960) -- the full capacity of the model will not be utilized | 0.01.907.814 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden | 0.01.969.183 W llama_context: n_ctx_seq (512) < n_ctx_train (40960) -- the full capacity of the model will not be utilized | 0.02.182.068 W common_speculative_init: draft model is specified but 'draft' speculative type is not explicitly enabled - enabling it | 0.02.184.999 W srv          init: --cache-idle-slots requires --kv-unified, disabling

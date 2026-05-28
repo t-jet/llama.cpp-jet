@@ -1,0 +1,10 @@
+NAME=qwen3-draft-mtp-separate
+PORT=53019
+COMMAND=& "D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe" --model D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf --host 127.0.0.1 --port 53019 --ctx-size 512 --parallel 1 --cache-ram 100 --temp 0 --seed 42 --metrics --log-verbosity 5 --cache-mode hybrid --spec-type draft-mtp --model-draft D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf
+START=2026-05-28T16:38:54.5283012+03:00
+READY=False
+EXITED_BEFORE_READY=True
+EXIT_CODE_BEFORE_READY=-1073741819
+READY_TIME=2026-05-28T16:38:57.0762378+03:00
+END=2026-05-28T16:38:57.0827094+03:00
+FINAL_EXIT_CODE=-1073741819
