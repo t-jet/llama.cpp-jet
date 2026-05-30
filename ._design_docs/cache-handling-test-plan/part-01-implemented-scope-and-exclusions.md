@@ -12,11 +12,12 @@ The test plan covers the implementation status described in the design documents
 - `cache-handling-phase3-implementation.md` (Phase 3: Non-Destructive Exact Blob Cache - **COMPLETE**)
 - `cache-handling-phase4-implementation.md` (Stage 4: LRU eviction policy with protected roots - closed)
 - `cache-handling-phase5-implementation.md` (Stage 5: descriptor separation and target/draft transactional restore - closed)
+- `cache-handling-phase6-implementation.md` (Stage 6: cold payload storage and asynchronous I/O - implementation review PASS)
 - `cache-handling-architecture/part-06-stage-5-draft-context-modes-and-pairing.md` (Stage 5 draft context mode compatibility)
 - `cache-handling-phase-1-and-2-adjustments.md`
 - `cache-handling-phases-1-and-2-implementation-gaps.md`
 
-Stage 5 is closed. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics. Stage 5 adds descriptor-owned payloads, hot payload records, pair-state validation, transactional target/draft restore behavior, and draft context mode compatibility. The Stage 5 rows remain useful for regression checks and for the residual external draft-model fixture follow-up.
+Stage 5 is closed. Stage 6 is implementation complete with review PASS. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics. Stage 5 adds descriptor-owned payloads, hot payload records, pair-state validation, transactional target/draft restore behavior, and draft context mode compatibility. Stage 6 adds cold payload storage, an asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, and cold layer metrics. The Stage 5 rows remain useful for regression checks and for the residual external draft-model fixture follow-up.
 
 - Non-destructive exact blob cache with LRU eviction
 - Comprehensive namespace isolation (14/14 fields populated)
@@ -30,6 +31,17 @@ Stage 5 is closed. Phase 3 remains the base cache behavior; Stage 4 adds byte-ac
 - Target-only and target-plus-draft pair enforcement
 - Compatibility isolation across no-draft, normal separate draft model, target-derived `draft-mtp`, and separate-model `draft-mtp` runtimes
 - Transactional restore rollback for target and draft apply failures
+- Cold payload storage via `--cache-cold-path` (opt-in; when unconfigured, behavior is identical to Stage 5)
+- Hot-to-cold demotion when `--cache-ram` budget pressure selects a hot payload for eviction
+- Cold-to-hot promotion on cache hit; current request falls back, subsequent requests benefit
+- Startup validation for `--cache-cold-path` (empty, non-existent, not a directory, non-writable, requires hybrid mode)
+- Asynchronous I/O worker for demotion writes and promotion reads without blocking `server_context`
+- Atomic write-and-rename for cold file creation
+- Cold file integrity validation on promotion (magic, format version, header checksum, payload checksums, payload ID, pair state, sizes)
+- Target and draft sides demote and promote as one unit
+- Protected root demotion emits a warning diagnostic
+- Demotion and promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency histogram, and eviction exclusion of demoted payloads in `/metrics`
+- Fault injection for cold file corruption, cold store read failure, and queue-full fallback
 
 ## Report cross-check
 
@@ -71,12 +83,12 @@ The current implemented cache surface is:
 | Draft runtime compatibility | Pair state remains binary: no draft context requires `target_only`; any active draft context requires `target_and_draft`. The compatibility namespace must still distinguish no draft, normal separate draft model through `--model-draft` or `--spec-draft-model`, target-derived `--spec-type draft-mtp`, and separate-model `--spec-type draft-mtp`. |
 | Empty-preimage rollback | If a pre-restore target or draft side has no serialized bytes, rollback clears that sequence. Unsupported clear paths fail before target payload application. |
 | Stage 5 observability | `/metrics` exports descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors in addition to the Stage 4 counters. |
+| Stage 6 cold layer | Cold payload storage is opt-in via `--cache-cold-path`. When unconfigured, the server behaves identically to Stage 5. When configured, hot payloads are demoted to cold files under budget pressure and promoted back to hot on cache hit. Startup validation rejects invalid `--cache-cold-path` configurations. `/metrics` exports demotion and promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency, and eviction exclusion of demoted payloads. Target and draft sides demote and promote as one unit. Protected root demotion emits a warning. |
 
 ## Exclusions
 
 Do not write acceptance tests for these features yet:
 
-- Cold payload storage or `--cache-cold-dir`.
 - Metadata-only branch nodes and re-materialization.
 - Shared branch graph traversal.
 - Checkpoint-first restore strategy.
@@ -84,10 +96,10 @@ Do not write acceptance tests for these features yet:
 - Public request-controlled protected-root markers.
 - A public JSON `/cache/stats` endpoint.
 - Cache fields in `/health`.
-- Separate hot, metadata, and cold budget flags.
+- Separate hot, metadata, and cold budget flags. (Cold budget is deferred; `--cache-ram` remains the only budget flag.)
 - Cache policy selection such as `--cache-eviction-policy`.
 - Namespace fairness or per-namespace quotas.
-- Stage 6 cold residency or cold-store restore. Stage 5 must reject cold descriptors rather than treating them as restorable.
+- Cold residency or cold-store restore across server restarts. Cold files may persist on disk, but the design does not guarantee that a future server start will accept them as valid restore sources.
 
 Tests may mention these as future work only when they verify that the current build does not expose the feature.
 

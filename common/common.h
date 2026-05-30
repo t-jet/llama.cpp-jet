@@ -603,6 +603,7 @@ struct common_params {
     int32_t checkpoint_every_nt = 8192;  // make a checkpoint every n tokens during prefill
     int32_t cache_ram_mib       = 8192;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
     cache_mode cache_mode_val   = CACHE_MODE_LEGACY;  // cache mode (legacy or hybrid)
+    std::string cache_cold_path;       // path for cold payload storage (empty = cold store disabled)
 
     std::string hostname      = "127.0.0.1";
     std::string public_path   = "";                                                                         // NOLINT

@@ -64,7 +64,7 @@ A descriptor is eligible for promotion when all of these conditions are true:
 3. The controller enqueues a promotion task in `server_cache_io_worker`.
 4. The `server_context` thread may proceed to the fallback slower path for the current request. It does not block. The request that triggered promotion will not benefit from it in the same request turn unless the implementation provides an optional wait mechanism documented separately.
 5. The worker opens the cold file identified by `cold_ref`.
-6. The worker reads and validates the header checksum, magic, format version, checksum algorithm, and payload checksums.
+6. The worker reads and validates the cold file header and payload checksums in this order: magic, format version, header checksum, checksum algorithm, then payload checksums.
 7. The worker reads target and draft bytes.
 8. The worker validates that the file's `payload_id`, `pair_state`, byte sizes, and checksums all match the in-memory descriptor snapshot it was given at enqueue time.
 9. The worker places the promoted bytes into a completed-promotion record and calls the completion callback with a success result.

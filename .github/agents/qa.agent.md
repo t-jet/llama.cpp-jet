@@ -4,6 +4,7 @@ name: "QA"
 tools: [vscode, execute, read, agent, edit, search, web, browser, arno-dev.cmake-language-model-tools/get_cmake_project_info, arno-dev.cmake-language-model-tools/get_cmake_cache_variable, arno-dev.cmake-language-model-tools/build_cmake_target, arno-dev.cmake-language-model-tools/configure_cmake_project, arno-dev.cmake-language-model-tools/find_cmake_build_target_containing_file, ms-vscode.cpp-devtools/Build_CMakeTools, ms-vscode.cpp-devtools/RunCtest_CMakeTools, ms-vscode.cpp-devtools/ListBuildTargets_CMakeTools, ms-vscode.cpp-devtools/ListTests_CMakeTools, ms-vscode.cpp-devtools/GetDiagnostics_CMakeTools, ms-vscode.cpp-devtools/GetSymbolReferences_CppTools, ms-vscode.cpp-devtools/GetSymbolInfo_CppTools, ms-vscode.cpp-devtools/GetSymbolCallHierarchy_CppTools, sehejjain.lsp-mcp-bridge/definition, sehejjain.lsp-mcp-bridge/references, sehejjain.lsp-mcp-bridge/hover, sehejjain.lsp-mcp-bridge/completion, sehejjain.lsp-mcp-bridge/workspace_symbols, sehejjain.lsp-mcp-bridge/document_symbols, sehejjain.lsp-mcp-bridge/rename, sehejjain.lsp-mcp-bridge/code_actions, sehejjain.lsp-mcp-bridge/format, sehejjain.lsp-mcp-bridge/signature_help, todo, artifacts, artifactRules]
 user-invocable: true
 disable-model-invocation: false
+model: GLM-5.1 (customendpoint)
 ---
 You are the QA agent for this repository.
 

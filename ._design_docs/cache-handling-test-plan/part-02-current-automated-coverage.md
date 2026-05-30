@@ -41,6 +41,15 @@ Model-backed integration tests must cover behavior that depends on real `llama_c
 - exact empty-preimage rollback and unsupported clear preflight
 - Stage 5 metrics for descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors
 - stable public HTTP surface: `/health`, `/metrics`, and missing `/cache/stats`
+- cold store opt-in behavior (server works identically to Stage 5 when `--cache-cold-path` is absent)
+- demotion: hot payloads are demoted to cold when `--cache-cold-path` is configured and `--cache-ram` budget is exceeded
+- promotion: cold payloads are promoted back to hot on cache hit; current request falls back
+- startup validation: invalid `--cache-cold-path` terminates server with error
+- cold layer metrics: demotion/promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency, eviction exclusion of demoted payloads
+- fault tolerance: cold file corruption, cold store read failure, queue-full fallback
+- protected root demotion warning
+- target/draft pair demotion and promotion as a unit
+- Stage 4 and Stage 5 regression with cold store configured
 
 Some Stage 5 rows need focused controller evidence or another fault-injection harness. Public HTTP can prove normal model-backed save, hit, metrics shape, budget pressure, and legacy compatibility, but it cannot directly corrupt a descriptor, change a hot-store reference, force a draft apply failure after target apply, or make the memory clear primitive unsupported.
 

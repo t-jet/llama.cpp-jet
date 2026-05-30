@@ -5,7 +5,7 @@ Source: [../cache-handling-phase6-implementation.md](../cache-handling-phase6-im
 ## Status
 
 Planning date: May 30, 2026
-Implementation state: not started
+Implementation state: complete
 Plan state: ready for independent Architect review
 
 ## Approved design baseline
@@ -30,7 +30,7 @@ Key design decisions binding this plan:
 - Atomic write-and-rename ensures that a reader never sees a partial cold file at the indexed path.
 - Integrity validation on promotion checks magic, format version, header checksum, checksum
   algorithm, payload_id, pair_state, byte sizes, and per-side checksums in that order.
-- Startup failure on invalid `--cache-cold-path` aborts the server before it accepts requests.
+- Startup failure on invalid `--cache-cold-path` terminates the server with an error before it accepts requests. The implementation must use a graceful exit mechanism (return error code, `exit()`, or throw), not the C `abort()` function, which produces an unhandleable dialog on Windows.
 - Design decision 2 (single worker thread) and decision 5 (fallback on queue full) are binding.
 - NB-1 through NB-5 from Part 8 must be resolved in this plan before code work begins.
 
@@ -137,6 +137,10 @@ Changes:
 - `server-cache-store-cold.h`: declare `cold_ref` as a `uint64_t` typedef; declare
   `server_cache_store_cold` class with `configure`, `write`, `read`, `remove`, and
   `is_configured` operations as specified in design Part 2. Omit `cold_ref_for(payload_id)`.
+  **Design correction required:** before Step 2 is implemented, a supersession note must be added
+  to design Part 2's interface table marking `cold_ref_for(payload_id)` as removed by NB-3
+  resolution, so the design and implementation remain consistent. This correction will be created
+  as a design amendment part before Step 2 code work begins.
   Include the `cold_store_header` struct with all fields from the design Part 2 table: `magic`,
   `format_version`, `checksum_algorithm`, `payload_id`, `pair_state`, `target_size_bytes`,
   `draft_size_bytes`, `target_checksum`, `draft_checksum`, `header_checksum`. Declare `magic` as a

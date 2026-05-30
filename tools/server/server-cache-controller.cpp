@@ -8,7 +8,8 @@ std::unique_ptr<cache_controller> create_cache_controller(
     int32_t limit_size_mib,
     size_t limit_tokens,
     llama_context * ctx_tgt,
-    llama_context * ctx_dft)
+    llama_context * ctx_dft,
+    const std::string & cold_path)
 {
     switch (mode) {
         case CACHE_MODE_LEGACY:
@@ -17,7 +18,7 @@ std::unique_ptr<cache_controller> create_cache_controller(
 
         case CACHE_MODE_HYBRID:
             return std::make_unique<hybrid_cache_controller>(
-                params, limit_size_mib, limit_tokens, ctx_tgt, ctx_dft);
+                params, limit_size_mib, limit_tokens, ctx_tgt, ctx_dft, cold_path);
 
         default:
             throw std::invalid_argument("invalid cache mode");

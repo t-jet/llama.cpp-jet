@@ -24,6 +24,10 @@ add_library(${TARGET} STATIC
     server-cache-policy-lru.h
     server-cache-hybrid.cpp
     server-cache-hybrid.h
+    server-cache-store-cold.cpp
+    server-cache-store-cold.h
+    server-cache-io-worker.cpp
+    server-cache-io-worker.h
 )
 
 if (BUILD_SHARED_LIBS)

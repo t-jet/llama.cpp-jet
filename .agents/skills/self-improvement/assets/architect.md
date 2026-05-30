@@ -1,5 +1,13 @@
 # Architect improvement memory
 
+## Improvement: Test-plan review evidence-source consistency
+
+Condition:
+- When reviewing a test plan that references both public HTTP observability and internal controller stats or focused C++ tests, and some scenario rows reference metrics that may not be exposed in the public Prometheus endpoint
+
+Action:
+- Do check each metric reference against the design observability section and the implementation review to confirm whether the metric is a Prometheus metric or an internal controller stat; flag any row that references an internal stat as requiring a stats-capable harness or focused C++ test in the evidence requirements section; don't assume all metric names in scenario rows are publicly observable
+
 ## Improvement: Memory load before acknowledgement
 
 Condition:

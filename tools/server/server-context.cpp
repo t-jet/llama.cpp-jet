@@ -1204,13 +1204,23 @@ private:
                 params_base.cache_ram_mib,
                 n_ctx,
                 ctx_tgt,
-                ctx_dft ? ctx_dft.get() : nullptr
+                ctx_dft ? ctx_dft.get() : nullptr,
+                params_base.cache_cold_path
             );
 
             if (cache_mode_active == CACHE_MODE_LEGACY) {
                 SRV_INF("%s", "cache mode: legacy (FIFO, destructive hits)\n");
             } else {
                 SRV_INF("%s", "cache mode: hybrid (LRU, non-destructive hits)\n");
+            }
+
+            // Phase 6: Validate cold path configuration
+            if (!params_base.cache_cold_path.empty()) {
+                if (cache_mode_active != CACHE_MODE_HYBRID) {
+                    SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
+                    throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
+                }
+                SRV_INF(" - cache: cold store path: %s\n", params_base.cache_cold_path.c_str());
             }
         } else {
             SRV_INF("%s", "prompt cache is disabled - use `--cache-ram N` to enable it\n");
@@ -4411,6 +4421,33 @@ void server_routes::init_routes() {
             write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
             write_cache_metric("gauge",   "llamacpp_cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
             write_cache_metric("gauge",   "llamacpp_cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
+            // Phase 6 Step 10: Cold layer Prometheus metrics
+            write_cache_metric("counter", "llamacpp_cache_payload_demotions_total", "Demotion operations completed by mode.", json_value(cache_stats, "n_demotion_successes", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_demotion_failures_total", "Demotion operations failed by mode.", json_value(cache_stats, "n_demotion_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_promotions_total", "Promotion operations completed by mode.", json_value(cache_stats, "n_promotion_successes", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_promotion_failures_total", "Promotion operations failed by mode.", json_value(cache_stats, "n_promotion_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_cold_evictions_total", "Cold payload evictions by mode.", json_value(cache_stats, "n_cold_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_demotion_queue_full_total", "Demotion queue-full events by mode.", json_value(cache_stats, "n_demotion_queue_full", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_queue_full_total", "Promotion queue-full events by mode.", json_value(cache_stats, "n_promotion_queue_full", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
+            write_cache_metric("counter", "llamacpp_cache_protected_root_demotions_total", "Protected root demotions by mode.", json_value(cache_stats, "n_protected_root_demotions", 0));
+            // Step 10: Promotion latency histogram
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_0_1ms", "Promotion latency bucket 0-1ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_0_1ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_1_5ms", "Promotion latency bucket 1-5ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_1_5ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_5_10ms", "Promotion latency bucket 5-10ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_5_10ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_10_50ms", "Promotion latency bucket 10-50ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_10_50ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_50_100ms", "Promotion latency bucket 50-100ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_50_100ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_100_500ms", "Promotion latency bucket 100-500ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_100_500ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_500_1000ms", "Promotion latency bucket 500ms-1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_500_1000ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_over_1000ms", "Promotion latency bucket over 1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_over_1000ms", 0));
+            // Step 10: Promotion failure reason counters
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_checksum_mismatch_total", "Promotion failures due to checksum mismatch by mode.", json_value(cache_stats, "n_promotion_failure_checksum_mismatch", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_not_found_total", "Promotion failures due to file not found by mode.", json_value(cache_stats, "n_promotion_failure_not_found", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_other_total", "Promotion failures due to other reasons by mode.", json_value(cache_stats, "n_promotion_failure_other", 0));
+            // Step 10: Demotion failure reason counters
+            write_cache_metric("counter", "llamacpp_cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
+            write_cache_metric("counter", "llamacpp_cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
@@ -5416,6 +5453,32 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
+
+    // Phase 6: Check if the payload is in cold state - attempt promotion
+    auto descriptor_it = payload_descriptors.find(it_best->payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            SRV_INF(" - hybrid cache: try_restore - payload %" PRIu64 " is cold, initiating promotion\n",
+                    it_best->payload_id);
+            promote_payload(it_best->payload_id);
+            // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::demoting) {
+            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is demoting, cannot restore yet\n",
+                    it_best->payload_id);
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::promoting) {
+            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is promoting, cannot restore yet\n",
+                    it_best->payload_id);
+            n_misses++;
+            return false;
+        }
+    }
+
     if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
         SRV_ERR(" - hybrid cache: try_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
         return false;
@@ -5579,6 +5642,31 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
+
+    // Phase 6: Check if the payload is in cold/demoting/promoting state
+    auto descriptor_it = payload_descriptors.find(it_best->payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
+                    it_best->payload_id);
+            promote_payload(it_best->payload_id);
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::demoting) {
+            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is demoting, cannot restore yet\n",
+                    it_best->payload_id);
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::promoting) {
+            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is promoting, cannot restore yet\n",
+                    it_best->payload_id);
+            n_misses++;
+            return false;
+        }
+    }
+
     if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
         SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
         return false;

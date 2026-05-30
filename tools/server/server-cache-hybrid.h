@@ -2,11 +2,15 @@
 
 #include "server-cache-controller.h"
 #include "server-cache-policy-lru.h"
+#include "server-cache-store-cold.h"
+#include "server-cache-io-worker.h"
 #include "server-task.h"
 
+#include <chrono>
 #include <list>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <string>
 #include <functional>
@@ -65,9 +69,62 @@ enum class payload_pair_state {
 
 enum class payload_residency_state {
     hot,
-    evicted,
+    demoting,   // Transient: hot payload is being written to cold store
+    promoting,  // Transient: cold payload is being read back to hot store
     cold,
+    evicted,
 };
+
+// Residency state transition table (Stage 6):
+//
+//   hot      -> demoting    : demotion initiated by residency policy
+//   demoting -> cold        : demotion completed successfully (hot bytes released)
+//   demoting -> hot         : demotion enqueue failed (queue-full revert, NB-2)
+//   demoting -> evicted     : demotion failed after hot bytes released (should not happen with NB-5 pinning)
+//   cold     -> promoting   : promotion initiated on restore request
+//   promoting -> hot        : promotion completed successfully
+//   promoting -> cold       : promotion enqueue failed (queue-full revert, NB-2)
+//   promoting -> evicted    : promotion failed (integrity check failure)
+//   hot      -> evicted    : hot eviction when cold store not configured or demotion fails
+//   cold     -> evicted    : cold file deleted or invalidated
+//
+// Operations blocked while in transient state:
+//   demoting : no concurrent demotion, no promotion, no restore, no eviction
+//   promoting: no concurrent promotion, no demotion, no eviction
+//
+// Transient states resolve to stable states via:
+//   - Completion callback (success or failure) from the I/O worker
+//   - Immediate revert on queue-full failure (NB-2)
+//
+// Guard: transient states (demoting, promoting) are internal to the cache
+// controller. They must not be visible outside the cache subsystem. While a
+// descriptor is in a transient state, the controller must not select it for
+// any other transition. External code must only observe hot, cold, or evicted.
+
+// Validate that a residency state transition is allowed by the state machine.
+// Returns true if the transition from -> to is a valid transition per the
+// table above, false otherwise.
+inline bool can_transition(payload_residency_state from, payload_residency_state to) {
+    switch (from) {
+        case payload_residency_state::hot:
+            return to == payload_residency_state::demoting
+                || to == payload_residency_state::evicted;
+        case payload_residency_state::demoting:
+            return to == payload_residency_state::cold
+                || to == payload_residency_state::hot
+                || to == payload_residency_state::evicted;
+        case payload_residency_state::promoting:
+            return to == payload_residency_state::hot
+                || to == payload_residency_state::cold
+                || to == payload_residency_state::evicted;
+        case payload_residency_state::cold:
+            return to == payload_residency_state::promoting
+                || to == payload_residency_state::evicted;
+        case payload_residency_state::evicted:
+            return false;  // No transitions out of evicted
+    }
+    return false;
+}
 
 enum class payload_debug_fault {
     unsupported_version,
@@ -83,6 +140,8 @@ enum class payload_debug_fault {
     missing_draft_for_pair,
     draft_size_mismatch,
     draft_checksum_mismatch,
+    demoting_residency,   // Stage 6: inject demoting transient state for tests
+    promoting_residency,   // Stage 6: inject promoting transient state for tests
 };
 
 struct payload_store_ref {
@@ -181,9 +240,10 @@ public:
         int32_t limit_size_mib,
         size_t limit_tokens,
         llama_context * ctx_tgt,
-        llama_context * ctx_dft);
+        llama_context * ctx_dft,
+        const std::string & cold_path = "");
 
-    ~hybrid_cache_controller() override = default;
+    ~hybrid_cache_controller() override;
 
     // Cache controller interface implementation
     bool save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) override;
@@ -197,6 +257,19 @@ public:
     // Returns true if a matching entry was found and restored into the slot
     // Unlike load_slot(), this does not require the slot to be cleared first
     bool try_restore_from_cache(server_slot & slot, const server_task & task);
+
+    // Phase 6: Cold layer demotion and promotion
+    // Demote a hot payload to cold storage. Returns true if demotion was initiated.
+    // The descriptor transitions to demoting state. Completion is handled asynchronously.
+    bool demote_payload(uint64_t payload_id);
+
+    // Promote a cold payload back to hot storage. Returns true if promotion was initiated.
+    // The descriptor transitions to promoting state. Completion is handled asynchronously.
+    bool promote_payload(uint64_t payload_id);
+
+    // Process pending I/O completion results from the worker.
+    // Must be called from the server_context thread at safe scheduling points.
+    void process_completions();
 
     // Phase 3: Build comprehensive compatibility key (Gap 2.2)
     cache_compatibility_key build_compatibility_key() const;
@@ -227,6 +300,49 @@ public:
     bool debug_empty_preimage_draft_failure_for_tests();
     bool debug_unsupported_empty_clear_for_tests();
     bool debug_rollback_failure_for_tests();
+
+    // Phase 6 Step 6: Demotion protocol test hooks
+    void debug_set_cold_store_for_tests(const std::string & path) {
+        cold_store.configure(path, COLD_STORE_FORMAT_VERSION_1);
+    }
+    void debug_start_io_worker_for_tests() {
+        io_worker.debug_set_cold_store_for_tests(&cold_store);
+        io_worker.start();
+    }
+    void debug_stop_io_worker_for_tests() {
+        process_completions();
+        io_worker.stop();
+    }
+    void debug_set_io_worker_queue_capacity_for_tests(size_t capacity) {
+        io_worker.debug_set_queue_capacity_for_tests(capacity);
+    }
+    void debug_set_cold_store_validation_failure_for_tests(io_failure_reason reason) {
+        cold_store.debug_set_validation_failure_for_tests(reason);
+    }
+    void debug_set_cold_store_read_failure_for_tests(bool fail) {
+        cold_store.debug_set_read_failure_for_tests(fail);
+    }
+
+    // Step 8: Test accessors for cold_store and io_worker
+    server_cache_store_cold & debug_cold_store_for_tests() { return cold_store; }
+    server_cache_io_worker & debug_io_worker_for_tests() { return io_worker; }
+
+    // Step 11: Test hooks for residency state query and promotion failure injection
+    payload_residency_state debug_get_residency_state_for_tests(uint64_t payload_id) {
+        auto it = payload_descriptors.find(payload_id);
+        if (it == payload_descriptors.end()) {
+            return payload_residency_state::evicted;
+        }
+        return it->second.residency;
+    }
+
+    void debug_inject_promotion_failure_for_tests(uint64_t payload_id) {
+        debug_promotion_failure_payload_ids_.insert(payload_id);
+    }
+
+    void debug_clear_promotion_failures_for_tests() {
+        debug_promotion_failure_payload_ids_.clear();
+    }
 #endif
 
 private:
@@ -282,6 +398,15 @@ private:
         token_prefix_hash
     > prefix_index;
 
+    // Phase 6: Cold store and async I/O worker
+    server_cache_store_cold cold_store;
+    server_cache_io_worker io_worker;
+
+    // Phase 6 Step 11: Per-payload promotion failure injection set
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::unordered_set<uint64_t> debug_promotion_failure_payload_ids_;
+#endif
+
     // Configuration
     const common_params & params; // runtime parameters for comprehensive namespace keys
     size_t limit_size;       // size limit in bytes, 0 = no limit
@@ -310,6 +435,35 @@ private:
     size_t n_restore_draft_apply_failures = 0;
     size_t n_restore_commit_failures = 0;
     size_t n_restore_rollback_failures = 0;
+
+    // Phase 6: Cold layer statistics
+    size_t n_demotion_successes = 0;
+    size_t n_demotion_failures = 0;
+    size_t n_promotion_successes = 0;
+    size_t n_promotion_failures = 0;
+    size_t n_cold_evictions = 0;
+    size_t n_demotion_queue_full = 0;
+    size_t n_promotion_queue_full = 0;
+    size_t n_cold_payload_bytes = 0;              // Total bytes in cold store (incremented on demotion success)
+    size_t n_protected_root_demotions = 0;         // Protected roots that were demoted
+
+    // Phase 6 Step 10: Promotion latency histogram
+    // Buckets: 0-1ms, 1-5ms, 5-10ms, 10-50ms, 50-100ms, 100-500ms, 500ms-1s, 1s+
+    static constexpr size_t PROMOTION_LATENCY_BUCKET_COUNT = 8;
+    size_t n_promotion_latency_buckets[PROMOTION_LATENCY_BUCKET_COUNT] = {};
+    std::chrono::steady_clock::time_point promotion_enqueue_time;
+
+    // Phase 6 Step 10: Cold payload count gauge
+    size_t n_cold_payload_count = 0;              // Count of descriptors with residency_state == cold
+
+    // Phase 6 Step 10: Promotion failure reason counters
+    size_t n_promotion_failure_checksum_mismatch = 0;
+    size_t n_promotion_failure_not_found = 0;
+    size_t n_promotion_failure_other = 0;
+
+    // Phase 6 Step 10: Demotion failure reason counters
+    size_t n_demotion_failure_write_error = 0;
+    size_t n_demotion_failure_other = 0;
 
     // Find best matching entry for given tokens and metadata
     // Returns iterator to best match, or entries.end() if no suitable match
@@ -373,6 +527,10 @@ private:
     std::string compute_namespace_id() const;
     std::string compute_namespace_id(const prepared_prompt_metadata & metadata) const;
     cache_compatibility_key build_compatibility_key(bool runtime_has_draft) const;
+
+    // Phase 6: Cold layer demotion and promotion completion handlers
+    void handle_demotion_completion(io_completion_result & result);
+    void handle_promotion_completion(io_completion_result & result);
 
     // Phase 2: Index maintenance helpers
     void add_to_lru_index(std::list<hybrid_cache_entry>::iterator it);

@@ -5,6 +5,7 @@ tools: [read, edit, agent, search, todo]
 agents: [Architect, Developer, QA]
 user-invocable: true
 disable-model-invocation: false
+model: GLM-5.1 (customendpoint)
 ---
 You are the Manager agent for this repository.
 

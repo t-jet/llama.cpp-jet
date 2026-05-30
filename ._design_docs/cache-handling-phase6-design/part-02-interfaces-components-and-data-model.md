@@ -29,7 +29,7 @@ Required operations:
 - `read(cold_ref) -> (target_bytes, draft_bytes, descriptor_snapshot)` — read and validate a cold file; return failure if checksum, version, or size does not match
 - `remove(cold_ref)` — delete a cold file; called when the owning descriptor is deleted or the cold layer is cleared
 - `is_configured() -> bool` — return true only when a valid root path is set
-- `cold_ref_for(payload_id) -> cold_ref` — resolve an active cold file reference for a given payload id
+- ~~`cold_ref_for(payload_id) -> cold_ref` — resolve an active cold file reference for a given payload id~~ **Removed by NB-3 resolution (Phase 6 implementation plan):** The controller always holds the cold ref in `store_ref.id` for any cold descriptor. A separate lookup is not needed within Stage 6 scope. If a future stage requires a scan-based lookup, it can be added then.
 
 Cold file references (`cold_ref`) are opaque handles internal to `server_cache_store_cold`. The descriptor stores a `cold_ref` in `store_ref` after demotion. The controller must not construct or inspect file paths directly.
 
@@ -68,22 +68,32 @@ Header size is fixed for a given format version. A future format version may ext
 
 ## Residency state transitions
 
-`PayloadDescriptor.residency_state` has three values in Stage 6.
+`PayloadDescriptor.residency_state` has five values in Stage 6.
 
 | State | Meaning |
 | --- | --- |
 | `hot` | Payload bytes are resident in the hot payload store. `store_ref` points to a hot payload record. |
+| `demoting` | Transient state during hot-to-cold demotion. The descriptor has been selected for demotion and a cold write is in progress. The hot payload record is still held. No other operation may transition this descriptor until demotion completes. |
 | `cold` | Payload bytes have been written to the cold store. `store_ref` holds a `cold_ref` pointing to the cold file. The hot record has been released. |
+| `promoting` | Transient state during cold-to-hot promotion. A cold read and validation is in progress. No other operation may transition this descriptor until promotion completes. |
 | `evicted` | Payload bytes are gone. No cold file exists. The descriptor may be retained for diagnostics but must not be selected as a restore candidate. |
 
 Valid transitions:
 
-- `hot` -> `cold`: demotion by the residency policy. Requires a successful cold write before the hot record is released.
-- `cold` -> `hot`: promotion on restore request. Requires a successful cold read and validation before the descriptor moves to `hot` and the cold file is optionally retained or removed.
+- `hot` -> `demoting`: controller selects the descriptor for demotion and enqueues a cold write. The hot record is still held.
+- `demoting` -> `cold`: demotion completes successfully. `store_ref` is updated to the cold ref, hot bytes are released.
+- `demoting` -> `hot`: demotion enqueue fails (queue full) or the controller reverts before enqueue. Hot bytes are retained.
+- `demoting` -> `evicted`: demotion completes but the hot record has already been released (should not happen with NB-5 pinning, but must be handled).
+- `cold` -> `promoting`: controller selects the descriptor for promotion and enqueues a cold read.
+- `promoting` -> `hot`: promotion completes successfully. Promoted bytes are inserted into the hot store, `store_ref` is updated.
+- `promoting` -> `cold`: promotion enqueue fails (queue full). The descriptor remains cold and the current request falls back.
+- `promoting` -> `evicted`: promotion fails validation or I/O error. The cold file may be retained for operator inspection.
 - `hot` -> `evicted`: hot eviction when cold store is not configured or demotion fails and the policy decides to discard.
 - `cold` -> `evicted`: cold file deleted by explicit cleanup, budget enforcement on cold storage, or branch pruning in a later stage.
 
-No transition is allowed from `evicted` back to `hot` or `cold` within the same descriptor lifetime. An evicted descriptor is a dead record.
+No transition is allowed from `evicted` back to `hot`, `demoting`, `cold`, or `promoting` within the same descriptor lifetime. An evicted descriptor is a dead record.
+
+Transient states (`demoting`, `promoting`) are internal to the controller and must not be visible outside the cache subsystem. While a descriptor is in a transient state, the controller must not select it for any other transition.
 
 ## Configuration
 

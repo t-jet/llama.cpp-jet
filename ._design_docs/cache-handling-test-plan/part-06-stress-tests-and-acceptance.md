@@ -17,6 +17,15 @@ The implemented PowerShell runner currently covers:
 - **D01-D08:** skipped unless the requested draft runtime is configured and startup proves it is active; do not treat the placeholder branch as acceptance evidence
 - **N01-N15:** Edge and negative scenarios that the public harness can exercise or classify.
 - **N16-N23:** Stage 5 descriptor and transactional failure rows remain acceptance scenarios, but they need focused controller or fault-injection evidence before they can pass.
+- **C60-C65:** Stage 6 cold store opt-in and startup validation (no cold path, valid cold path, hybrid mode required, invalid paths)
+- **H60-H65:** Stage 6 demotion (budget pressure, target/draft pair, hot store release, protected root warning, non-blocking, queue-full fallback)
+- **H66-H70:** Stage 6 promotion (cache hit, target/draft pair, failure marks evicted, queue-full fallback, latency observable)
+- **N30-N35:** Stage 6 startup validation (empty path, non-existent path, file path, non-writable, world-writable warning, hybrid mode required)
+- **M10-M17:** Stage 6 metrics (demotion/promotion counters, cold payload bytes, cold payload count, hot payload count, eviction exclusion, latency histogram, failure reason counters)
+- **F01-F10:** Stage 6 fault tolerance (checksum corruption, read failure, header truncation, format version, payload ID mismatch, pair state mismatch, magic mismatch, draft-side failure, write failure, shutdown race)
+- **H71:** Protected root demotion warning
+- **H72-H74:** Target/draft pair demotion and promotion as a unit
+- **R10-R12:** Stage 4 and Stage 5 regression with cold store configured
 
 See Parts 3 and 4 of this test plan for the complete test matrix.
 

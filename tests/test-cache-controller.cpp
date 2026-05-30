@@ -1439,6 +1439,141 @@ void test_namespace_isolation_kv_unified() {
     printf("  PASSED\n");
 }
 
+// Test 35: Residency state transition validation - can_transition function
+void test_residency_state_transitions() {
+    printf("test-cache-controller: residency state transitions...\n");
+
+    // Valid transitions from hot
+    assert(can_transition(payload_residency_state::hot, payload_residency_state::demoting));
+    assert(can_transition(payload_residency_state::hot, payload_residency_state::evicted));
+
+    // Valid transitions from demoting
+    assert(can_transition(payload_residency_state::demoting, payload_residency_state::cold));
+    assert(can_transition(payload_residency_state::demoting, payload_residency_state::hot));
+    assert(can_transition(payload_residency_state::demoting, payload_residency_state::evicted));
+
+    // Valid transitions from promoting
+    assert(can_transition(payload_residency_state::promoting, payload_residency_state::hot));
+    assert(can_transition(payload_residency_state::promoting, payload_residency_state::cold));
+    assert(can_transition(payload_residency_state::promoting, payload_residency_state::evicted));
+
+    // Valid transitions from cold
+    assert(can_transition(payload_residency_state::cold, payload_residency_state::promoting));
+    assert(can_transition(payload_residency_state::cold, payload_residency_state::evicted));
+
+    // No transitions from evicted
+    assert(!can_transition(payload_residency_state::evicted, payload_residency_state::hot));
+    assert(!can_transition(payload_residency_state::evicted, payload_residency_state::demoting));
+    assert(!can_transition(payload_residency_state::evicted, payload_residency_state::promoting));
+    assert(!can_transition(payload_residency_state::evicted, payload_residency_state::cold));
+    assert(!can_transition(payload_residency_state::evicted, payload_residency_state::evicted));
+
+    // Invalid transitions from hot
+    assert(!can_transition(payload_residency_state::hot, payload_residency_state::hot));
+    assert(!can_transition(payload_residency_state::hot, payload_residency_state::promoting));
+    assert(!can_transition(payload_residency_state::hot, payload_residency_state::cold));
+
+    // Invalid transitions from demoting
+    assert(!can_transition(payload_residency_state::demoting, payload_residency_state::demoting));
+    assert(!can_transition(payload_residency_state::demoting, payload_residency_state::promoting));
+
+    // Invalid transitions from promoting
+    assert(!can_transition(payload_residency_state::promoting, payload_residency_state::demoting));
+    assert(!can_transition(payload_residency_state::promoting, payload_residency_state::promoting));
+
+    // Invalid transitions from cold
+    assert(!can_transition(payload_residency_state::cold, payload_residency_state::hot));
+    assert(!can_transition(payload_residency_state::cold, payload_residency_state::cold));
+    assert(!can_transition(payload_residency_state::cold, payload_residency_state::demoting));
+
+    printf("  PASSED\n");
+}
+
+// Test 36: Residency state enum has exactly five values
+void test_residency_state_enum_values() {
+    printf("test-cache-controller: residency state enum values...\n");
+
+    // Verify all five residency states exist and are distinct
+    auto hot = payload_residency_state::hot;
+    auto demoting = payload_residency_state::demoting;
+    auto promoting = payload_residency_state::promoting;
+    auto cold = payload_residency_state::cold;
+    auto evicted = payload_residency_state::evicted;
+
+    // Each value must be distinct
+    assert(hot != demoting);
+    assert(hot != promoting);
+    assert(hot != cold);
+    assert(hot != evicted);
+    assert(demoting != promoting);
+    assert(demoting != cold);
+    assert(demoting != evicted);
+    assert(promoting != cold);
+    assert(promoting != evicted);
+    assert(cold != evicted);
+
+    printf("  PASSED\n");
+}
+
+// Test 37: Descriptor residency field defaults to hot
+void test_descriptor_residency_default() {
+    printf("test-cache-controller: descriptor residency default...\n");
+
+    payload_descriptor descriptor;
+    assert(descriptor.residency == payload_residency_state::hot);
+    assert(descriptor.payload_id == 0);
+    assert(descriptor.store_ref.id == 0);
+
+    printf("  PASSED\n");
+}
+
+// Test 38: Descriptor can be set to each residency state
+void test_descriptor_residency_assignment() {
+    printf("test-cache-controller: descriptor residency assignment...\n");
+
+    payload_descriptor descriptor;
+
+    descriptor.residency = payload_residency_state::hot;
+    assert(descriptor.residency == payload_residency_state::hot);
+
+    descriptor.residency = payload_residency_state::demoting;
+    assert(descriptor.residency == payload_residency_state::demoting);
+
+    descriptor.residency = payload_residency_state::promoting;
+    assert(descriptor.residency == payload_residency_state::promoting);
+
+    descriptor.residency = payload_residency_state::cold;
+    assert(descriptor.residency == payload_residency_state::cold);
+
+    descriptor.residency = payload_residency_state::evicted;
+    assert(descriptor.residency == payload_residency_state::evicted);
+
+    printf("  PASSED\n");
+}
+
+// Test 39: Debug fault injection for transient residency states
+void test_debug_fault_injection_transient_states() {
+    printf("test-cache-controller: debug fault injection transient states...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "transient", 128, 0);
+
+    // Inject demoting residency state
+    assert(ctrl.debug_inject_first_payload_fault_for_tests(payload_debug_fault::demoting_residency));
+    json demoting_stats = ctrl.get_stats();
+    assert(demoting_stats["n_demoting_payload_descriptors"] == 1);
+
+    // Reset and inject promoting residency state
+    hybrid_cache_controller ctrl2(params, 2, 1000, nullptr, nullptr);
+    ctrl2.debug_add_entry_for_tests(create_tokens({3, 4}), false, "transient", 128, 0);
+    assert(ctrl2.debug_inject_first_payload_fault_for_tests(payload_debug_fault::promoting_residency));
+    json promoting_stats = ctrl2.get_stats();
+    assert(promoting_stats["n_promoting_payload_descriptors"] == 1);
+
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -1497,9 +1632,16 @@ int main() {
     test_namespace_isolation_multimodal();
     test_namespace_isolation_kv_unified();
     
+    // Stage 6 Step 1: Residency state machine tests
+    test_residency_state_transitions();
+    test_residency_state_enum_values();
+    test_descriptor_residency_default();
+    test_descriptor_residency_assignment();
+    test_debug_fault_injection_transient_states();
+    
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 44 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused)\n");
+    printf("Total: 49 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1)\n");
     printf("==================================================\n");
     
     return 0;

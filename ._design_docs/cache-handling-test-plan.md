@@ -1,7 +1,7 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-05-28
+Last updated: 2026-05-30
 Scope: server integration tests and focused evidence mapping for implemented cache behavior
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
@@ -52,7 +52,7 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4 and Stage 5, read:
+Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, and Stage 6, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -63,6 +63,9 @@ Use [document-index.md](./document-index.md) first. For Stage 4 and Stage 5, rea
 - [cache-handling-phase5-implementation/part-06-implementation-evidence.md](./cache-handling-phase5-implementation/part-06-implementation-evidence.md)
 - [cache-handling-phase5-implementation/part-08-review-fix-evidence.md](./cache-handling-phase5-implementation/part-08-review-fix-evidence.md)
 - [cache-handling-phase5-implementation/part-09-implementation-re-review.md](./cache-handling-phase5-implementation/part-09-implementation-re-review.md)
+- [cache-handling-phase6-design.md](./cache-handling-phase6-design.md)
+- [cache-handling-phase6-implementation.md](./cache-handling-phase6-implementation.md)
+- [cache-handling-phase6-implementation/part-13-implementation-review.md](./cache-handling-phase6-implementation/part-13-implementation-review.md)
 
 ## Test coverage summary
 
@@ -73,6 +76,7 @@ The integration plan covers:
 - Stage 3 non-destructive exact blob cache behavior, restore metrics, namespace isolation, and draft-model pairing.
 - Stage 4 resident payload byte budget enforcement, deterministic LRU behavior, restore recency semantics, protected-root eviction priority and fallback, protected admission rejection, and Stage 4 metrics.
 - Stage 5 payload descriptor separation, hot payload ownership, descriptor validation, target/draft pair validation, draft runtime mode namespace isolation, transactional restore rollback, paired eviction and byte accounting, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage.
+- Stage 6 cold payload storage, asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, cold store opt-in behavior, target/draft pair demotion and promotion as a unit, fault tolerance for cold file corruption and I/O failures, protected root demotion warning, cold layer metrics, and Stage 4 and Stage 5 regression with cold store configured.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -97,8 +101,17 @@ Implemented behavior that must be covered:
 - A failed target or draft restore is transactional: no hit is counted, no usage or recency refresh happens, and the slot returns to its pre-restore state, including the empty-preimage rollback case.
 - Unsupported empty-side clear is checked before applying cached target bytes.
 - Metrics expose Stage 5 descriptor validation, pairing violation, fallback restore, hot descriptor, and evicted descriptor signals.
+- Cold payload storage is opt-in via `--cache-cold-path`. When unconfigured, the server behaves identically to Stage 5.
+- Hot payloads are demoted to cold when `--cache-cold-path` is configured and `--cache-ram` budget pressure selects them for eviction.
+- Cold payloads are promoted back to hot on cache hit. The current request falls back; subsequent requests benefit from the promotion.
+- Startup validation rejects invalid `--cache-cold-path` configurations (empty, non-existent, not a directory, non-writable) and rejects `--cache-cold-path` without hybrid mode.
+- Demotion and promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency, and eviction exclusion of demoted payloads are observable in `/metrics`.
+- Cold file corruption, cold store read failure, and queue-full fallback are testable through fault injection.
+- Protected root demotion emits a warning diagnostic.
+- Target and draft payloads demote and promote as one unit.
+- Stage 4 and Stage 5 behavior is preserved when the cold store is configured.
 
-Do not treat cold storage, metadata-only branch nodes, shared branch graphs, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
+Do not treat metadata-only branch nodes, shared branch graphs, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
 
 ## Contents
 
@@ -111,6 +124,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 5: runner and evidence format](./cache-handling-test-plan/part-05-runner-and-evidence-format.md)
 - [Part 6: stress tests and acceptance criteria](./cache-handling-test-plan/part-06-stress-tests-and-acceptance.md)
 - [Part 7: test report quality and templates](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md)
+- [Part 8: Stage 6 cold layer integration](./cache-handling-test-plan/part-08-stage6-cold-layer-integration.md)
 
 ## Review reports
 

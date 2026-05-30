@@ -48,6 +48,14 @@ Condition:
 Action:
 - Do assign the next suffix after the highest existing same-day report, not the first missing gap, so the newest report is also the lexically latest handoff artifact.
 
+## Improvement: check async test timing after fixing disabled assertions
+
+Condition:
+- When a TEST_ASSERT or similar fix re-enables previously disabled assertions in async tests that call process_completions after demote_payload or promote_payload
+
+Action:
+- Do verify that each async test includes a sleep_for before process_completions; previously masked race conditions become visible when assertions start working; run both Debug and Release to confirm the failure is not configuration-specific; classify the failure as a test bug, not a product bug, and hand off to Developer for a targeted sleep_for addition.
+
 ## Improvement: reserve report artifacts under final suffix
 
 Condition:
@@ -87,3 +95,13 @@ Condition:
 
 Action:
 - Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`; use explicit names like `ServerArgs`, preserve the discarded harness logs if a collision starts the wrong mode, and rerun before classifying product behavior.
+
+## Improvement: verify Release-mode assertions in focused C++ tests
+
+Condition:
+
+- When running focused C++ tests in Release configuration where `NDEBUG` is defined
+
+Action:
+
+- Do check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after; if assertions are silently disabled, a Release-only crash may mask a real product bug or test infrastructure bug; run the Debug build as a cross-check and classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking the test step as PASS.

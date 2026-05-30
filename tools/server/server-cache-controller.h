@@ -55,5 +55,5 @@ std::unique_ptr<cache_controller> create_cache_controller(
     int32_t limit_size_mib,
     size_t limit_tokens,
     llama_context * ctx_tgt,
-    llama_context * ctx_dft
-);
+    llama_context * ctx_dft,
+    const std::string & cold_path = "");

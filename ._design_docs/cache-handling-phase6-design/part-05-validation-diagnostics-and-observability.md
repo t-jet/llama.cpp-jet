@@ -8,11 +8,11 @@ The following checks must run at startup, before the server accepts requests, wh
 
 | Check | Failure behavior |
 | --- | --- |
-| Cold store root path is provided and non-empty | Log diagnostic and abort server startup |
-| Cold store root path exists as a directory | Log diagnostic and abort server startup |
-| Cold store root directory is writable by the server process | Log diagnostic and abort server startup |
-| Worker thread creation succeeds | Log diagnostic and abort server startup |
-| `--cache-ram` is set to a positive value when hybrid mode is enabled | Log diagnostic and abort server startup (inherited from Stage 4, revalidated here) |
+| Cold store root path is provided and non-empty | Log diagnostic and terminate server startup with an error |
+| Cold store root path exists as a directory | Log diagnostic and terminate server startup with an error |
+| Cold store root directory is writable by the server process | Log diagnostic and terminate server startup with an error |
+| Worker thread creation succeeds | Log diagnostic and terminate server startup with an error |
+| `--cache-ram` is set to a positive value when hybrid mode is enabled | Log diagnostic and terminate server startup with an error (inherited from Stage 4, revalidated here) |
 
 Startup failures must emit a message that identifies the specific check that failed and the configured value that caused the failure. The message must be sufficient for an operator to correct the configuration without consulting source code.
 

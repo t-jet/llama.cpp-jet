@@ -243,6 +243,76 @@ target_include_directories(test-cache-controller PRIVATE ${CMAKE_SOURCE_DIR}/too
 target_compile_definitions(test-cache-controller PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-cache-controller)
 
+# test-step1-state-machine requires server-context library
+llama_build(test-step1-state-machine.cpp get-model.cpp)
+target_link_libraries(test-step1-state-machine PRIVATE server-context)
+target_include_directories(test-step1-state-machine PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step1-state-machine PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step1-state-machine)
+
+# test-step2-cold-store requires server-context library
+llama_build(test-step2-cold-store.cpp get-model.cpp)
+target_link_libraries(test-step2-cold-store PRIVATE server-context)
+target_include_directories(test-step2-cold-store PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step2-cold-store PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step2-cold-store)
+
+# test-step3-4-cold-store-write-read requires server-context library
+llama_build(test-step3-4-cold-store-write-read.cpp get-model.cpp)
+target_link_libraries(test-step3-4-cold-store-write-read PRIVATE server-context)
+target_include_directories(test-step3-4-cold-store-write-read PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step3-4-cold-store-write-read PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step3-4-cold-store-write-read)
+
+# test-step5-io-worker requires server-context library
+llama_build(test-step5-io-worker.cpp get-model.cpp)
+target_link_libraries(test-step5-io-worker PRIVATE server-context)
+target_include_directories(test-step5-io-worker PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step5-io-worker PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step5-io-worker)
+
+# test-step6-demotion-protocol requires server-context library
+llama_build(test-step6-demotion-protocol.cpp get-model.cpp)
+target_link_libraries(test-step6-demotion-protocol PRIVATE server-context)
+target_include_directories(test-step6-demotion-protocol PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step6-demotion-protocol PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step6-demotion-protocol)
+
+# test-step7-promotion-protocol requires server-context library
+llama_build(test-step7-promotion-protocol.cpp get-model.cpp)
+target_link_libraries(test-step7-promotion-protocol PRIVATE server-context)
+target_include_directories(test-step7-promotion-protocol PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step7-promotion-protocol PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step7-promotion-protocol)
+
+# test-step8-integration-wiring requires server-context library
+llama_build(test-step8-integration-wiring.cpp get-model.cpp)
+target_link_libraries(test-step8-integration-wiring PRIVATE server-context)
+target_include_directories(test-step8-integration-wiring PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step8-integration-wiring PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step8-integration-wiring)
+
+# test-step9-startup-validation requires server-context library
+llama_build(test-step9-startup-validation.cpp get-model.cpp)
+target_link_libraries(test-step9-startup-validation PRIVATE server-context)
+target_include_directories(test-step9-startup-validation PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step9-startup-validation PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step9-startup-validation)
+
+# test-step10-metrics requires server-context library
+llama_build(test-step10-metrics.cpp get-model.cpp)
+target_link_libraries(test-step10-metrics PRIVATE server-context)
+target_include_directories(test-step10-metrics PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step10-metrics PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step10-metrics)
+
+# test-step11-test-hooks-fault-injection requires server-context library
+llama_build(test-step11-test-hooks-fault-injection.cpp get-model.cpp)
+target_link_libraries(test-step11-test-hooks-fault-injection PRIVATE server-context)
+target_include_directories(test-step11-test-hooks-fault-injection PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step11-test-hooks-fault-injection PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step11-test-hooks-fault-injection)
+
 if (NOT LLAMA_SANITIZE_ADDRESS AND NOT GGML_SCHED_NO_REALLOC)
   # TODO: repair known memory leaks
   llama_build_and_test(test-opt.cpp)

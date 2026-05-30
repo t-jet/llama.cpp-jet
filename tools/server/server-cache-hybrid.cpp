@@ -13,7 +13,8 @@ hybrid_cache_controller::hybrid_cache_controller(
     int32_t limit_size_mib,
     size_t limit_tokens,
     llama_context * ctx_tgt,
-    llama_context * ctx_dft)
+    llama_context * ctx_dft,
+    const std::string & cold_path)
     : params(params)
     , limit_tokens(limit_tokens)
     , ctx_tgt(ctx_tgt)
@@ -21,9 +22,345 @@ hybrid_cache_controller::hybrid_cache_controller(
 {
     this->limit_size_unlimited = limit_size_mib < 0;
     this->limit_size = this->limit_size_unlimited ? 0 : 1024ull * 1024ull * limit_size_mib;
+
+    // Configure cold store if path is provided
+    if (!cold_path.empty()) {
+        if (!cold_store.configure(cold_path, COLD_STORE_FORMAT_VERSION_1)) {
+            SRV_ERR(" - hybrid cache: cold store configuration failed for path '%s'\n", cold_path.c_str());
+            throw std::runtime_error("cold store configuration failed: " + cold_path);
+        }
+
+        // Wire the cold store to the I/O worker
+        io_worker.set_cold_store(&cold_store);
+
+        // Start the I/O worker thread
+        if (!io_worker.start()) {
+            SRV_ERR(" - hybrid cache: failed to start cold store I/O worker thread\n%s", "");
+            throw std::runtime_error("cold store I/O worker thread start failed");
+        }
+
+        SRV_INF(" - hybrid cache: cold store configured at '%s'\n", cold_path.c_str());
+    }
+}
+
+hybrid_cache_controller::~hybrid_cache_controller() {
+    // Stop the I/O worker before releasing the cold store
+    if (io_worker.is_running()) {
+        io_worker.stop();
+    }
+}
+
+bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: demote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        return false;
+    }
+
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    // Validate eligibility for demotion
+    if (descriptor.residency != payload_residency_state::hot) {
+        SRV_WRN(" - hybrid cache: demote_payload: payload_id %" PRIu64 " is not hot (residency=%d)\n",
+                payload_id, static_cast<int>(descriptor.residency));
+        return false;
+    }
+
+    if (!cold_store.is_configured()) {
+        SRV_WRN(" - hybrid cache: demote_payload: cold store not configured\n%s", "");
+        return false;
+    }
+
+    // Check for in-progress demotion
+    if (descriptor.residency == payload_residency_state::demoting) {
+        SRV_WRN(" - hybrid cache: demote_payload: payload_id %" PRIu64 " is already demoting\n", payload_id);
+        return false;
+    }
+
+    // Get the hot payload record
+    auto record_it = hot_payloads.find(descriptor.store_ref.id);
+    if (record_it == hot_payloads.end()) {
+        SRV_ERR(" - hybrid cache: demote_payload: hot record not found for payload_id %" PRIu64 "\n", payload_id);
+        return false;
+    }
+
+    const hot_payload_record & record = record_it->second;
+
+    // Validate pairing invariant for target_and_draft
+    if (descriptor.pair_state == payload_pair_state::target_and_draft) {
+        if (record.draft.empty() || descriptor.draft_size_bytes == 0) {
+            SRV_ERR(" - hybrid cache: demote_payload: target_and_draft descriptor missing draft for payload_id %" PRIu64 "\n",
+                    payload_id);
+            return false;
+        }
+    }
+
+    // Transition to demoting state (NB-5: hot bytes are NOT released yet)
+    descriptor.residency = payload_residency_state::demoting;
+
+    // Build descriptor snapshot for the worker
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = descriptor.payload_id;
+    snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
+    snapshot.format_version = descriptor.format_version;
+    snapshot.target_size_bytes = descriptor.target_size_bytes;
+    snapshot.draft_size_bytes = descriptor.draft_size_bytes;
+    snapshot.target_checksum = descriptor.target_checksum;
+    snapshot.draft_checksum = descriptor.draft_checksum;
+
+    // Enqueue demotion task (NB-2: fail-fast on queue full)
+    bool enqueued = io_worker.enqueue_demotion(
+        payload_id,
+        snapshot,
+        record.target,
+        record.draft);
+
+    if (!enqueued) {
+        // Queue full: revert to hot immediately (NB-2)
+        descriptor.residency = payload_residency_state::hot;
+        n_demotion_queue_full++;
+        SRV_WRN(" - hybrid cache: demote_payload: queue full, reverting payload_id %" PRIu64 " to hot\n", payload_id);
+        return false;
+    }
+
+    SRV_DBG(" - hybrid cache: demote_payload: enqueued payload_id %" PRIu64 " for demotion\n", payload_id);
+    return true;
+}
+
+bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: promote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        return false;
+    }
+
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    // Validate eligibility for promotion
+    // Check for in-progress promotion first (before the cold check, since
+    // promoting is a transient state that should produce a specific diagnostic)
+    if (descriptor.residency == payload_residency_state::promoting) {
+        SRV_WRN(" - hybrid cache: promote_payload: payload_id %" PRIu64 " is already promoting\n", payload_id);
+        return false;
+    }
+
+    if (descriptor.residency != payload_residency_state::cold) {
+        SRV_WRN(" - hybrid cache: promote_payload: payload_id %" PRIu64 " is not cold (residency=%d)\n",
+                payload_id, static_cast<int>(descriptor.residency));
+        return false;
+    }
+
+    if (!cold_store.is_configured()) {
+        SRV_WRN(" - hybrid cache: promote_payload: cold store not configured\n%s", "");
+        return false;
+    }
+
+    // Transition to promoting state
+    descriptor.residency = payload_residency_state::promoting;
+
+    // Build descriptor snapshot for validation during promotion
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = descriptor.payload_id;
+    snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
+    snapshot.format_version = descriptor.format_version;
+    snapshot.target_size_bytes = descriptor.target_size_bytes;
+    snapshot.draft_size_bytes = descriptor.draft_size_bytes;
+    snapshot.target_checksum = descriptor.target_checksum;
+    snapshot.draft_checksum = descriptor.draft_checksum;
+
+    // Enqueue promotion task (NB-2: fail-fast on queue full)
+    cold_ref ref = descriptor.store_ref.id;
+    bool enqueued = io_worker.enqueue_promotion(payload_id, ref, snapshot);
+
+    if (!enqueued) {
+        // Queue full: revert to cold immediately (NB-2)
+        descriptor.residency = payload_residency_state::cold;
+        n_promotion_queue_full++;
+        SRV_WRN(" - hybrid cache: promote_payload: queue full, reverting payload_id %" PRIu64 " to cold\n", payload_id);
+        return false;
+    }
+
+    // Step 10: Record enqueue timestamp for latency tracking
+    promotion_enqueue_time = std::chrono::steady_clock::now();
+
+    SRV_DBG(" - hybrid cache: promote_payload: enqueued payload_id %" PRIu64 " for promotion\n", payload_id);
+    return true;
+}
+
+void hybrid_cache_controller::process_completions() {
+    if (!io_worker.is_running()) {
+        return;
+    }
+
+    std::vector<io_completion_result> results = io_worker.drain_results();
+    for (auto & result : results) {
+        if (result.is_demotion) {
+            handle_demotion_completion(result);
+        } else {
+            handle_promotion_completion(result);
+        }
+    }
+}
+
+void hybrid_cache_controller::handle_demotion_completion(io_completion_result & result) {
+    auto descriptor_it = payload_descriptors.find(result.payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: demotion completion: descriptor not found for payload_id %" PRIu64 "\n",
+                result.payload_id);
+        return;
+    }
+
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    // Verify the descriptor is in demoting state
+    if (descriptor.residency != payload_residency_state::demoting) {
+        SRV_WRN(" - hybrid cache: demotion completion: payload_id %" PRIu64 " is not in demoting state (residency=%d)\n",
+                result.payload_id, static_cast<int>(descriptor.residency));
+        return;
+    }
+
+    if (result.success) {
+        // Success: set cold ref, transition to cold, release hot bytes (NB-5)
+        descriptor.store_ref.id = result.ref;
+        descriptor.residency = payload_residency_state::cold;
+        // Track cold payload bytes (target + draft)
+        n_cold_payload_bytes += descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        // Step 10: Track cold payload count
+        n_cold_payload_count++;
+        hot_payloads.erase(descriptor.payload_id);
+        n_demotion_successes++;
+
+        SRV_INF(" - hybrid cache: demotion completed for payload_id %" PRIu64 " (ref %" PRIu64 ")\n",
+                result.payload_id, result.ref);
+    } else {
+        // Step 10: Track demotion failure reasons
+        if (result.failure_reason == io_failure_reason::write_error) {
+            n_demotion_failure_write_error++;
+        } else {
+            n_demotion_failure_other++;
+        }
+
+        // Failure: check if hot record still exists
+        auto record_it = hot_payloads.find(descriptor.payload_id);
+        if (record_it != hot_payloads.end()) {
+            // Hot bytes still exist: revert to hot (NB-5 pinning)
+            descriptor.residency = payload_residency_state::hot;
+            n_demotion_failures++;
+            SRV_ERR(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", reverting to hot (failure_reason=%d)\n",
+                    result.payload_id, static_cast<int>(result.failure_reason));
+        } else {
+            // Hot bytes gone: mark as evicted
+            descriptor.residency = payload_residency_state::evicted;
+            descriptor.resident_payload_bytes = 0;
+            n_demotion_failures++;
+            SRV_ERR(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", hot bytes gone, marking evicted (failure_reason=%d)\n",
+                    result.payload_id, static_cast<int>(result.failure_reason));
+        }
+    }
+}
+
+void hybrid_cache_controller::handle_promotion_completion(io_completion_result & result) {
+    auto descriptor_it = payload_descriptors.find(result.payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: promotion completion: descriptor not found for payload_id %" PRIu64 "\n",
+                result.payload_id);
+        return;
+    }
+
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    // Verify the descriptor is in promoting state
+    if (descriptor.residency != payload_residency_state::promoting) {
+        SRV_WRN(" - hybrid cache: promotion completion: payload_id %" PRIu64 " is not in promoting state (residency=%d)\n",
+                result.payload_id, static_cast<int>(descriptor.residency));
+        return;
+    }
+
+    // Step 10: Compute promotion latency and bucket it
+    auto completion_time = std::chrono::steady_clock::now();
+    auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(completion_time - promotion_enqueue_time).count();
+    double elapsed_ms = elapsed_us / 1000.0;
+    if (elapsed_ms < 1.0) {
+        n_promotion_latency_buckets[0]++;
+    } else if (elapsed_ms < 5.0) {
+        n_promotion_latency_buckets[1]++;
+    } else if (elapsed_ms < 10.0) {
+        n_promotion_latency_buckets[2]++;
+    } else if (elapsed_ms < 50.0) {
+        n_promotion_latency_buckets[3]++;
+    } else if (elapsed_ms < 100.0) {
+        n_promotion_latency_buckets[4]++;
+    } else if (elapsed_ms < 500.0) {
+        n_promotion_latency_buckets[5]++;
+    } else if (elapsed_ms < 1000.0) {
+        n_promotion_latency_buckets[6]++;
+    } else {
+        n_promotion_latency_buckets[7]++;
+    }
+
+    // Step 11: Check for injected promotion failure
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    if (debug_promotion_failure_payload_ids_.count(result.payload_id) > 0) {
+        result.success = false;
+        result.failure_reason = io_failure_reason::validation_target_checksum_mismatch;
+        debug_promotion_failure_payload_ids_.erase(result.payload_id);
+    }
+#endif
+
+    if (result.success) {
+        // Success: insert promoted bytes into hot store, update descriptor
+        hot_payload_record record;
+        record.payload_id = descriptor.payload_id;
+        record.target = std::move(result.target_bytes);
+        record.draft = std::move(result.draft_bytes);
+
+        descriptor.store_ref.id = record.payload_id;
+        descriptor.residency = payload_residency_state::hot;
+        hot_payloads[record.payload_id] = std::move(record);
+        n_promotion_successes++;
+
+        // Step 10: Update cold payload count (promotion removes from cold)
+        if (n_cold_payload_count > 0) {
+            n_cold_payload_count--;
+        }
+        if (n_cold_payload_bytes >= descriptor.target_size_bytes + descriptor.draft_size_bytes) {
+            n_cold_payload_bytes -= descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        }
+
+        SRV_INF(" - hybrid cache: promotion completed for payload_id %" PRIu64 "\n%s",
+                result.payload_id, "");
+    } else {
+        // Failure: mark as evicted
+        descriptor.residency = payload_residency_state::evicted;
+        descriptor.resident_payload_bytes = 0;
+        n_promotion_failures++;
+
+        // Step 10: Track promotion failure reasons
+        if (result.failure_reason == io_failure_reason::validation_target_checksum_mismatch ||
+            result.failure_reason == io_failure_reason::validation_draft_checksum_mismatch ||
+            result.failure_reason == io_failure_reason::validation_header_checksum_mismatch) {
+            n_promotion_failure_checksum_mismatch++;
+        } else if (result.failure_reason == io_failure_reason::validation_file_not_found) {
+            n_promotion_failure_not_found++;
+        } else {
+            n_promotion_failure_other++;
+        }
+
+        // Step 10: Update cold payload count (evicted from cold)
+        if (n_cold_payload_count > 0) {
+            n_cold_payload_count--;
+        }
+        n_cold_evictions++;
+
+        SRV_ERR(" - hybrid cache: promotion failed for payload_id %" PRIu64 ", marking evicted (failure_reason=%d)\n",
+                result.payload_id, static_cast<int>(result.failure_reason));
+    }
 }
 
 void hybrid_cache_controller::update() {
+    // Phase 6: Process any pending I/O completions from the worker
+    process_completions();
+
     evict_until_within_budget();
 
     while (!entries.empty() && limit_tokens > 0 && calculate_total_tokens() > limit_tokens) {
@@ -67,6 +404,9 @@ json hybrid_cache_controller::get_stats() const {
     }
     
     size_t hot_descriptors = 0;
+    size_t demoting_descriptors = 0;
+    size_t promoting_descriptors = 0;
+    size_t cold_descriptors = 0;
     size_t evicted_descriptors = 0;
     size_t target_only_descriptors = 0;
     size_t target_and_draft_descriptors = 0;
@@ -74,6 +414,12 @@ json hybrid_cache_controller::get_stats() const {
         const auto & descriptor = item.second;
         if (descriptor.residency == payload_residency_state::hot) {
             hot_descriptors++;
+        } else if (descriptor.residency == payload_residency_state::demoting) {
+            demoting_descriptors++;
+        } else if (descriptor.residency == payload_residency_state::promoting) {
+            promoting_descriptors++;
+        } else if (descriptor.residency == payload_residency_state::cold) {
+            cold_descriptors++;
         } else if (descriptor.residency == payload_residency_state::evicted) {
             evicted_descriptors++;
         }
@@ -110,7 +456,37 @@ json hybrid_cache_controller::get_stats() const {
         {"n_restore_draft_apply_failures", n_restore_draft_apply_failures},
         {"n_restore_commit_failures", n_restore_commit_failures},
         {"n_restore_rollback_failures", n_restore_rollback_failures},
+        // Phase 6: Cold layer statistics
+        {"n_demotion_successes", n_demotion_successes},
+        {"n_demotion_failures", n_demotion_failures},
+        {"n_promotion_successes", n_promotion_successes},
+        {"n_promotion_failures", n_promotion_failures},
+        {"n_cold_evictions", n_cold_evictions},
+        {"n_demotion_queue_full", n_demotion_queue_full},
+        {"n_promotion_queue_full", n_promotion_queue_full},
+        {"n_cold_payload_bytes", n_cold_payload_bytes},
+        {"n_cold_payload_count", n_cold_payload_count},
+        {"n_protected_root_demotions", n_protected_root_demotions},
+        // Step 10: Promotion failure reason counters
+        {"n_promotion_failure_checksum_mismatch", n_promotion_failure_checksum_mismatch},
+        {"n_promotion_failure_not_found", n_promotion_failure_not_found},
+        {"n_promotion_failure_other", n_promotion_failure_other},
+        // Step 10: Demotion failure reason counters
+        {"n_demotion_failure_write_error", n_demotion_failure_write_error},
+        {"n_demotion_failure_other", n_demotion_failure_other},
+        // Step 10: Promotion latency histogram buckets
+        {"n_promotion_latency_bucket_0_1ms", n_promotion_latency_buckets[0]},
+        {"n_promotion_latency_bucket_1_5ms", n_promotion_latency_buckets[1]},
+        {"n_promotion_latency_bucket_5_10ms", n_promotion_latency_buckets[2]},
+        {"n_promotion_latency_bucket_10_50ms", n_promotion_latency_buckets[3]},
+        {"n_promotion_latency_bucket_50_100ms", n_promotion_latency_buckets[4]},
+        {"n_promotion_latency_bucket_100_500ms", n_promotion_latency_buckets[5]},
+        {"n_promotion_latency_bucket_500_1000ms", n_promotion_latency_buckets[6]},
+        {"n_promotion_latency_bucket_over_1000ms", n_promotion_latency_buckets[7]},
         {"n_hot_payload_descriptors", hot_descriptors},
+        {"n_demoting_payload_descriptors", demoting_descriptors},
+        {"n_promoting_payload_descriptors", promoting_descriptors},
+        {"n_cold_payload_descriptors", cold_descriptors},
         {"n_evicted_payload_descriptors", evicted_descriptors},
         {"n_target_only_payload_descriptors", target_only_descriptors},
         {"n_target_and_draft_payload_descriptors", target_and_draft_descriptors},
@@ -380,9 +756,33 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
         }
 
         GGML_UNUSED(reason);
+
+        // Phase 6: Attempt demotion before eviction when cold store is configured.
+        // mark_payload_evicted handles the demotion path and returns early if
+        // demotion is initiated, leaving the entry in the list with cleared
+        // budget accounting. If demotion fails or cold store is not configured,
+        // it falls through to immediate eviction.
+        uint64_t payload_id = it->payload_id;
+        mark_payload_evicted(*it);
+
+        // Check if the payload was demoted (descriptor is now demoting or cold)
+        // rather than evicted.
+        auto desc_it = payload_descriptors.find(payload_id);
+        if (desc_it != payload_descriptors.end() &&
+            (desc_it->second.residency == payload_residency_state::demoting ||
+             desc_it->second.residency == payload_residency_state::cold)) {
+            // Demotion initiated or completed: keep the entry but remove from
+            // LRU and prefix indices so it won't be selected for eviction again.
+            remove_from_lru_index(it);
+            remove_from_prefix_index(it);
+            n_evictions++;
+            return true;
+        }
+
+        // Immediate eviction: remove from indices and erase the entry.
+        // The descriptor was already set to evicted by mark_payload_evicted.
         remove_from_lru_index(it);
         remove_from_prefix_index(it);
-        remove_payload(it->payload_id);
         entries.erase(it);
         n_evictions++;
         n_payload_evictions++;
@@ -493,6 +893,12 @@ bool hybrid_cache_controller::debug_inject_first_payload_fault_for_tests(payload
             return true;
         case payload_debug_fault::draft_checksum_mismatch:
             descriptor.draft_checksum ^= 0xff;
+            return true;
+        case payload_debug_fault::demoting_residency:
+            descriptor.residency = payload_residency_state::demoting;
+            return true;
+        case payload_debug_fault::promoting_residency:
+            descriptor.residency = payload_residency_state::promoting;
             return true;
     }
 
@@ -697,6 +1103,33 @@ void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
 
     auto descriptor_it = payload_descriptors.find(entry.payload_id);
     if (descriptor_it != payload_descriptors.end()) {
+        // Phase 6: If cold store is configured and payload is hot, attempt demotion
+        // instead of immediate eviction. If demotion is initiated, the descriptor
+        // transitions to demoting state and hot bytes are retained until the
+        // demotion completion callback releases them (NB-5).
+        if (cold_store.is_configured() &&
+            descriptor_it->second.residency == payload_residency_state::hot) {
+            // Emit warning if a protected root is being demoted
+            if (entry.protected_root) {
+                n_protected_root_demotions++;
+                SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", entry.payload_id);
+            }
+            if (demote_payload(entry.payload_id)) {
+                // Demotion initiated: hot bytes retained, descriptor is now demoting.
+                // Clear budget accounting so the payload is not counted as resident
+                // during the demoting state. Actual hot byte release happens in
+                // handle_demotion_completion().
+                descriptor_it->second.resident_payload_bytes = 0;
+                entry.resident_payload_bytes_cached = 0;
+                entry.has_target_payload_cached = false;
+                entry.has_draft_payload_cached = false;
+                return;
+            }
+            // Demotion failed (queue full, etc.): fall through to immediate eviction
+            SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", falling back to immediate eviction\n",
+                    entry.payload_id);
+        }
+
         descriptor_it->second.residency = payload_residency_state::evicted;
         descriptor_it->second.resident_payload_bytes = 0;
     }
@@ -764,10 +1197,16 @@ bool hybrid_cache_controller::validate_descriptor_against_record(
         return fail("payload record mismatch");
     }
     if (require_hot && descriptor.residency != payload_residency_state::hot) {
+        if (descriptor.residency == payload_residency_state::demoting) {
+            return fail("payload is in demoting transient state");
+        }
+        if (descriptor.residency == payload_residency_state::promoting) {
+            return fail("payload is in promoting transient state");
+        }
         return fail("payload is not hot");
     }
     if (descriptor.residency == payload_residency_state::cold) {
-        return fail("cold payload is not supported in stage 5");
+        return fail("cold payload requires promotion before restore");
     }
     if (!runtime_pair_matches(descriptor.pair_state, runtime_has_draft, failure_reason)) {
         return false;

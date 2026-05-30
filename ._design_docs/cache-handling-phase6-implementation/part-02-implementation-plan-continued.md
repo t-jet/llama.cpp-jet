@@ -48,7 +48,7 @@ Acceptance test: add a focused test that demotes a hot descriptor through a fake
 queue-full reverts residency to `hot`. Confirm hot bytes are still present in the hot record during
 the demotion window (before callback). Add cases to `tests/test-cache-controller.cpp`.
 
-Dependencies: Steps 1, 2, 3, 5.
+Dependencies: Steps 1, 2, 3, 5, 8.
 
 ---
 
@@ -80,13 +80,18 @@ Changes:
 - In `try_restore_from_cache`, when the selected descriptor has `residency_state == cold`, call
   `promote_payload` and fall back for the current request. Subsequent requests will find the
   descriptor hot after promotion completes.
+- **Implementation note on validation order:** design Part 3, promotion protocol step 6, contains
+  both prose and a numbered check list. The prose lists validation items in a different order
+  from the numbered list. Implementers must follow the numbered check list order (magic,
+  format_version, header_checksum, checksum_algorithm, payload_id, pair_state, target_size_bytes,
+  draft_size_bytes, target payload bytes, draft payload bytes), not the prose order.
 
 Acceptance test: add a focused test that promotes a cold descriptor through a fake cold store.
 Confirm `residency_state == hot` after `process_completions`. Confirm queue-full leaves
 `residency_state == cold`. Confirm draft-side failure for `target_and_draft` transitions to
 `evicted` and not partially hot. Add cases to `tests/test-cache-controller.cpp`.
 
-Dependencies: Steps 1, 4, 5, 6.
+Dependencies: Steps 1, 4, 5, 6, 8.
 
 ---
 
@@ -114,7 +119,7 @@ Changes:
   store.
 - `server-context.cpp`: in the server startup sequence that constructs the cache controller,
   validate `--cache-cold-path` (see Step 9) before passing it to the constructor. If validation
-  fails, abort startup with a diagnostic.
+  fails, terminate startup with an error diagnostic. Do not use the C `abort()` function; use a graceful exit mechanism (return error code, `exit()`, or throw).
 
 Acceptance test: construct `hybrid_cache_controller` with a valid temporary directory as cold path.
 Confirm `cold_store.is_configured()` returns true. Confirm the worker thread is running. Call the
@@ -142,15 +147,22 @@ Changes:
 - In `server_cache_store_cold::configure` or in the worker startup: worker thread creation failure
   is treated as startup failure. Log diagnostic and return failure.
 - In `server-context.cpp` startup: if `--cache-cold-path` is set and `configure` returns failure,
-  abort server startup before `accept()` with a message sufficient for an operator to correct the
+  terminate server startup with an error before `accept()` with a message sufficient for an operator to correct the
   configuration without consulting source code.
 - Add a world-writable directory check: if the cold store root is world-writable, emit a warning
-  diagnostic. Do not abort startup for this condition alone.
+  diagnostic. Do not terminate startup for this condition alone.
+- **Inherited check:** design Part 5 startup validation table includes a fifth check that
+  `--cache-ram` is set to a positive value when hybrid mode is enabled. This check was implemented
+  in Stage 4 and is not re-implemented in Step 9. The existing Stage 4 validation continues to run
+  in the startup path and is not broken by Step 9's changes. Step 9 adds only the four cold-store-
+  specific checks listed above.
 
 Acceptance test: start `llama-server` with a non-existent cold path; confirm exit before accepting
 requests with a diagnostic message. Start with a non-writable path (chmod 000 on Linux or deny
-write on Windows); confirm abort. Confirm that a valid path starts the server normally. These
+write on Windows); confirm termination. Confirm that a valid path starts the server normally. These
 checks can be added to the Python test suite as pytest cases.
+
+**Implementation note on startup failure handling:** All startup validation failures must terminate the server process using a graceful exit mechanism. Do not use the C `abort()` function or any mechanism that triggers a dialog or crash handler. Acceptable patterns include returning a non-zero exit code from `main()`, calling `exit(EXIT_FAILURE)`, or throwing an exception that is caught at the top level. The `abort()` function produces an unhandleable dialog on Windows and must not be used.
 
 Dependencies: Steps 2, 8.
 
@@ -279,5 +291,5 @@ After each numbered step completes, the developer records the following before a
 - For Steps 9 and 10: Python pytest output for relevant test cases
 - Any deviation from the plan and the resolution
 
-Evidence is written to a new implementation evidence part (`part-03-implementation-evidence.md`
+Evidence is written to a new implementation evidence part (`part-04-implementation-evidence.md`
 or later parts if size requires splitting) before the step is marked complete.
