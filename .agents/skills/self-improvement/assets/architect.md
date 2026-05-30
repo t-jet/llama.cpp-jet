@@ -63,3 +63,23 @@ Condition:
 
 Action:
 - Do verify that the prerequisite decision is recorded or linked in durable docs before returning PASS; don't treat a technically sound plan as approved when the document set still says the handoff is closed
+
+## Improvement: Cross-part protocol consistency in multi-part design reviews
+
+Condition:
+
+- When a multi-part design specifies a step-by-step protocol in one part and failure-mode handling for those same steps in a separate part, and the two parts can produce conflicting state outcomes (for example, a transient state set before an enqueue attempt but the failure table implies the prior state must be preserved on queue-full)
+
+Action:
+
+- Do read both the protocol steps and the failure-handling table together, identify any case where the protocol mutates state before a fallible step and the failure table implies that mutation must be reverted, and record that as a non-blocking observation with a concrete implementation contract requirement; don't flag it as a blocking finding if the correct outcome is unambiguous across both parts
+
+## Improvement: Dependency graph completeness in implementation plan reviews
+
+Condition:
+
+- When reviewing an implementation plan where later steps add member variables to a class and earlier-numbered steps add methods that use those same variables, but the dependency list on those method-adding steps does not reference the member-adding step
+
+Action:
+
+- Do trace each step's code changes to check that every member variable, function, or type referenced in the step's changes exists at the point that step's dependencies are satisfied; flag any case where a referenced symbol is only introduced in a later step as a blocking missing-dependency finding; don't assume numerical step order implies the correct dependency graph
