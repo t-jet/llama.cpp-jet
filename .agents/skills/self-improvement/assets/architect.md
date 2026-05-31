@@ -115,3 +115,11 @@ Condition:
 
 Action:
 - Do verify that each correction is implementable from the documented data model and does not pull deferred-stage behavior into the current stage without its required safety contract; don't limit the re-review to confirming that the old finding text disappeared
+
+## Improvement: One-gate stage design authoring
+
+Condition:
+- When a task asks to advance exactly one architecture gate by creating a new stage design deliverable
+
+Action:
+- Do mark the authored design as ready for independent review while leaving design review, manager gate, implementation planning, implementation, and QA gates unstarted; don't use the new design document to approve later gates or imply implementation authorization
