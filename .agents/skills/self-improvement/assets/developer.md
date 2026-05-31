@@ -18,7 +18,7 @@ Condition:
 
 Action:
 
-- Do verify the changed lines directly and report the path as changed; don't rely on plain `git diff`, because it does not show untracked file content.
+- Do verify the changed lines, status text, and line counts directly with file reads or searches, then report the path as changed; don't rely on plain `git diff`, because it does not show untracked file content.
 
 ## Improvement: Windows server pytest path
 
@@ -38,7 +38,7 @@ Condition:
 
 Action:
 
-- Do make the first action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, even when the user message includes AGENTS.md or environment instructions.
+- Do make the first visible action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, even when the user message includes AGENTS.md or environment instructions.
 
 ## Improvement: Test-results review gate classification
 
@@ -89,3 +89,33 @@ Condition:
 Action:
 
 - Do trace the full handoff from controller restore through slot launch and prompt processing; check request `cache_prompt`, explicit `id_slot` routing, and checkpoint/SWA replay guards before treating the mismatch as response serialization only.
+
+## Improvement: Split near-limit planning docs early
+
+Condition:
+
+- When creating durable implementation or planning documentation that is likely to approach the 300-line document limit
+
+Action:
+
+- Do split the entry into a short TOC/status file and part files before drafting the full content; don't leave an over-limit draft in the worktree while reviewing.
+
+## Improvement: Cache metric defaults across modes
+
+Condition:
+
+- When adding cache metrics that are sourced from hybrid-only stats but emitted through the shared server `/metrics` path
+
+Action:
+
+- Do verify the metric shape for both hybrid and legacy cache modes, and use safe default values for stats fields that legacy controllers do not report.
+
+## Improvement: Preserve local line endings in patch edits
+
+Condition:
+
+- When applying manual patches to files that may use CRLF or mixed line endings
+
+Action:
+
+- Do inspect the resulting diff for unnecessary line-ending churn and, if the patch changed unrelated lines only because of newline normalization, correct that before handoff.

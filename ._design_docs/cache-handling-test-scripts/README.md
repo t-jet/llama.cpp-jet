@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-05-28
+Last updated: 2026-05-31
 Status: Active reusable integration runner
 
 ## Scope
@@ -11,6 +11,10 @@ These PowerShell scripts support the integration scenarios in [cache-handling-te
 The Stage 4 plan includes resident payload byte budget enforcement, deterministic LRU ordering, successful and failed restore recency behavior, equivalent-entry refresh budget enforcement, protected-root priority and fallback eviction, protected admission rejection, metrics, legacy compatibility, and reusable evidence capture.
 
 The Stage 5 plan adds descriptor separation, hot payload ownership, descriptor validation, target/draft pair-state checks, draft runtime mode isolation, paired eviction and byte accounting, transactional rollback, empty-preimage rollback, unsupported clear preflight, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage. Most descriptor-corruption and restore-failure branches need focused controller or fault-injection evidence; public HTTP alone cannot create those preconditions.
+
+The Stage 6 plan adds cold payload storage and asynchronous I/O. Public HTTP can cover startup validation, opt-in behavior, metrics shape, and some demotion or promotion counter changes. Cold residency transitions, queue-full paths, file corruption, and draft-side promotion failure need focused controller, cold-store, or fault-injection evidence.
+
+The Stage 7 plan adds the branch graph foundation. Public HTTP can cover model-backed save/load regression, missing `/cache/stats`, and metric shape. Branch node lifecycle, traversal, slot refs, metadata soft-limit diagnostics, checksum candidate selection, and global cross-namespace eviction ordering rely on focused C++ evidence unless the session provides a stats-capable integration harness.
 
 ## Scripts
 
@@ -77,6 +81,8 @@ Stage 4 H30-H39 scenarios are part of the plan. The main runner does not impleme
 
 Stage 5 H40-H58 scenarios are part of the plan. The main runner does not implement the full Stage 5 descriptor, draft runtime mode, and transactional restore matrix. Normal target-only HTTP save/restore, metrics shape, legacy compatibility, and public surface checks are script-friendly. Descriptor version or kind corruption, checksum or size mismatch, owner/store-ref mismatch, non-hot or cold residency, pair-state/runtime mismatch, cross-mode draft namespace isolation, target/draft apply failures, empty-preimage rollback, and unsupported clear preflight require focused controller tests, cross-run cache persistence, or another fault-injection harness.
 
+Stage 7 G70-G89 scenarios are part of the plan. The main runner does not implement a dedicated Stage 7 matrix. Use it for public HTTP regression and metrics evidence, then cite `test-step12-branch-graph`, `test-cache-controller`, and `tools/server/tests/unit/test_cache_modes.py` for focused graph and metric-shape evidence. Do not mark graph-internal rows `PASS` from public requests alone.
+
 ### `run_stage4_h30_h37.ps1`
 
 Focused Stage 4 H30-H37 evidence rerun. It starts a fresh server for executable public HTTP rows, records explicit `PASS`, `FAIL`, `SKIP`, or `BLOCKED` outcomes, and writes the next available report under `._design_docs/.test_reports/`. Rows that lack a public precondition use accepted focused controller evidence when available, otherwise they report `BLOCKED` without starting a server.
@@ -119,6 +125,7 @@ Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --target llama-server -j 4
 cmake --build build --config Release --target test-cache-controller -j 4
+cmake --build build --config Release --target test-step12-branch-graph -j 4
 
 $Binary = Get-Item build\bin\Release\llama-server.exe
 $BuildAge = (Get-Date) - $Binary.LastWriteTime
@@ -128,6 +135,15 @@ if ($BuildAge.TotalMinutes -gt 10) {
 ```
 
 The runner repeats the timestamp check before it starts tests.
+
+For Stage 7 planning or execution sessions, focused checks use:
+
+```powershell
+ctest --test-dir build -C Release -R "test-step12-branch-graph|test-cache-controller" --output-on-failure
+$env:LLAMA_SERVER_BIN_PATH=(Resolve-Path build\bin\Release\llama-server.exe).Path
+$env:LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD='1'
+pytest tools/server/tests/unit/test_cache_modes.py
+```
 
 ## Usage
 
@@ -228,6 +244,16 @@ For Stage 5 cases, also capture:
 - whether evidence came from public HTTP, focused controller tests, or fault injection
 - proof that failed restore did not report a hit or refresh recency
 - empty-preimage rollback or unsupported clear preflight evidence when those rows are in scope
+
+For Stage 7 cases, also capture:
+
+- evidence source for each row: public HTTP, focused graph test, focused controller test, Python metric-shape test, or stats-capable harness
+- branch namespace IDs or fixture names used for same-namespace and cross-namespace assertions
+- slot-ref acquire/release sequence and whether active refs blocked eviction candidates
+- branch metadata bytes, metadata soft max, and over-limit state for soft-limit rows
+- lookup method evidence for token-span and checksum-span candidate selection
+- payload budget, measured payload size, and global candidate ordering for cross-namespace LRU rows
+- Stage 7 metric names and labels from `/metrics` when public observability is in scope
 
 ## Maintenance
 

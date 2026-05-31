@@ -31,3 +31,11 @@ Condition:
 
 Action:
 - Do pass global CLI options such as `--cd`, `--sandbox`, and `-a never` before the `exec` subcommand, then pass the prompt with `exec -`; use a timeout long enough for documentation edits and, if the wrapper times out, inspect the worktree and target deliverables before deciding whether to rerun; don't put global options after `exec`.
+
+## Improvement: subagent lifecycle during gated workflows
+
+Condition:
+- When managing a long staged workflow with repeated fresh review or correction sessions
+
+Action:
+- Do close completed subagents after their durable deliverable has been checked and before spawning the next gate owner, so the agent thread limit does not block required handoffs.

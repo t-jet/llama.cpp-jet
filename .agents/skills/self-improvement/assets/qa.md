@@ -105,3 +105,19 @@ Condition:
 Action:
 
 - Do check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after; if assertions are silently disabled, a Release-only crash may mask a real product bug or test infrastructure bug; run the Debug build as a cross-check and classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking the test step as PASS.
+
+## Improvement: verify markdown constraints after QA doc edits
+
+Condition:
+- When editing reusable QA markdown that must stay under repository line-count, ASCII, and whitespace rules
+
+Action:
+- Do run line-count, ASCII-byte, and whitespace checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect.
+
+## Improvement: load required memory before status updates
+
+Condition:
+- When a task requires self-improvement memory to be read before any other action
+
+Action:
+- Do read the skill and agent memory before sending any acknowledgement, skill announcement, status update, or task analysis; treat every user-visible reply as task action.

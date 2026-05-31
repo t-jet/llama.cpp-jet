@@ -21,7 +21,7 @@ public:
 
     // Save slot state to cache
     // Returns true if successful
-    virtual bool save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) = 0;
+    virtual bool save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) = 0;
 
     // Load matching cache entry into slot
     // Returns true if a match was found and loaded
@@ -33,6 +33,10 @@ public:
     virtual bool try_restore_from_cache(server_slot & slot, const server_task & task) {
         // Default: use standard load_slot (works for legacy cache)
         return load_slot(slot, task);
+    }
+
+    virtual void release_branch_node_ref(uint64_t node_id) {
+        GGML_UNUSED(node_id);
     }
 
     // Perform cache maintenance (eviction, cleanup)

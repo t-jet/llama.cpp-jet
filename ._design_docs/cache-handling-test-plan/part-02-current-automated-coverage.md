@@ -4,18 +4,20 @@ Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
 
 ## Scope boundary
 
-This plan is for integration tests only. It assumes unit and focused C++ tests are handled by a separate test plan or by the normal project test suite.
+This plan is primarily for model-backed public integration tests. It also classifies focused C++ and Python metric-shape evidence when public HTTP cannot create or observe an internal precondition.
 
-Do not use this document to track:
+Do not count these as model-backed public integration coverage:
 
 - `tests/test-cache-controller.cpp`
 - focused cache-controller line coverage
 - pure prefix-index, LRU, metadata, or compatibility-key helper tests
 - adopted Jinja fixture tests that do not start `llama-server`
 
-Those tests are useful, but they are not integration coverage.
+Those tests are useful, but reports must label them as focused or metric-shape evidence, not public HTTP evidence.
 
 For Stage 5, focused controller or fault-injection tests may be cited as supplemental evidence for internal failure preconditions that public HTTP cannot create. Report them as focused evidence, not as model-backed integration coverage.
+
+For Stage 7, focused graph and controller tests are expected evidence for branch node lifecycle, traversal, slot refs, metadata soft-limit diagnostics, checksum candidate selection, and global cross-namespace eviction ordering. Public HTTP remains required for model-backed save/load and public surface regression rows.
 
 ## Integration coverage needed
 

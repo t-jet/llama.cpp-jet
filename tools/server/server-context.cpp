@@ -24,6 +24,7 @@
 #include <exception>
 #include <memory>
 #include <filesystem>
+#include <unordered_set>
 #include <utility>
 
 // fix problem with std::min and std::max
@@ -114,6 +115,7 @@ struct server_slot {
     server_prompt prompt;
     prepared_prompt_metadata prompt_metadata;
     bool checkpoints_enabled = true;
+    uint64_t hybrid_cache_branch_node_id = 0;
 
     static size_t checkpoints_size(const server_prompt & src_prompt) {
         size_t total = 0;
@@ -307,6 +309,12 @@ struct server_slot {
         prompt.tokens.clear();
         prompt_metadata.clear();
         hybrid_cache_restored = false;
+        if (hybrid_cache_branch_node_id != 0) {
+            if (callback_on_branch_ref_release) {
+                callback_on_branch_ref_release(hybrid_cache_branch_node_id);
+            }
+            hybrid_cache_branch_node_id = 0;
+        }
     }
 
     std::vector<common_adapter_lora_info> lora;
@@ -330,6 +338,7 @@ struct server_slot {
     double t_token_generation = 0.0;  // ms
 
     std::function<void(int /* id_slot */)> callback_on_release;
+    std::function<void(uint64_t /* node_id */)> callback_on_branch_ref_release;
 
     // Speculative decoding stats
     int32_t n_draft_total = 0;      // Total draft tokens generated
@@ -1157,6 +1166,11 @@ private:
 
             slot.callback_on_release = [this](int id_slot) {
                 queue_tasks.pop_deferred_task(id_slot);
+            };
+            slot.callback_on_branch_ref_release = [this](uint64_t node_id) {
+                if (cache_ctrl) {
+                    cache_ctrl->release_branch_node_ref(node_id);
+                }
             };
 
             slot.reset();
@@ -4406,6 +4420,25 @@ void server_routes::init_routes() {
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"} " << value << "\n";
             };
+            const auto write_cache_metric_with_label = [&prometheus, &mode](
+                    const char * type, const char * name, const char * help,
+                    const char * label_name, const std::string & label_value, auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_name << "=\""
+                            << label_value << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_two_labels = [&prometheus, &mode](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << label_a_value << "\"," << label_b_name << "=\""
+                            << label_b_value << "\"} " << value << "\n";
+            };
 
             write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
             write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
@@ -4419,6 +4452,74 @@ void server_routes::init_routes() {
             write_cache_metric("counter", "llamacpp_cache_descriptor_validation_failures_total", "Payload descriptor validation failures by mode.", json_value(cache_stats, "n_descriptor_validation_failures", 0));
             write_cache_metric("counter", "llamacpp_cache_pairing_violations_total", "Payload target and draft pairing violations by mode.", json_value(cache_stats, "n_pairing_violations", 0));
             write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
+            write_cache_metric("counter", "cache_branch_nodes_created_total", "Branch nodes created by mode.", json_value(cache_stats, "n_branch_nodes_created", 0));
+            const json branch_lookup_namespaces = cache_stats.contains("branch_lookup_namespaces") ? cache_stats["branch_lookup_namespaces"] : json::object();
+            const auto write_lookup_method = [&](
+                    const char * method,
+                    const char * legacy_total_key,
+                    const json & namespace_stats) {
+                const json method_stats = branch_lookup_namespaces.contains(method) ?
+                    branch_lookup_namespaces[method] : json::object();
+                if (method_stats.empty()) {
+                    if (namespace_stats.empty()) {
+                        write_cache_metric_with_two_labels(
+                            "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                            "namespace", "none", "method", method, json_value(cache_stats, legacy_total_key, 0));
+                    } else {
+                        for (const auto & ns : namespace_stats.items()) {
+                            write_cache_metric_with_two_labels(
+                                "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                                "namespace", ns.key(), "method", method, 0);
+                        }
+                    }
+                    return;
+                }
+                for (const auto & ns : method_stats.items()) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                        "namespace", ns.key(), "method", method, ns.value());
+                }
+            };
+            write_cache_metric("counter", "cache_branch_lookup_hits_total", "Branch lookup hits by mode.", json_value(cache_stats, "n_branch_lookup_hits", 0));
+            const json branch_forest = cache_stats.contains("branch_forest") ? cache_stats["branch_forest"] : json::object();
+            const json namespace_stats = branch_forest.contains("namespaces") ? branch_forest["namespaces"] : json::object();
+            write_lookup_method("token_span", "n_branch_token_lookups", namespace_stats);
+            write_lookup_method("checksum_span", "n_branch_checksum_lookups", namespace_stats);
+            const json branch_traversals = cache_stats.contains("branch_traversals") ? cache_stats["branch_traversals"] : json::object();
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "path_to_root", json_value(branch_traversals, "path_to_root", 0));
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "descendants", json_value(branch_traversals, "descendants", 0));
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "children", json_value(branch_traversals, "children", 0));
+            write_cache_metric("gauge",   "cache_namespace_count", "Current branch namespace count by mode.", namespace_stats.size());
+            if (namespace_stats.empty()) {
+                write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", "none", 0);
+            } else {
+                for (const auto & ns : namespace_stats.items()) {
+                    const std::string namespace_id = ns.key();
+                    write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", namespace_id, json_value(ns.value(), "nodes", 0));
+                    write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", namespace_id, json_value(ns.value(), "roots", 0));
+                    write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", namespace_id, json_value(ns.value(), "metadata_bytes", 0));
+                }
+            }
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_bytes", "Current branch metadata RAM bytes by mode.", json_value(cache_stats, "branch_metadata_bytes", 0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_soft_max_bytes", "Branch metadata RAM soft limit by mode.", json_value(cache_stats, "branch_metadata_soft_max_bytes", 0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_ratio", "Branch metadata RAM ratio by mode.", json_value(branch_forest, "metadata_ratio", 0.0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_over_limit", "Whether branch metadata exceeds its soft limit by mode.", json_value(cache_stats, "branch_metadata_over_limit", false) ? 1 : 0);
+            write_cache_metric_with_label("counter", "cache_eviction_payloads_total", "Payload eviction or demotion decisions by action.", "action", "evict", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric_with_label("counter", "cache_eviction_payload_bytes_total", "Payload bytes evicted or demoted by action.", "action", "evict", json_value(cache_stats, "n_payload_eviction_bytes", 0));
+            write_cache_metric("counter", "cache_eviction_payload_blocked_refs_total", "Payload eviction candidates blocked by active slot refs by mode.", json_value(cache_stats, "n_eviction_payload_blocked_refs", 0));
+            write_cache_metric_with_label("counter", "cache_protected_root_payload_decisions_total", "Protected-root payload decisions by decision.", "decision", "all", json_value(cache_stats, "n_protected_root_decisions", 0));
+            write_cache_metric_with_label("gauge", "cache_protected_root_payload_bytes", "Protected-root payload bytes by residency.", "residency", "hot", json_value(cache_stats, "protected_payload_bytes", 0));
+            write_cache_metric("counter", "cache_slot_ref_acquires_total", "Branch slot reference acquires by mode.", json_value(cache_stats, "n_slot_ref_acquires", 0));
+            write_cache_metric("counter", "cache_slot_ref_releases_total", "Branch slot reference releases by mode.", json_value(cache_stats, "n_slot_ref_releases", 0));
+            write_cache_metric("counter", "cache_forest_lock_acquires_total", "Branch forest lock acquires by mode.", json_value(cache_stats, "n_forest_lock_acquires", 0));
+            write_cache_metric("counter", "cache_forest_lock_retries_total", "Branch forest lock retries by mode.", json_value(cache_stats, "n_forest_lock_retries", 0));
+            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "pass", json_value(cache_stats, "n_namespace_validation_passes", 0));
+            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "fail", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            write_cache_metric("counter", "cache_namespace_validation_failures_total", "Namespace validation failures by mode.", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            const int branch_peak_refs = cache_stats.contains("branch_forest") ? json_value(cache_stats["branch_forest"], "peak_concurrent_refs", 0) : 0;
+            write_cache_metric("gauge", "cache_slot_ref_concurrent_peak", "Peak branch slot references by mode.", branch_peak_refs);
             write_cache_metric("gauge",   "llamacpp_cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
             write_cache_metric("gauge",   "llamacpp_cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
             // Phase 6 Step 10: Cold layer Prometheus metrics
@@ -5287,7 +5388,27 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
 // server_slot is private to this translation unit.
 //
 
-bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) {
+static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
+    const llama_tokens & raw = tokens.get_tokens();
+    return std::vector<llama_token>(raw.begin(), raw.end());
+}
+
+bool hybrid_cache_controller::acquire_branch_node_ref_for_slot(server_slot & slot, uint64_t node_id) {
+    if (node_id == 0 || slot.hybrid_cache_branch_node_id == node_id) {
+        return node_id != 0;
+    }
+    if (!forest.acquire_slot_ref(node_id)) {
+        return false;
+    }
+    n_slot_ref_acquires++;
+    if (slot.hybrid_cache_branch_node_id != 0) {
+        release_branch_node_ref(slot.hybrid_cache_branch_node_id);
+    }
+    slot.hybrid_cache_branch_node_id = node_id;
+    return true;
+}
+
+bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) {
     if (slot.prompt.tokens.empty()) {
         SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
         return false;
@@ -5348,6 +5469,7 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
     auto existing = find_exact_match(entry.tokens, entry.namespace_id);
     if (existing != entries.end()) {
         refresh_existing_entry(existing, protected_root);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
         SRV_DBG(" - hybrid cache: updated existing entry with %zu tokens (namespace: %s)\n",
                 entry.tokens.size(), entry.namespace_id.c_str());
         return true;
@@ -5394,6 +5516,8 @@ bool hybrid_cache_controller::save_slot(const server_slot & slot, const prepared
 
     entries.push_back(std::move(entry));
     auto it_new = std::prev(entries.end());
+    create_branch_node_for_entry(*it_new);
+    acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
     add_to_lru_index(it_new);
     add_to_prefix_index(it_new);
     evict_until_within_budget();
@@ -5415,13 +5539,36 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
 
     // Find best matching entry
     std::list<hybrid_cache_entry>::iterator it_best = entries.end();
+    record_branch_lookup(lookup_namespace_id, "token_span");
     
-    // Search for exact match
-    for (auto it = entries.begin(); it != entries.end(); ++it) {
-        if (it->namespace_id != lookup_namespace_id) {
+    const auto lookup_tokens = cache_tokens_to_vector(task.tokens);
+    auto forest_candidates = forest.find_nodes_by_token_span(lookup_namespace_id, lookup_tokens, lookup_tokens.size());
+    std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
+    for (const auto & boundary : task.prompt_metadata.boundaries) {
+        if (boundary.token_start != 0 || boundary.checksum == 0 || boundary.token_end == 0 ||
+            boundary.token_end > lookup_tokens.size()) {
+            continue;
+        }
+        record_branch_lookup(lookup_namespace_id, "checksum_span");
+        auto checksum_candidates = forest.find_nodes_by_checksum_span(
+            lookup_namespace_id, boundary.checksum, boundary.token_end);
+        for (uint64_t node_id : checksum_candidates) {
+            if (seen_candidates.insert(node_id).second) {
+                forest_candidates.push_back(node_id);
+            }
+        }
+    }
+    for (uint64_t node_id : forest_candidates) {
+        auto it = find_entry_by_branch_node(node_id);
+        if (it == entries.end()) {
+            continue;
+        }
+        if (!validate_namespace_compatibility(lookup_namespace_id, it->namespace_id)) {
+            n_namespace_validation_failures++;
             SRV_DBG("%s", " - hybrid cache: try_restore - skipping entry with different namespace\n");
             continue;
         }
+        n_namespace_validation_passes++;
 
         const int common_prefix = it->tokens.get_common_prefix(task.tokens);
         
@@ -5431,6 +5578,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             it_best = it;
             SRV_INF(" - hybrid cache: try_restore - found match: task %d tokens, entry %d tokens, prefix %d\n", 
                     (int)task.tokens.size(), it->n_tokens(), common_prefix);
+            n_branch_lookup_hits++;
             break;
         } else {
             SRV_DBG(" - hybrid cache: try_restore - partial match %d tokens (entry: %d, task: %zu)\n",
@@ -5596,7 +5744,9 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
 
     const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
     it_best->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it_best);
     update_lru_index(it_best, old_key);
+    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
 
     // Update slot state with restored data
     slot.prompt.tokens.clear();
@@ -5782,7 +5932,9 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
 
     const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
     it_best->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it_best);
     update_lru_index(it_best, old_key);
+    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
 
     slot.prompt.tokens.clear();
     for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {
@@ -5815,7 +5967,7 @@ legacy_cache_controller::legacy_cache_controller(
     cache = std::make_unique<server_prompt_cache>(limit_size_mib, limit_tokens);
 }
 
-bool legacy_cache_controller::save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) {
+bool legacy_cache_controller::save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) {
     GGML_UNUSED(metadata);
     return const_cast<server_slot &>(slot).prompt_save(*cache, true);
 }

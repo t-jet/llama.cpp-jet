@@ -313,6 +313,13 @@ target_include_directories(test-step11-test-hooks-fault-injection PRIVATE ${CMAK
 target_compile_definitions(test-step11-test-hooks-fault-injection PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-step11-test-hooks-fault-injection)
 
+# test-step12-branch-graph covers the Stage 7 branch graph module
+llama_build(test-step12-branch-graph.cpp get-model.cpp)
+target_link_libraries(test-step12-branch-graph PRIVATE server-context)
+target_include_directories(test-step12-branch-graph PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step12-branch-graph PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step12-branch-graph)
+
 if (NOT LLAMA_SANITIZE_ADDRESS AND NOT GGML_SCHED_NO_REALLOC)
   # TODO: repair known memory leaks
   llama_build_and_test(test-opt.cpp)

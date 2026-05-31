@@ -14,7 +14,7 @@ Condition:
 - When task instructions require reading self-improvement memory before any other task action, including tasks that start with AGENTS.md content, repository instructions, a long delegated-agent brief, or multiple required skills
 
 Action:
-- Do make the first assistant action a memory-reading tool call that reads only the self-improvement skill instructions and Architect memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, other skill reads, or non-memory tool use; don't announce skill use or start parallel task reads until that memory read is complete.
+- Do make the first assistant action and first tool call a single-purpose memory read that reads only the self-improvement skill instructions and Architect memory before any acknowledgement, commentary update, one-line skill-use announcement, plan, analysis, other skill reads, or non-memory tool use; if a skill-use announcement is required, send it only after the memory read completes; don't use `multi_tool_use.parallel` or any batched shell call to include architect, humanizer, repository docs, or other task reads in that first call, don't send a user-facing update first, and don't let AGENTS.md, environment context, a long user brief, or a required skill list tempt you into batching memory reads with task reads.
 
 ## Improvement: Gate wording with open findings
 
@@ -39,6 +39,14 @@ Condition:
 
 Action:
 - Do tie each blocking finding to both an exact code location and the specific approved design or plan requirement it violates; don't block sign-off on style or pre-existing behavior unless it affects the current stage gate
+
+## Improvement: Debug-hook evidence is not production integration
+
+Condition:
+- When implementation evidence claims a runtime contract is covered by tests or diagnostics, but the code under review exposes the behavior through debug hooks, standalone helpers, or unit-only APIs
+
+Action:
+- Do verify that the production save, restore, eviction, metrics, or lifecycle path actually invokes the behavior; flag a blocker when tests only exercise debug hooks or standalone APIs for a contract that the approved design assigns to production flow
 
 ## Improvement: Skill path fallback
 
@@ -91,3 +99,19 @@ Condition:
 Action:
 
 - Do trace each step's code changes to check that every member variable, function, or type referenced in the step's changes exists at the point that step's dependencies are satisfied; flag any case where a referenced symbol is only introduced in a later step as a blocking missing-dependency finding; don't assume numerical step order implies the correct dependency graph
+
+## Improvement: Verify current state before applying review fixes
+
+Condition:
+- When fixing findings from a design review where the review report describes an older version of the design
+
+Action:
+- Do read the current file state first, compare against the review report's description of the problem, and only apply fixes for issues that still exist in the current files; don't blindly apply all review recommendations without verifying current state
+
+## Improvement: Re-review corrected designs for new scope drift
+
+Condition:
+- When re-reviewing a design that was edited to close earlier architecture blockers
+
+Action:
+- Do verify that each correction is implementable from the documented data model and does not pull deferred-stage behavior into the current stage without its required safety contract; don't limit the re-review to confirming that the old finding text disappeared

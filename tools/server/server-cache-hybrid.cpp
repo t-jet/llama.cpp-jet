@@ -6,7 +6,13 @@
 #include <cinttypes>
 #include <functional>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
+
+static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
+    const llama_tokens & raw = tokens.get_tokens();
+    return std::vector<llama_token>(raw.begin(), raw.end());
+}
 
 hybrid_cache_controller::hybrid_cache_controller(
     const common_params & params,
@@ -229,6 +235,11 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
         n_cold_payload_count++;
         hot_payloads.erase(descriptor.payload_id);
         n_demotion_successes++;
+        for (auto & entry : entries) {
+            if (entry.payload_id == descriptor.payload_id) {
+                sync_branch_node_from_entry(entry);
+            }
+        }
 
         SRV_INF(" - hybrid cache: demotion completed for payload_id %" PRIu64 " (ref %" PRIu64 ")\n",
                 result.payload_id, result.ref);
@@ -252,6 +263,14 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
             // Hot bytes gone: mark as evicted
             descriptor.residency = payload_residency_state::evicted;
             descriptor.resident_payload_bytes = 0;
+            for (auto & entry : entries) {
+                if (entry.payload_id == descriptor.payload_id) {
+                    entry.resident_payload_bytes_cached = 0;
+                    entry.has_target_payload_cached = false;
+                    entry.has_draft_payload_cached = false;
+                    sync_branch_node_from_entry(entry);
+                }
+            }
             n_demotion_failures++;
             SRV_ERR(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", hot bytes gone, marking evicted (failure_reason=%d)\n",
                     result.payload_id, static_cast<int>(result.failure_reason));
@@ -317,6 +336,14 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         descriptor.store_ref.id = record.payload_id;
         descriptor.residency = payload_residency_state::hot;
         hot_payloads[record.payload_id] = std::move(record);
+        for (auto & entry : entries) {
+            if (entry.payload_id == descriptor.payload_id) {
+                entry.resident_payload_bytes_cached = descriptor.target_size_bytes + descriptor.draft_size_bytes;
+                entry.has_target_payload_cached = descriptor.target_size_bytes > 0;
+                entry.has_draft_payload_cached = descriptor.draft_size_bytes > 0;
+                sync_branch_node_from_entry(entry);
+            }
+        }
         n_promotion_successes++;
 
         // Step 10: Update cold payload count (promotion removes from cold)
@@ -333,6 +360,14 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         // Failure: mark as evicted
         descriptor.residency = payload_residency_state::evicted;
         descriptor.resident_payload_bytes = 0;
+        for (auto & entry : entries) {
+            if (entry.payload_id == descriptor.payload_id) {
+                entry.resident_payload_bytes_cached = 0;
+                entry.has_target_payload_cached = false;
+                entry.has_draft_payload_cached = false;
+                sync_branch_node_from_entry(entry);
+            }
+        }
         n_promotion_failures++;
 
         // Step 10: Track promotion failure reasons
@@ -430,6 +465,16 @@ json hybrid_cache_controller::get_stats() const {
         }
     }
 
+    json token_lookup_namespaces = json::object();
+    for (const auto & item : n_branch_token_lookups_by_namespace) {
+        token_lookup_namespaces[item.first] = item.second;
+    }
+    json checksum_lookup_namespaces = json::object();
+    for (const auto & item : n_branch_checksum_lookups_by_namespace) {
+        checksum_lookup_namespaces[item.first] = item.second;
+    }
+    const branch_traversal_counts traversal_counts = forest.traversal_counts();
+
     return json {
         {"type",        "hybrid"},
         {"size_bytes",  calculate_total_size()},
@@ -445,6 +490,7 @@ json hybrid_cache_controller::get_stats() const {
         {"n_misses",    n_misses},
         {"n_evictions", n_evictions},
         {"n_payload_evictions", n_payload_evictions},
+        {"n_payload_eviction_bytes", n_payload_eviction_bytes},
         {"n_protected_root_decisions", n_protected_root_decisions},
         {"n_protected_root_evictions", n_protected_root_evictions},
         {"n_protected_root_admission_rejections", n_protected_root_admission_rejections},
@@ -456,6 +502,52 @@ json hybrid_cache_controller::get_stats() const {
         {"n_restore_draft_apply_failures", n_restore_draft_apply_failures},
         {"n_restore_commit_failures", n_restore_commit_failures},
         {"n_restore_rollback_failures", n_restore_rollback_failures},
+        {"n_branch_nodes_created", n_branch_nodes_created},
+        {"n_branch_token_lookups", n_branch_token_lookups},
+        {"n_branch_checksum_lookups", n_branch_checksum_lookups},
+        {"n_branch_lookup_hits", n_branch_lookup_hits},
+        {"branch_lookup_namespaces", {
+            {"token_span", token_lookup_namespaces},
+            {"checksum_span", checksum_lookup_namespaces},
+        }},
+        {"branch_traversals", {
+            {"path_to_root", traversal_counts.path_to_root},
+            {"descendants", traversal_counts.descendants},
+            {"children", traversal_counts.children},
+        }},
+        {"n_namespace_validation_passes", n_namespace_validation_passes},
+        {"n_namespace_validation_failures", n_namespace_validation_failures},
+        {"n_branch_metadata_over_limit_events", n_branch_metadata_over_limit_events},
+        {"n_eviction_payload_blocked_refs", n_eviction_payload_blocked_refs},
+        {"n_slot_ref_acquires", n_slot_ref_acquires},
+        {"n_slot_ref_releases", n_slot_ref_releases},
+        {"n_forest_lock_acquires", n_forest_lock_acquires},
+        {"n_forest_lock_retries", n_forest_lock_retries},
+        {"branch_metadata_bytes", forest.total_metadata_ram_bytes()},
+        {"branch_metadata_soft_max_bytes", branch_metadata_ram_soft_max},
+        {"branch_metadata_over_limit", branch_metadata_ram_soft_max > 0 && forest.total_metadata_ram_bytes() > branch_metadata_ram_soft_max},
+        {"branch_forest", [&]() {
+            json ns = json::object();
+            for (const auto & name : forest.get_namespaces()) {
+                ns[name] = json {
+                    {"nodes", forest.namespace_node_count(name)},
+                    {"roots", forest.namespace_roots(name).size()},
+                    {"metadata_bytes", forest.namespace_metadata_ram_bytes(name)},
+                };
+            }
+            return json {
+                {"total_nodes", forest.size()},
+                {"total_metadata_bytes", forest.total_metadata_ram_bytes()},
+                {"metadata_soft_limit_bytes", branch_metadata_ram_soft_max},
+                {"metadata_ratio", branch_metadata_ram_soft_max == 0 ? 0.0 :
+                    static_cast<double>(forest.total_metadata_ram_bytes()) / static_cast<double>(branch_metadata_ram_soft_max)},
+                {"metadata_over_limit", branch_metadata_ram_soft_max > 0 && forest.total_metadata_ram_bytes() > branch_metadata_ram_soft_max},
+                {"namespaces", ns},
+                {"protected_roots", calculate_protected_entry_count()},
+                {"active_slot_refs", forest.active_slot_refs()},
+                {"peak_concurrent_refs", forest.peak_slot_refs()},
+            };
+        }()},
         // Phase 6: Cold layer statistics
         {"n_demotion_successes", n_demotion_successes},
         {"n_demotion_failures", n_demotion_failures},
@@ -521,6 +613,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bo
 
     entries.push_back(std::move(entry));
     auto it = std::prev(entries.end());
+    create_branch_node_for_entry(*it);
     add_to_lru_index(it);
     add_to_prefix_index(it);
     evict_until_within_budget();
@@ -540,6 +633,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
 
     entries.push_back(std::move(entry));
     auto it = std::prev(entries.end());
+    create_branch_node_for_entry(*it);
     add_to_lru_index(it);
     add_to_prefix_index(it);
     evict_until_within_budget();
@@ -615,6 +709,7 @@ bool hybrid_cache_controller::debug_try_admit_entry_for_tests(
 
     entries.push_back(std::move(entry));
     auto it = std::prev(entries.end());
+    create_branch_node_for_entry(*it);
     add_to_lru_index(it);
     add_to_prefix_index(it);
     evict_until_within_budget();
@@ -640,8 +735,55 @@ void hybrid_cache_controller::debug_set_hot_payload_budget_bytes_for_tests(size_
     limit_size_unlimited = unlimited;
 }
 
+void hybrid_cache_controller::debug_set_branch_metadata_soft_max_for_tests(size_t limit_size_bytes) {
+    branch_metadata_ram_soft_max = limit_size_bytes;
+    record_branch_metadata_pressure();
+}
+
+bool hybrid_cache_controller::debug_acquire_first_branch_ref_for_tests() {
+    if (entries.empty()) {
+        return false;
+    }
+    const bool acquired = forest.acquire_slot_ref(entries.front().branch_node_id);
+    if (acquired) {
+        n_slot_ref_acquires++;
+    }
+    return acquired;
+}
+
+bool hybrid_cache_controller::debug_release_first_branch_ref_for_tests() {
+    if (entries.empty()) {
+        return false;
+    }
+    const bool released = forest.release_slot_ref(entries.front().branch_node_id);
+    if (released) {
+        n_slot_ref_releases++;
+    }
+    return released;
+}
+
+bool hybrid_cache_controller::debug_pin_first_branch_ref_for_tests() {
+    if (entries.empty()) {
+        return false;
+    }
+    const bool acquired = forest.acquire_slot_ref(entries.front().branch_node_id);
+    if (acquired) {
+        n_slot_ref_acquires++;
+    }
+    return acquired;
+}
+
 size_t hybrid_cache_controller::debug_entry_count_for_tests() const {
     return entries.size();
+}
+
+void hybrid_cache_controller::release_branch_node_ref(uint64_t node_id) {
+    if (node_id == 0) {
+        return;
+    }
+    if (forest.release_slot_ref(node_id)) {
+        n_slot_ref_releases++;
+    }
 }
 
 void hybrid_cache_controller::debug_mark_first_entry_used_for_tests() {
@@ -663,6 +805,16 @@ cache_compatibility_key hybrid_cache_controller::debug_get_compatibility_key_for
     return build_compatibility_key(runtime_has_draft);
 }
 
+void hybrid_cache_controller::record_branch_lookup(const std::string & namespace_id, const char * method) {
+    if (std::string(method) == "checksum_span") {
+        n_branch_checksum_lookups++;
+        n_branch_checksum_lookups_by_namespace[namespace_id]++;
+        return;
+    }
+    n_branch_token_lookups++;
+    n_branch_token_lookups_by_namespace[namespace_id]++;
+}
+
 std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match(
     const server_tokens & tokens_new,
     const prepared_prompt_metadata & metadata)
@@ -675,9 +827,48 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
     }
     
     const std::string ns_id = compute_namespace_id(metadata);
+    record_branch_lookup(ns_id, "token_span");
     
     auto it_best = entries.end();
     int lcp_best = -1;
+
+    const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens_new);
+    std::vector<uint64_t> forest_candidates = forest.find_nodes_by_token_span(ns_id, lookup_tokens, lookup_tokens.size());
+    std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
+    for (const auto & boundary : metadata.boundaries) {
+        if (boundary.token_start != 0 || boundary.checksum == 0 || boundary.token_end == 0 ||
+            boundary.token_end > lookup_tokens.size()) {
+            continue;
+        }
+        record_branch_lookup(ns_id, "checksum_span");
+        auto checksum_candidates = forest.find_nodes_by_checksum_span(ns_id, boundary.checksum, boundary.token_end);
+        for (uint64_t node_id : checksum_candidates) {
+            if (seen_candidates.insert(node_id).second) {
+                forest_candidates.push_back(node_id);
+            }
+        }
+    }
+    for (uint64_t node_id : forest_candidates) {
+        auto entry_it = find_entry_by_branch_node(node_id);
+        if (entry_it == entries.end()) {
+            continue;
+        }
+        if (!validate_namespace_compatibility(ns_id, entry_it->namespace_id)) {
+            n_namespace_validation_failures++;
+            continue;
+        }
+        n_namespace_validation_passes++;
+        const int lcp_cur = entry_it->tokens.get_common_prefix(tokens_new);
+        if (lcp_cur == entry_it->n_tokens() && lcp_cur > lcp_best) {
+            lcp_best = lcp_cur;
+            it_best = entry_it;
+        }
+    }
+
+    if (it_best != entries.end()) {
+        n_branch_lookup_hits++;
+        return it_best;
+    }
 
     const size_t n_prefix_max = std::min(tokens_new.size(), PREFIX_INDEX_LENGTH);
     for (size_t n_prefix = n_prefix_max; n_prefix > 0; --n_prefix) {
@@ -687,9 +878,11 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
         }
 
         for (auto it : prefix_it->second) {
-            if (it->namespace_id != ns_id) {
+            if (!validate_namespace_compatibility(ns_id, it->namespace_id)) {
+                n_namespace_validation_failures++;
                 continue;
             }
+            n_namespace_validation_passes++;
 
             const int lcp_cur = it->tokens.get_common_prefix(tokens_new);
 
@@ -716,6 +909,27 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_exact_matc
     // Use prefix index for fast candidate filtering
     if (tokens.empty()) {
         return entries.end();
+    }
+    record_branch_lookup(namespace_id, "token_span");
+
+    const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens);
+    auto forest_candidates = forest.find_nodes_by_token_span(namespace_id, lookup_tokens, lookup_tokens.size());
+    for (uint64_t node_id : forest_candidates) {
+        auto entry_it = find_entry_by_branch_node(node_id);
+        if (entry_it == entries.end()) {
+            continue;
+        }
+        if (!validate_namespace_compatibility(namespace_id, entry_it->namespace_id)) {
+            n_namespace_validation_failures++;
+            continue;
+        }
+        n_namespace_validation_passes++;
+        const llama_tokens & cached_tokens = entry_it->tokens.get_tokens();
+        if (cached_tokens.size() == lookup_tokens.size() &&
+            std::equal(lookup_tokens.begin(), lookup_tokens.end(), cached_tokens.begin())) {
+            n_branch_lookup_hits++;
+            return entry_it;
+        }
     }
     
     auto prefix_it = prefix_index.find(get_token_prefix(tokens, PREFIX_INDEX_LENGTH));
@@ -763,6 +977,7 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
         // budget accounting. If demotion fails or cold store is not configured,
         // it falls through to immediate eviction.
         uint64_t payload_id = it->payload_id;
+        const size_t payload_bytes = it->resident_payload_bytes();
         mark_payload_evicted(*it);
 
         // Check if the payload was demoted (descriptor is now demoting or cold)
@@ -786,6 +1001,7 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
         entries.erase(it);
         n_evictions++;
         n_payload_evictions++;
+        n_payload_eviction_bytes += payload_bytes;
         return true;
     }
 
@@ -1078,14 +1294,93 @@ void hybrid_cache_controller::evict_until_within_budget() {
         SRV_WRN(" - hybrid cache: eviction could not satisfy payload budget (resident bytes: %zu, budget bytes: %zu)\n",
                 calculate_resident_payload_bytes(), limit_size);
     }
+
+    record_branch_metadata_pressure();
 }
 
 void hybrid_cache_controller::refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root) {
     const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
     it->protected_root = it->protected_root || protected_root;
     it->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it);
     update_lru_index(it, old_key);
     evict_until_within_budget();
+}
+
+uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entry & entry) {
+    const auto token_vec = cache_tokens_to_vector(entry.tokens);
+    const uint64_t node_id = forest.create_node(
+        entry.namespace_id,
+        0,
+        token_vec,
+        token_vec.empty() ? 0 : 0,
+        token_vec.empty() ? 0 : static_cast<int64_t>(token_vec.size() - 1),
+        0,
+        entry.protected_root);
+    if (node_id == 0) {
+        return 0;
+    }
+    entry.branch_node_id = node_id;
+    n_branch_nodes_created++;
+    sync_branch_node_from_entry(entry);
+    record_branch_metadata_pressure();
+    return node_id;
+}
+
+void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_entry & entry) {
+    branch_node * node = forest.get_node(entry.branch_node_id);
+    if (!node) {
+        return;
+    }
+    node->use_sequence = entry.use_sequence;
+    node->use_count = entry.use_count;
+    node->insertion_sequence = entry.insertion_sequence;
+    node->protected_root = node->protected_root || entry.protected_root;
+    node->exact_blob_payload_id = entry.payload_id;
+    node->resident_payload_bytes = entry.resident_payload_bytes_cached;
+    node->has_target_payload = entry.has_target_payload_cached;
+    node->has_draft_payload = entry.has_draft_payload_cached;
+    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        switch (descriptor_it->second.residency) {
+            case payload_residency_state::hot:
+            case payload_residency_state::demoting:
+            case payload_residency_state::promoting:
+                node->residency_state = branch_node::residency::hot;
+                break;
+            case payload_residency_state::cold:
+                node->residency_state = branch_node::residency::cold;
+                break;
+            case payload_residency_state::evicted:
+                node->residency_state = branch_node::residency::evicted;
+                break;
+        }
+    }
+}
+
+std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_entry_by_branch_node(uint64_t node_id) {
+    return std::find_if(entries.begin(), entries.end(), [node_id](const hybrid_cache_entry & entry) {
+        return entry.branch_node_id == node_id;
+    });
+}
+
+std::list<hybrid_cache_entry>::const_iterator hybrid_cache_controller::find_entry_by_branch_node(uint64_t node_id) const {
+    return std::find_if(entries.begin(), entries.end(), [node_id](const hybrid_cache_entry & entry) {
+        return entry.branch_node_id == node_id;
+    });
+}
+
+void hybrid_cache_controller::record_branch_metadata_pressure() {
+    if (branch_metadata_ram_soft_max == 0) {
+        return;
+    }
+    const size_t metadata_bytes = forest.total_metadata_ram_bytes();
+    if (metadata_bytes <= branch_metadata_ram_soft_max) {
+        return;
+    }
+    n_branch_metadata_over_limit_events++;
+    SRV_WRN(" - hybrid cache: branch metadata over soft limit (metadata bytes: %zu, soft max bytes: %zu)\n",
+            metadata_bytes, branch_metadata_ram_soft_max);
 }
 
 void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
@@ -1137,6 +1432,7 @@ void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
     entry.resident_payload_bytes_cached = 0;
     entry.has_target_payload_cached = false;
     entry.has_draft_payload_cached = false;
+    sync_branch_node_from_entry(entry);
 }
 
 uint64_t hybrid_cache_controller::payload_checksum(const std::vector<uint8_t> & bytes) const {
@@ -1416,10 +1712,23 @@ bool hybrid_cache_controller::hot_payload_budget_enabled() const {
     return !limit_size_unlimited && limit_size > 0;
 }
 
-std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy_candidates() const {
+std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy_candidates() {
     std::vector<server_cache_policy_candidate> candidates;
     candidates.reserve(entries.size());
     for (const auto & entry : entries) {
+        if (entry.branch_node_id != 0 && forest.slot_ref_count(entry.branch_node_id) > 0 &&
+            entry.resident_payload_bytes() > 0) {
+            n_eviction_payload_blocked_refs++;
+        }
+    }
+
+    const auto forest_candidate_ids = forest.payload_eviction_candidates(0);
+    for (uint64_t node_id : forest_candidate_ids) {
+        auto it = find_entry_by_branch_node(node_id);
+        if (it == entries.end()) {
+            continue;
+        }
+        const auto & entry = *it;
         candidates.push_back({
             entry.entry_id,
             entry.namespace_id,

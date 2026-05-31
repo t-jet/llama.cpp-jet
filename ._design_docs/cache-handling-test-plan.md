@@ -1,7 +1,7 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 Scope: server integration tests and focused evidence mapping for implemented cache behavior
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
@@ -48,11 +48,11 @@ Example design:
 
 ## Purpose
 
-This plan covers server integration tests for the cache behavior implemented now. Unit and focused C++ tests are tracked by the normal project test suite and are not acceptance gates in this document.
+This plan covers server integration tests for the cache behavior implemented now. When public HTTP cannot create an internal precondition, the plan also maps focused C++ or Python metric-shape evidence that may be used for that row.
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, and Stage 6, read:
+Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, and Stage 7, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -66,6 +66,12 @@ Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, and St
 - [cache-handling-phase6-design.md](./cache-handling-phase6-design.md)
 - [cache-handling-phase6-implementation.md](./cache-handling-phase6-implementation.md)
 - [cache-handling-phase6-implementation/part-13-implementation-review.md](./cache-handling-phase6-implementation/part-13-implementation-review.md)
+- [cache-handling-phase7-design.md](./cache-handling-phase7-design.md)
+- [cache-handling-phase7-design/part-04-test-specifications.md](./cache-handling-phase7-design/part-04-test-specifications.md)
+- [cache-handling-phase7-design/part-05-metrics-and-observability.md](./cache-handling-phase7-design/part-05-metrics-and-observability.md)
+- [cache-handling-phase7-design/part-06-acceptance-criteria.md](./cache-handling-phase7-design/part-06-acceptance-criteria.md)
+- [cache-handling-phase7-implementation.md](./cache-handling-phase7-implementation.md)
+- [cache-handling-phase7-implementation/part-10-implementation-re-review.md](./cache-handling-phase7-implementation/part-10-implementation-re-review.md)
 
 ## Test coverage summary
 
@@ -77,6 +83,7 @@ The integration plan covers:
 - Stage 4 resident payload byte budget enforcement, deterministic LRU behavior, restore recency semantics, protected-root eviction priority and fallback, protected admission rejection, and Stage 4 metrics.
 - Stage 5 payload descriptor separation, hot payload ownership, descriptor validation, target/draft pair validation, draft runtime mode namespace isolation, transactional restore rollback, paired eviction and byte accounting, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage.
 - Stage 6 cold payload storage, asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, cold store opt-in behavior, target/draft pair demotion and promotion as a unit, fault tolerance for cold file corruption and I/O failures, protected root demotion warning, cold layer metrics, and Stage 4 and Stage 5 regression with cold store configured.
+- Stage 7 branch graph foundation, branch node lifecycle, namespace validation, slot references, checksum-assisted lookup, branch metadata RAM accounting and soft-limit diagnostics, global hot-payload LRU selection across namespaces, Stage 7 metrics, and Stage 1-6 regression with the forest-backed controller.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -110,8 +117,16 @@ Implemented behavior that must be covered:
 - Protected root demotion emits a warning diagnostic.
 - Target and draft payloads demote and promote as one unit.
 - Stage 4 and Stage 5 behavior is preserved when the cold store is configured.
+- Branch graph nodes are created for hybrid saves and remain separate from payload residency.
+- Strict namespace validation prevents unsafe cross-model or cross-config restores.
+- Token-span and length-qualified checksum lookup select same-namespace branch candidates.
+- Slots hold transient refs to branch nodes; active refs block payload eviction or demotion candidates.
+- Multiple namespaces share the hot payload budget through one global LRU candidate order.
+- Branch metadata RAM is accounted and exposed through metrics and focused stats. The Stage 7 metadata soft max is internal/test-only and diagnostics-only.
+- Protected-root graph metadata survives payload eviction and demotion. Protected-root payload bytes still count against the hot budget.
+- Stage 7 Prometheus metrics expose branch lookup, namespace, metadata budget, payload eviction, protected-root payload, slot-ref, forest-lock, and namespace-validation signals.
 
-Do not treat metadata-only branch nodes, shared branch graphs, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
+Do not treat metadata-only branch nodes, equivalent-branch deduplication, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
 
 ## Contents
 
@@ -125,11 +140,15 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 6: stress tests and acceptance criteria](./cache-handling-test-plan/part-06-stress-tests-and-acceptance.md)
 - [Part 7: test report quality and templates](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md)
 - [Part 8: Stage 6 cold layer integration](./cache-handling-test-plan/part-08-stage6-cold-layer-integration.md)
+- [Part 9: Stage 7 branch graph foundation](./cache-handling-test-plan/part-09-stage7-branch-graph-foundation.md)
 
 ## Review reports
 
 - [Stage 4 test-plan review: 2026-05-27](./cache-handling-test-plan/stage-4-test-plan-review-20260527.md)
 - [Stage 5 test-plan review: 2026-05-28](./cache-handling-test-plan/stage-5-test-plan-review-20260528.md)
+- [Stage 6 test-plan review: 2026-05-30](./cache-handling-test-plan/stage-6-test-plan-review-20260530.md)
+- [Stage 7 test-plan review: 2026-05-31](./cache-handling-test-plan/stage-7-test-plan-review-20260531.md)
+- [Stage 7 manager test-plan gate: 2026-05-31](./cache-handling-test-plan/stage-7-manager-test-plan-gate-20260531.md)
 
 ## Test scripts
 

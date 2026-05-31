@@ -20,7 +20,7 @@ public:
     ~legacy_cache_controller() override = default;
 
     // Cache controller interface implementation
-    bool save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) override;
+    bool save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) override;
     bool load_slot(server_slot & slot, const server_task & task) override;
     void update() override;
     json get_stats() const override;

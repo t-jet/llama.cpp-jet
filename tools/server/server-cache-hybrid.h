@@ -1,6 +1,7 @@
 #pragma once
 
 #include "server-cache-controller.h"
+#include "server-cache-graph.h"
 #include "server-cache-policy-lru.h"
 #include "server-cache-store-cold.h"
 #include "server-cache-io-worker.h"
@@ -178,6 +179,7 @@ struct hybrid_cache_entry {
     prepared_prompt_metadata metadata;             // Prompt boundary metadata for this entry
     std::string namespace_id;                      // Namespace (model + config identifier)
     uint64_t payload_id = 0;                       // Descriptor-owned exact-blob payload
+    uint64_t branch_node_id = 0;                   // Forest node metadata identity
 
     uint64_t entry_id = 0;                         // Stable identifier for policy plans
     uint64_t insertion_sequence = 0;               // Stable tie-breaker for equal recency
@@ -246,7 +248,7 @@ public:
     ~hybrid_cache_controller() override;
 
     // Cache controller interface implementation
-    bool save_slot(const server_slot & slot, const prepared_prompt_metadata & metadata) override;
+    bool save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) override;
     bool load_slot(server_slot & slot, const server_task & task) override;
     void update() override;
     json get_stats() const override;
@@ -257,6 +259,7 @@ public:
     // Returns true if a matching entry was found and restored into the slot
     // Unlike load_slot(), this does not require the slot to be cleared first
     bool try_restore_from_cache(server_slot & slot, const server_task & task);
+    void release_branch_node_ref(uint64_t node_id) override;
 
     // Phase 6: Cold layer demotion and promotion
     // Demote a hot payload to cold storage. Returns true if demotion was initiated.
@@ -288,6 +291,10 @@ public:
     bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
     bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited = false);
+    void debug_set_branch_metadata_soft_max_for_tests(size_t limit_size_bytes);
+    bool debug_acquire_first_branch_ref_for_tests();
+    bool debug_release_first_branch_ref_for_tests();
+    bool debug_pin_first_branch_ref_for_tests();
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
@@ -356,6 +363,10 @@ private:
     bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
     bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited = false);
+    void debug_set_branch_metadata_soft_max_for_tests(size_t limit_size_bytes);
+    bool debug_acquire_first_branch_ref_for_tests();
+    bool debug_release_first_branch_ref_for_tests();
+    bool debug_pin_first_branch_ref_for_tests();
     size_t debug_entry_count_for_tests() const;
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
@@ -372,6 +383,7 @@ private:
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
     std::list<hybrid_cache_entry> entries;
+    branch_forest_index forest;
     std::unordered_map<uint64_t, payload_descriptor> payload_descriptors;
     std::unordered_map<uint64_t, hot_payload_record> hot_payloads;
 
@@ -418,12 +430,14 @@ private:
     uint64_t next_entry_id = 1;
     uint64_t next_sequence = 1;
     uint64_t next_payload_id = 1;
+    size_t branch_metadata_ram_soft_max = 0;
 
     // Statistics
     size_t n_hits = 0;
     size_t n_misses = 0;
     size_t n_evictions = 0;
     size_t n_payload_evictions = 0;
+    size_t n_payload_eviction_bytes = 0;
     size_t n_protected_root_decisions = 0;
     size_t n_protected_root_evictions = 0;
     size_t n_protected_root_admission_rejections = 0;
@@ -435,6 +449,20 @@ private:
     size_t n_restore_draft_apply_failures = 0;
     size_t n_restore_commit_failures = 0;
     size_t n_restore_rollback_failures = 0;
+    size_t n_branch_nodes_created = 0;
+    size_t n_branch_token_lookups = 0;
+    size_t n_branch_checksum_lookups = 0;
+    size_t n_branch_lookup_hits = 0;
+    std::map<std::string, size_t> n_branch_token_lookups_by_namespace;
+    std::map<std::string, size_t> n_branch_checksum_lookups_by_namespace;
+    size_t n_namespace_validation_passes = 0;
+    size_t n_namespace_validation_failures = 0;
+    size_t n_branch_metadata_over_limit_events = 0;
+    size_t n_eviction_payload_blocked_refs = 0;
+    size_t n_slot_ref_acquires = 0;
+    size_t n_slot_ref_releases = 0;
+    size_t n_forest_lock_acquires = 0;
+    size_t n_forest_lock_retries = 0;
 
     // Phase 6: Cold layer statistics
     size_t n_demotion_successes = 0;
@@ -476,10 +504,17 @@ private:
     std::list<hybrid_cache_entry>::iterator find_exact_match(
         const server_tokens & tokens,
         const std::string & namespace_id);
+    void record_branch_lookup(const std::string & namespace_id, const char * method);
 
     bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
     void evict_until_within_budget();
     void refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root);
+    uint64_t create_branch_node_for_entry(hybrid_cache_entry & entry);
+    void sync_branch_node_from_entry(const hybrid_cache_entry & entry);
+    bool acquire_branch_node_ref_for_slot(server_slot & slot, uint64_t node_id);
+    std::list<hybrid_cache_entry>::iterator find_entry_by_branch_node(uint64_t node_id);
+    std::list<hybrid_cache_entry>::const_iterator find_entry_by_branch_node(uint64_t node_id) const;
+    void record_branch_metadata_pressure();
     void remove_payload(uint64_t payload_id);
     void mark_payload_evicted(hybrid_cache_entry & entry);
     bool attach_payload(
@@ -519,7 +554,7 @@ private:
     size_t calculate_unprotected_payload_bytes() const;
     size_t calculate_protected_entry_count() const;
     bool hot_payload_budget_enabled() const;
-    std::vector<server_cache_policy_candidate> build_policy_candidates() const;
+    std::vector<server_cache_policy_candidate> build_policy_candidates();
     uint64_t next_use_sequence();
     void assign_entry_identity(hybrid_cache_entry & entry);
 

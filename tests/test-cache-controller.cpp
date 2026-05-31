@@ -26,6 +26,15 @@ static server_tokens create_tokens(const std::vector<int> & ids) {
     return tokens;
 }
 
+static uint64_t token_checksum(const std::vector<int> & ids) {
+    uint64_t hash = 1469598103934665603ull;
+    for (int id : ids) {
+        hash ^= static_cast<uint64_t>(static_cast<uint32_t>(id));
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 // Helper to create test common_params with configurable fields
 static common_params create_test_params(
     const std::string & model_path = "test_model.gguf",
@@ -135,6 +144,10 @@ void test_hybrid_controller_interface() {
     assert(stats.contains("n_hits"));
     assert(stats.contains("n_misses"));
     assert(stats.contains("n_evictions"));
+    assert(stats.contains("branch_forest"));
+    assert(stats.contains("branch_metadata_bytes"));
+    assert(stats.contains("n_branch_nodes_created"));
+    assert(stats.contains("n_namespace_validation_failures"));
     assert(stats.contains("resident_payload_bytes"));
     assert(stats.contains("n_payload_evictions"));
     assert(stats.contains("n_protected_root_decisions"));
@@ -146,6 +159,101 @@ void test_hybrid_controller_interface() {
     assert(stats.contains("n_target_and_draft_payload_descriptors"));
     assert(stats.contains("namespaces"));
     
+    printf("  PASSED\n");
+}
+
+void test_branch_graph_stats_and_metadata_soft_limit() {
+    printf("test-cache-controller: branch graph stats and metadata soft limit...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), false, "ns-a", 64, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6, 7, 8}), true, "ns-b", 64, 0);
+
+    json stats = ctrl.get_stats();
+    assert(stats["n_branch_nodes_created"] == 2);
+    assert(stats["branch_forest"]["total_nodes"] == 2);
+    assert(stats["branch_forest"]["namespaces"]["ns-a"]["nodes"] == 1);
+    assert(stats["branch_forest"]["namespaces"]["ns-b"]["nodes"] == 1);
+    assert(stats["branch_metadata_bytes"] > 0);
+
+    ctrl.debug_set_branch_metadata_soft_max_for_tests(1);
+    stats = ctrl.get_stats();
+    assert(stats["branch_metadata_over_limit"] == true);
+    assert(stats["branch_forest"]["metadata_over_limit"] == true);
+    assert(stats["n_branch_metadata_over_limit_events"] > 0);
+
+    assert(ctrl.debug_acquire_first_branch_ref_for_tests());
+    stats = ctrl.get_stats();
+    assert(stats["branch_forest"]["active_slot_refs"] == 1);
+    assert(ctrl.debug_release_first_branch_ref_for_tests());
+    printf("  PASSED\n");
+}
+
+void test_branch_ref_blocks_production_eviction_plan() {
+    printf("test-cache-controller: branch refs block production eviction...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(150);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "ns-a", 100, 0);
+    assert(ctrl.debug_pin_first_branch_ref_for_tests());
+    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}), false, "ns-b", 100, 0);
+
+    json stats = ctrl.get_stats();
+    assert(stats["resident_payload_bytes"] == 100);
+    assert(stats["n_payload_evictions"] == 1);
+    assert(stats["n_eviction_payload_blocked_refs"] > 0);
+    assert(stats["branch_forest"]["active_slot_refs"] == 1);
+    assert(ctrl.debug_release_first_branch_ref_for_tests());
+
+    printf("  PASSED\n");
+}
+
+void test_branch_global_eviction_across_namespaces() {
+    printf("test-cache-controller: branch global eviction across namespaces...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(150);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({10, 11, 12}), false, "ns-a", 100, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({20, 21, 22}), false, "ns-b", 100, 0);
+
+    json stats = ctrl.get_stats();
+    assert(stats["n_payload_evictions"] == 1);
+    assert(stats["resident_payload_bytes"] == 100);
+    assert(stats["branch_forest"]["namespaces"]["ns-a"]["nodes"] == 1);
+    assert(stats["branch_forest"]["namespaces"]["ns-b"]["nodes"] == 1);
+
+    printf("  PASSED\n");
+}
+
+void test_branch_checksum_lookup_selects_restore_candidate() {
+    printf("test-cache-controller: branch checksum lookup selects restore candidate...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata meta;
+    meta.compatibility_key = "checksum-restore";
+    meta.add_span(
+        prompt_boundary::MESSAGE_START,
+        0,
+        3,
+        token_checksum({31, 32, 33}),
+        false,
+        "user");
+
+    ctrl.debug_add_entry_for_tests(create_tokens({31, 32, 33}), meta);
+    assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({31, 32, 33, 34}), meta) == 3);
+
+    json stats = ctrl.get_stats();
+    assert(stats["n_branch_checksum_lookups"] > 0);
+    assert(stats["n_branch_lookup_hits"] > 0);
+    assert(stats["n_namespace_validation_failures"] == 0);
+
     printf("  PASSED\n");
 }
 
@@ -1638,10 +1746,14 @@ int main() {
     test_descriptor_residency_default();
     test_descriptor_residency_assignment();
     test_debug_fault_injection_transient_states();
-    
+    test_branch_graph_stats_and_metadata_soft_limit();
+    test_branch_ref_blocks_production_eviction_plan();
+    test_branch_global_eviction_across_namespaces();
+    test_branch_checksum_lookup_selects_restore_candidate();
+
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 49 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1)\n");
+    printf("Total: 53 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused)\n");
     printf("==================================================\n");
     
     return 0;

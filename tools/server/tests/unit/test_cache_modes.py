@@ -57,6 +57,35 @@ def assert_cache_metrics_shape(body, expected_type):
     assert f'llamacpp_cache_descriptor_validation_failures_total{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_pairing_violations_total{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_fallback_restores_total{{mode="{expected_type}"}}' in body
+    assert f'cache_branch_nodes_created_total{{mode="{expected_type}"}}' in body
+    assert f'cache_branch_lookups_total{{mode="{expected_type}",namespace=' in body
+    assert 'method="token_span"' in body
+    assert 'method="checksum_span"' in body
+    assert f'cache_branch_lookup_hits_total{{mode="{expected_type}"}}' in body
+    assert f'cache_branch_traversals_total{{mode="{expected_type}",operation=' in body
+    assert 'operation="path_to_root"' in body
+    assert 'operation="descendants"' in body
+    assert 'operation="children"' in body
+    assert f'cache_namespace_count{{mode="{expected_type}"}}' in body
+    assert f'cache_namespace_nodes{{mode="{expected_type}",namespace=' in body
+    assert f'cache_namespace_roots{{mode="{expected_type}",namespace=' in body
+    assert f'cache_namespace_metadata_bytes{{mode="{expected_type}",namespace=' in body
+    assert f'cache_budget_branch_metadata_bytes{{mode="{expected_type}"}}' in body
+    assert f'cache_budget_branch_metadata_soft_max_bytes{{mode="{expected_type}"}}' in body
+    assert f'cache_budget_branch_metadata_ratio{{mode="{expected_type}"}}' in body
+    assert f'cache_budget_branch_metadata_over_limit{{mode="{expected_type}"}}' in body
+    assert f'cache_eviction_payloads_total{{mode="{expected_type}",action=' in body
+    assert f'cache_eviction_payload_bytes_total{{mode="{expected_type}",action=' in body
+    assert f'cache_eviction_payload_blocked_refs_total{{mode="{expected_type}"}}' in body
+    assert f'cache_protected_root_payload_decisions_total{{mode="{expected_type}",decision=' in body
+    assert f'cache_protected_root_payload_bytes{{mode="{expected_type}",residency=' in body
+    assert f'cache_slot_ref_acquires_total{{mode="{expected_type}"}}' in body
+    assert f'cache_slot_ref_releases_total{{mode="{expected_type}"}}' in body
+    assert f'cache_namespace_validation_failures_total{{mode="{expected_type}"}}' in body
+    assert f'cache_forest_lock_acquires_total{{mode="{expected_type}"}}' in body
+    assert f'cache_forest_lock_retries_total{{mode="{expected_type}"}}' in body
+    assert f'cache_namespace_validations_total{{mode="{expected_type}",result=' in body
+    assert f'cache_slot_ref_concurrent_peak{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_hot_payload_descriptors{{mode="{expected_type}"}}' in body
     assert f'llamacpp_cache_evicted_payload_descriptors{{mode="{expected_type}"}}' in body
 
