@@ -200,3 +200,28 @@ llamacpp_cache_evicted_payload_descriptors{mode="hybrid"}
 ```
 
 For focused controller evidence, map each `PASS` claim to the exact focused test name or source location. Acceptable focused evidence includes descriptor creation, target-plus-draft descriptor validation, pair mismatch, checksum failure, evicted descriptor rejection, paired byte accounting, transaction failure counters, and empty-preimage rollback. Do not mark a Stage 5 failure row as `PASS` from a script that only proves the server started or requests completed.
+
+### 10. Stage 8 evidence
+
+For Stage 8 rows, include the evidence source because most internal graph states are not reachable from public HTTP:
+
+- Focused Stage 8 evidence can cover metadata-only retention, active-ref eviction blocking, protected-root metadata survival, safe pruning, re-materialization plans, mismatch handling, equivalent deduplication, cold cleanup ownership, and metadata admission rejection.
+- Public HTTP evidence can cover model-backed Stage 4-7 regression, public surface stability, and `/metrics` output when the server starts with the requested cache mode.
+- Python metric-shape evidence can cover Stage 8 Prometheus names and labels. With `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1`, use it only for startup, public surface, and metric-label rows.
+- Fault-injection or stats-capable harness evidence is required for cold cleanup ownership conflicts, forced metadata pressure, descriptor corruption, or canonical branch identity when focused tests do not expose the precondition.
+- Do not mark re-materialization rows `PASS` from metric presence alone. Evidence must show the selected metadata-only node, validation result, restore source, and post-operation metadata or payload state.
+
+Capture these Stage 8 metric names when `/metrics` is enabled:
+
+```text
+cache_metadata_only_retentions_total{namespace=...,reason=...}
+cache_node_rematerializations_total{namespace=...,result=...}
+cache_node_rematerialization_bytes_total{namespace=...}
+cache_validation_mismatches_total{namespace=...,method=...}
+cache_mismatch_parent_selections_total{namespace=...,source=...}
+cache_equivalent_branch_deduplications_total{namespace=...,action=...}
+cache_branch_pruning_total{namespace=...,result=...,reason=...}
+cache_branch_pruned_metadata_bytes_total{namespace=...}
+cache_cold_cleanup_total{namespace=...,result=...}
+cache_branch_metadata_admission_rejections_total{namespace=...,reason=...}
+```

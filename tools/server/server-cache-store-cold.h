@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // Cold payload store: manages versioned filesystem files for demoted payloads.
@@ -137,6 +138,12 @@ public:
     // Remove a cold file. Called when the owning descriptor is deleted or evicted.
     // Returns true if the file was removed or did not exist.
     bool remove(cold_ref ref);
+
+    // Stage 8: Batch delete cold files by ID set.
+    // Deletes all cold files whose ref IDs are in the given set.
+    // Returns the number of files successfully deleted.
+    // IDs that do not exist are silently skipped.
+    size_t delete_ids(const std::unordered_set<uint64_t> & ids);
 
     // Return true only when a valid root path is set and configure() succeeded.
     bool is_configured() const { return configured_; }

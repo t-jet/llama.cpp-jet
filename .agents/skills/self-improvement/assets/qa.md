@@ -112,7 +112,15 @@ Condition:
 - When editing reusable QA markdown that must stay under repository line-count, ASCII, and whitespace rules
 
 Action:
-- Do run line-count, ASCII-byte, and whitespace checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect.
+- Do run line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect; preserve existing line endings where practical, and if a tool changes them, normalize deliberately and rerun `git diff --check`.
+
+## Improvement: wait for model-specific readiness in public probes
+
+Condition:
+- When a public HTTP harness starts `llama-server` with secondary model resources such as draft, MTP, multimodal, or adapter fixtures
+
+Action:
+- Do treat `/health` as process readiness only; wait for a model-specific log marker or other direct evidence that the secondary resource loaded before sending behavior probes, and keep startup log verbosity low unless diagnostics require it.
 
 ## Improvement: load required memory before status updates
 
@@ -120,4 +128,4 @@ Condition:
 - When a task requires self-improvement memory to be read before any other action
 
 Action:
-- Do read the skill and agent memory before sending any acknowledgement, skill announcement, status update, or task analysis; treat every user-visible reply as task action.
+- Do read the skill and agent memory before sending any acknowledgement, skill announcement, status update, task analysis, or parallel tool call; treat every user-visible reply and all task-specific file inspection as task action.

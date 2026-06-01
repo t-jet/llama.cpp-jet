@@ -74,6 +74,16 @@ def assert_cache_metrics_shape(body, expected_type):
     assert f'cache_budget_branch_metadata_soft_max_bytes{{mode="{expected_type}"}}' in body
     assert f'cache_budget_branch_metadata_ratio{{mode="{expected_type}"}}' in body
     assert f'cache_budget_branch_metadata_over_limit{{mode="{expected_type}"}}' in body
+    assert f'cache_metadata_only_retentions_total{{mode="{expected_type}",namespace="all",reason="evicted"}}' in body
+    assert f'cache_node_rematerializations_total{{mode="{expected_type}",namespace="all",result="success"}}' in body
+    assert f'cache_node_rematerialization_bytes_total{{mode="{expected_type}",namespace="all"}}' in body
+    assert f'cache_validation_mismatches_total{{mode="{expected_type}",namespace="all",method="token_span"}}' in body
+    assert f'cache_mismatch_parent_selections_total{{mode="{expected_type}",namespace="all",source="metadata_validation"}}' in body
+    assert f'cache_equivalent_branch_deduplications_total{{mode="{expected_type}",namespace="all",action="reuse_or_rematerialize"}}' in body
+    assert f'cache_branch_pruning_total{{mode="{expected_type}",namespace="all",result="success",reason="metadata_budget"}}' in body
+    assert f'cache_branch_pruned_metadata_bytes_total{{mode="{expected_type}",namespace="all"}}' in body
+    assert f'cache_cold_cleanup_total{{mode="{expected_type}",namespace="all",result="success"}}' in body
+    assert f'cache_branch_metadata_admission_rejections_total{{mode="{expected_type}",namespace="all",reason="metadata_budget"}}' in body
     assert f'cache_eviction_payloads_total{{mode="{expected_type}",action=' in body
     assert f'cache_eviction_payload_bytes_total{{mode="{expected_type}",action=' in body
     assert f'cache_eviction_payload_blocked_refs_total{{mode="{expected_type}"}}' in body

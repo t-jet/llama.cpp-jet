@@ -71,8 +71,12 @@ function Start-LlamaServer {
         "--port", [string]$Port
     )
     
-    # Add custom arguments with explicit string conversion
+    # Add custom arguments with explicit string conversion. Keys prefixed with
+    # "__" are harness-only controls and are not passed to llama-server.
     foreach ($key in $ServerArgs.Keys) {
+        if ($key.StartsWith("__")) {
+            continue
+        }
         # Check for explicit boolean true (not numeric 1)
         if ($ServerArgs[$key] -is [bool] -and $ServerArgs[$key] -eq $true) {
             $ArgList += $key
@@ -129,7 +133,7 @@ function Stop-LlamaServer {
     
     if ($ServerInfo.Process -and -not $ServerInfo.Process.HasExited) {
         $ServerInfo.Process.Kill($true)
-        $ServerInfo.Process.WaitForExit(5000)
+        [void]$ServerInfo.Process.WaitForExit(5000)
     }
 }
 
@@ -261,8 +265,13 @@ function Invoke-Test {
         $ServerInfo = Start-LlamaServer -TestId $TestId -ServerArgs $ServerArgs
         
         if ($ShouldFail) {
-            # Wait a bit to see if process exits
-            Start-Sleep -Seconds 2
+            # Wait long enough for model-loading failures, including draft model
+            # failures after the target model has loaded.
+            $WaitTimeoutSeconds = 2
+            if ($ServerArgs.ContainsKey("__WaitTimeoutSeconds")) {
+                $WaitTimeoutSeconds = [int]$ServerArgs["__WaitTimeoutSeconds"]
+            }
+            [void]$ServerInfo.Process.WaitForExit($WaitTimeoutSeconds * 1000)
             if ($ServerInfo.Process.HasExited) {
                 $ExitCode = $ServerInfo.Process.ExitCode
                 $ErrorContent = Get-Content $ServerInfo.ErrorLog -Raw -ErrorAction SilentlyContinue
@@ -280,7 +289,11 @@ function Invoke-Test {
             }
         } else {
             # Wait for server to be ready
-            $Ready = Wait-ForServer -Port $ServerInfo.Port
+            $WaitTimeoutSeconds = 30
+            if ($ServerArgs.ContainsKey("__WaitTimeoutSeconds")) {
+                $WaitTimeoutSeconds = [int]$ServerArgs["__WaitTimeoutSeconds"]
+            }
+            $Ready = Wait-ForServer -Port $ServerInfo.Port -TimeoutSeconds $WaitTimeoutSeconds
             if (-not $Ready) {
                 $ErrorContent = Get-Content $ServerInfo.ErrorLog -Raw -ErrorAction SilentlyContinue
                 $Result.Message = "Server did not become ready in time. Error: $ErrorContent"
@@ -289,7 +302,11 @@ function Invoke-Test {
                 Write-Host "  Server ready on port $($ServerInfo.Port)"
                 
                 # Run custom test script
-                $TestResult = & $TestScript -Port $ServerInfo.Port -ServerInfo $ServerInfo
+                $TestOutput = & $TestScript -Port $ServerInfo.Port -ServerInfo $ServerInfo
+                $TestResult = @(@($TestOutput) | Where-Object { $_ -is [hashtable] -and $_.ContainsKey("Passed") } | Select-Object -Last 1)[0]
+                if ($null -eq $TestResult) {
+                    $TestResult = @{ Passed = $false; Message = "Test script did not return a result hashtable" }
+                }
                 
                 if ($TestResult.Passed) {
                     $Result.Status = "PASS"

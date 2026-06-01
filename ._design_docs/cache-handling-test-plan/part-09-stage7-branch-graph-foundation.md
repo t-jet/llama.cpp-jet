@@ -23,6 +23,8 @@ Implementation documents:
 
 ## Out of scope for Stage 7 acceptance
 
+This list applies only when executing the Stage 7 row set below. Stage 8 acceptance now lives in [Part 10](part-10-stage8-metadata-only-rematerialization.md).
+
 Do not require these future-stage behaviors:
 
 - metadata-only branch nodes

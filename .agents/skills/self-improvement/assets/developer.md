@@ -38,7 +38,7 @@ Condition:
 
 Action:
 
-- Do make the first visible action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, even when the user message includes AGENTS.md or environment instructions.
+- Do make the first assistant action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, including when the note only says memory will be loaded.
 
 ## Improvement: Test-results review gate classification
 
@@ -119,3 +119,23 @@ Condition:
 Action:
 
 - Do inspect the resulting diff for unnecessary line-ending churn and, if the patch changed unrelated lines only because of newline normalization, correct that before handoff.
+
+## Improvement: Update indexes before mutable keys
+
+Condition:
+
+- When changing cache entries that are indexed by mutable fields such as use sequence, insertion sequence, namespace, token prefix, or payload residency
+
+Action:
+
+- Do capture the old index key and remove or update the existing index entry before mutating the field; don't add the refreshed entry without first proving the old index entry was removed.
+
+## Improvement: Avoid parallel MSBuild targets sharing objects
+
+Condition:
+
+- When building multiple CMake/MSBuild targets on Windows that share generated projects or object files, especially `server-context.cpp`
+
+Action:
+
+- Do build those targets sequentially or use one combined build command; don't launch parallel tool calls for separate MSBuild targets that can race on `ZERO_CHECK` state or shared object outputs.

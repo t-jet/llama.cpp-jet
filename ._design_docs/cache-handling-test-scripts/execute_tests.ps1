@@ -85,14 +85,20 @@ function Get-NextTestReportPath {
     New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 
     $DatePart = Get-Date -Format "yyyyMMdd"
-    for ($i = 1; $i -le 99; $i++) {
-        $Candidate = Join-Path $ReportDir ("test-report-{0}-{1:D2}.md" -f $DatePart, $i)
-        if (-not (Test-Path $Candidate)) {
-            return $Candidate
+    $Existing = Get-ChildItem -Path $ReportDir -Filter ("test-report-{0}-*.md" -f $DatePart) -ErrorAction SilentlyContinue
+    $MaxSuffix = 0
+    foreach ($File in $Existing) {
+        if ($File.BaseName -match "^test-report-$DatePart-(\d{2})$") {
+            $MaxSuffix = [Math]::Max($MaxSuffix, [int]$Matches[1])
         }
     }
 
-    throw "No available test report filename for $DatePart"
+    $NextSuffix = $MaxSuffix + 1
+    if ($NextSuffix -gt 99) {
+        throw "No available test report filename for $DatePart"
+    }
+
+    return (Join-Path $ReportDir ("test-report-{0}-{1:D2}.md" -f $DatePart, $NextSuffix))
 }
 
 function Get-GitEvidence {
@@ -2459,38 +2465,149 @@ $Result = Invoke-Test -TestId "R04" -Description "Regression: hybrid mode requir
 
 Add-TestResult $Result
 
-# Draft model tests (D01-D05) - SKIP if draft model not available
+# Draft model tests (D01-D05)
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "Draft Model Tests (requires --model-draft)"
 Write-Host "=========================================="
 Write-Host ""
 
-$DraftModelAvailable = $false  # Set to $true when draft model is available
+function New-BlockedResult {
+    param(
+        [string]$TestId,
+        [string]$Description,
+        [string]$Message
+    )
 
-if ($DraftModelAvailable) {
-    # Test D01: Paired save/restore with draft model
-    $Result = Invoke-Test -TestId "D01" -Description "Paired save/restore with draft model" `
-        -ServerArgs @{
-            "--cache-mode" = "hybrid"
-            "--ctx-size" = 512
-            "--model-draft" = "path/to/draft.gguf"
-            "--parallel" = 2
-            "--cont-batching" = $true
-            "--kv-unified" = $true
-            "--cache-ram" = 100
-            "--metrics" = $true
-        } `
-        -TestScript {
-            param($Port, $ServerInfo)
-            # Implementation pending
-            return @{ Passed = $true; Message = "Draft model save/restore verified" }
+    return @{
+        TestId = $TestId
+        Description = $Description
+        Status = "BLOCKED"
+        Message = $Message
+        Duration = 0
+    }
+}
+
+function Invoke-DraftCompletionPair {
+    param(
+        [int]$Port,
+        [string]$Prompt
+    )
+
+    $Body = @{
+        prompt = $Prompt
+        n_predict = 8
+        temperature = 0
+        seed = 42
+        speculative = @{
+            n_max = 4
+            n_min = 1
         }
-    Add-TestResult $Result
-    
-    # Tests D02-D05 would be implemented here
+    } | ConvertTo-Json -Depth 4
+
+    $First = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/completion" `
+        -Method Post -ContentType "application/json" -Body $Body -TimeoutSec 180
+    if ($First.StatusCode -ne 200) {
+        return @{ Passed = $false; Message = "First completion failed with HTTP $($First.StatusCode)" }
+    }
+
+    Start-Sleep -Milliseconds 500
+
+    $Second = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/completion" `
+        -Method Post -ContentType "application/json" -Body $Body -TimeoutSec 180
+    if ($Second.StatusCode -ne 200) {
+        return @{ Passed = $false; Message = "Second completion failed with HTTP $($Second.StatusCode)" }
+    }
+
+    return @{ Passed = $true; Message = "Both draft-runtime completions returned HTTP 200" }
+}
+
+function Wait-ForServerLogPattern {
+    param(
+        $ServerInfo,
+        [string]$Pattern,
+        [int]$TimeoutSeconds = 180
+    )
+
+    $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $Deadline) {
+        $LogText = (Get-Content $ServerInfo.LogFile -Raw -ErrorAction SilentlyContinue) + "`n" +
+            (Get-Content $ServerInfo.ErrorLog -Raw -ErrorAction SilentlyContinue)
+        if ($LogText -match $Pattern) {
+            return $true
+        }
+        if ($ServerInfo.Process.HasExited) {
+            return $false
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Invoke-FocusedBinaryResult {
+    param(
+        [string]$TestId,
+        [string]$Description,
+        [string]$BinaryName,
+        [string]$PassMessage,
+        [string]$BlockedMessage
+    )
+
+    $BinaryPath = Join-Path (Split-Path $ServerPath -Parent) $BinaryName
+    if (-not (Test-Path $BinaryPath)) {
+        return (New-BlockedResult -TestId $TestId -Description $Description -Message $BlockedMessage)
+    }
+
+    $StartTime = Get-Date
+    Write-Host ""
+    Write-Host "[$TestId] $Description"
+    Write-Host ("=" * 80)
+    Write-Host "  Focused binary: $BinaryPath"
+    & $BinaryPath | Out-Null
+    $ExitCode = $LASTEXITCODE
+    $Duration = ((Get-Date) - $StartTime).TotalSeconds
+    if ($ExitCode -eq 0) {
+        Write-Host "  PASS: $PassMessage"
+        return @{
+            TestId = $TestId
+            Description = $Description
+            Status = "PASS"
+            Message = $PassMessage
+            Duration = $Duration
+        }
+    }
+
+    Write-Host "  FAIL: Focused binary exited with code $ExitCode"
+    return @{
+        TestId = $TestId
+        Description = $Description
+        Status = "FAIL"
+        Message = "Focused binary $BinaryName exited with code $ExitCode"
+        Duration = $Duration
+    }
+}
+
+$DraftTargetModel = if (-not [string]::IsNullOrWhiteSpace($env:LLAMA_CACHE_TEST_TARGET_MODEL)) {
+    $env:LLAMA_CACHE_TEST_TARGET_MODEL
+} elseif (Test-Path "D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf") {
+    "D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf"
 } else {
-    # Skip draft model tests
+    $Model
+}
+
+$DraftModel = if (-not [string]::IsNullOrWhiteSpace($env:LLAMA_CACHE_TEST_DRAFT_MODEL)) {
+    $env:LLAMA_CACHE_TEST_DRAFT_MODEL
+} else {
+    "D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf"
+}
+
+$DraftModelAvailable = (Test-Path $DraftTargetModel) -and (Test-Path $DraftModel)
+
+if (-not $DraftModelAvailable) {
+    $Missing = @()
+    if (-not (Test-Path $DraftTargetModel)) { $Missing += "target model: $DraftTargetModel" }
+    if (-not (Test-Path $DraftModel)) { $Missing += "draft model: $DraftModel" }
+
     foreach ($TestId in @("D01", "D02", "D03", "D04", "D05")) {
         $Descriptions = @{
             "D01" = "Paired save/restore with draft model"
@@ -2499,19 +2616,132 @@ if ($DraftModelAvailable) {
             "D04" = "Draft model compatibility key"
             "D05" = "Draft-only cache miss"
         }
-        
-        $Result = @{
-            TestId = $TestId
-            Description = $Descriptions[$TestId]
-            Status = "SKIP"
-            Message = "Draft model not available - test skipped"
-            Duration = 0
-        }
+        $Result = New-BlockedResult -TestId $TestId -Description $Descriptions[$TestId] `
+            -Message ("Draft model precondition missing: {0}" -f ($Missing -join "; "))
         Add-TestResult $Result
-        Write-Host ""
-        Write-Host "[$TestId] $($Descriptions[$TestId])"
-        Write-Host ("=" * 80)
-        Write-Host "  SKIP: Draft model not available"
+    }
+} else {
+    $OriginalModelForDraft = $Model
+    $Model = $DraftTargetModel
+    Write-Host "  Draft target model: $DraftTargetModel"
+    Write-Host "  Draft model: $DraftModel"
+
+    try {
+        $Result = Invoke-Test -TestId "D01" -Description "Paired save/restore with draft model" `
+            -ServerArgs @{
+                "--cache-mode" = "hybrid"
+                "--ctx-size" = 512
+                "--model-draft" = $DraftModel
+                "--spec-type" = "draft-simple"
+                "--parallel" = 2
+                "--cont-batching" = $true
+                "--kv-unified" = $true
+                "--cache-ram" = 100
+                "--metrics" = $true
+                "--temp" = 0
+                "--seed" = 42
+                "__WaitTimeoutSeconds" = 240
+            } `
+            -TestScript {
+                param($Port, $ServerInfo)
+
+                if (-not (Wait-ForServerLogPattern -ServerInfo $ServerInfo -Pattern "loading draft model" -TimeoutSeconds 180)) {
+                    return @{ Passed = $false; Message = "Draft model load marker was not observed before timeout" }
+                }
+
+                $Before = Get-CacheMetrics -Port $Port
+                $HitsBefore = if ($Before.ContainsKey("hits_total_hybrid")) { $Before["hits_total_hybrid"] } else { 0 }
+                $PairResult = Invoke-DraftCompletionPair -Port $Port -Prompt "D01 paired draft cache probe"
+                if (-not $PairResult.Passed) {
+                    return $PairResult
+                }
+
+                Start-Sleep -Seconds 1
+                $After = Get-CacheMetrics -Port $Port
+                $HitsAfter = if ($After.ContainsKey("hits_total_hybrid")) { $After["hits_total_hybrid"] } else { 0 }
+                $LogText = (Get-Content $ServerInfo.LogFile -Raw -ErrorAction SilentlyContinue) + "`n" +
+                    (Get-Content $ServerInfo.ErrorLog -Raw -ErrorAction SilentlyContinue)
+
+                if ($LogText -notmatch "loading draft model") {
+                    return @{ Passed = $false; Message = "Draft runtime log marker was not observed" }
+                }
+                if (($HitsAfter - $HitsBefore) -lt 1) {
+                    return @{ Passed = $false; Message = "Paired draft public restore not proven: hits delta was $($HitsAfter - $HitsBefore)" }
+                }
+
+                return @{ Passed = $true; Message = "Draft runtime completed paired save/restore; hits_delta=$($HitsAfter - $HitsBefore)" }
+            }
+        Add-TestResult $Result
+
+        $BadDraftPath = Join-Path $PSScriptRoot "_missing_draft_model.gguf"
+        $Result = Invoke-Test -TestId "D02" -Description "Draft model failure handling" `
+            -ServerArgs @{
+                "--cache-mode" = "hybrid"
+                "--ctx-size" = 512
+                "--model-draft" = $BadDraftPath
+                "--spec-type" = "draft-simple"
+                "--cache-ram" = 100
+                "--metrics" = $true
+                "__WaitTimeoutSeconds" = 180
+            } `
+            -ShouldFail `
+            -TestScript {
+                param($Port, $ServerInfo)
+                return @{ Passed = $false; Message = "Unexpected server readiness with missing draft model" }
+            }
+        Add-TestResult $Result
+
+        $Result = Invoke-FocusedBinaryResult -TestId "D03" -Description "Atomic save for target+draft" `
+            -BinaryName "test-step13-stage8.exe" `
+            -PassMessage "Focused Stage 8 binary passed target/draft atomic re-materialization coverage (`test_hybrid_rematerialization_commits_target_draft_together`)." `
+            -BlockedMessage "Missing focused Stage 8 binary; public HTTP cannot force a partial target+draft save failure."
+        Add-TestResult $Result
+
+        $Result = Invoke-Test -TestId "D04" -Description "Draft model compatibility key" `
+            -ServerArgs @{
+                "--cache-mode" = "hybrid"
+                "--ctx-size" = 512
+                "--spec-draft-model" = $DraftModel
+                "--spec-type" = "draft-simple"
+                "--parallel" = 2
+                "--cont-batching" = $true
+                "--kv-unified" = $true
+                "--cache-ram" = 100
+                "--metrics" = $true
+                "--temp" = 0
+                "--seed" = 42
+                "__WaitTimeoutSeconds" = 240
+            } `
+            -TestScript {
+                param($Port, $ServerInfo)
+
+                if (-not (Wait-ForServerLogPattern -ServerInfo $ServerInfo -Pattern "loading draft model" -TimeoutSeconds 180)) {
+                    return @{ Passed = $false; Message = "Draft model load marker was not observed before timeout for --spec-draft-model" }
+                }
+
+                $PairResult = Invoke-DraftCompletionPair -Port $Port -Prompt "D04 draft compatibility key alias probe"
+                if (-not $PairResult.Passed) {
+                    return $PairResult
+                }
+
+                $LogText = (Get-Content $ServerInfo.LogFile -Raw -ErrorAction SilentlyContinue) + "`n" +
+                    (Get-Content $ServerInfo.ErrorLog -Raw -ErrorAction SilentlyContinue)
+                if ($LogText -notmatch "loading draft model") {
+                    return @{ Passed = $false; Message = "Draft runtime log marker was not observed for --spec-draft-model" }
+                }
+
+                return @{ Passed = $true; Message = "--spec-draft-model alias started draft runtime and completed cache-compatible requests" }
+            }
+        Add-TestResult $Result
+
+        $Result = Invoke-FocusedBinaryResult -TestId "D05" -Description "Draft-only cache miss" `
+            -BinaryName "test-cache-controller.exe" `
+            -PassMessage "Focused controller binary passed draft namespace isolation coverage (`test_namespace_isolation_draft_model` and `test_namespace_isolation_draft_context_modes`)." `
+            -BlockedMessage "Missing focused controller binary; public HTTP cannot switch draft model identity inside one server or expose cross-draft namespace comparison."
+        Add-TestResult $Result
+    }
+    finally {
+        $Model = $OriginalModelForDraft
     }
 }
 
@@ -2521,10 +2751,10 @@ Write-Host "=========================================="
 Write-Host "Test Summary"
 Write-Host "=========================================="
 
-$PassCount = ($Global:TestResults | Where-Object { $_.Status -eq "PASS" }).Count
-$FailCount = ($Global:TestResults | Where-Object { $_.Status -eq "FAIL" }).Count
-$SkipCount = ($Global:TestResults | Where-Object { $_.Status -eq "SKIP" }).Count
-$BlockedCount = ($Global:TestResults | Where-Object { $_.Status -eq "BLOCKED" }).Count
+$PassCount = ($Global:TestResults | Where-Object { $_["Status"] -eq "PASS" }).Count
+$FailCount = ($Global:TestResults | Where-Object { $_["Status"] -eq "FAIL" }).Count
+$SkipCount = ($Global:TestResults | Where-Object { $_["Status"] -eq "SKIP" }).Count
+$BlockedCount = ($Global:TestResults | Where-Object { $_["Status"] -eq "BLOCKED" }).Count
 $TotalCount = $Global:TestResults.Count
 
 Write-Host "Total: $TotalCount | Pass: $PassCount | Fail: $FailCount | Skip: $SkipCount | Blocked: $BlockedCount"

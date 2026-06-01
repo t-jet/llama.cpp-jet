@@ -13,11 +13,13 @@ The test plan covers the implementation status described in the design documents
 - `cache-handling-phase4-implementation.md` (Stage 4: LRU eviction policy with protected roots - closed)
 - `cache-handling-phase5-implementation.md` (Stage 5: descriptor separation and target/draft transactional restore - closed)
 - `cache-handling-phase6-implementation.md` (Stage 6: cold payload storage and asynchronous I/O - implementation review PASS)
+- `cache-handling-phase7-implementation.md` (Stage 7: branch graph foundation - closed)
+- `cache-handling-phase8-implementation.md` (Stage 8: metadata-only nodes and re-materialization - Architect implementation re-review PASS)
 - `cache-handling-architecture/part-06-stage-5-draft-context-modes-and-pairing.md` (Stage 5 draft context mode compatibility)
 - `cache-handling-phase-1-and-2-adjustments.md`
 - `cache-handling-phases-1-and-2-implementation-gaps.md`
 
-Stage 5 is closed. Stage 6 is implementation complete with review PASS. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics. Stage 5 adds descriptor-owned payloads, hot payload records, pair-state validation, transactional target/draft restore behavior, and draft context mode compatibility. Stage 6 adds cold payload storage, an asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, and cold layer metrics. The Stage 5 rows remain useful for regression checks and for the residual external draft-model fixture follow-up.
+Stage 5 is closed. Stage 6 and Stage 7 are closed. Stage 8 has passed Architect implementation re-review and is ready for QA planning. Phase 3 remains the base cache behavior; Stage 4 adds byte-accounted LRU policy behavior and protected-root budget semantics. Stage 5 adds descriptor-owned payloads, hot payload records, pair-state validation, transactional target/draft restore behavior, and draft context mode compatibility. Stage 6 adds cold payload storage, an asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, and cold layer metrics. Stage 7 adds the branch forest, strict namespace validation, slot references, metadata accounting, and global hot-payload LRU. Stage 8 adds metadata-only retention, re-materialization validation, mismatch-parent handling, equivalent-branch deduplication, branch-metadata admission rejection, and cold cleanup ownership checks.
 
 - Non-destructive exact blob cache with LRU eviction
 - Comprehensive namespace isolation (14/14 fields populated)
@@ -42,6 +44,14 @@ Stage 5 is closed. Stage 6 is implementation complete with review PASS. Phase 3 
 - Protected root demotion emits a warning diagnostic
 - Demotion and promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency histogram, and eviction exclusion of demoted payloads in `/metrics`
 - Fault injection for cold file corruption, cold store read failure, and queue-full fallback
+- Branch graph nodes, namespace validation, slot references, metadata accounting, checksum-assisted lookup, and global hot-payload LRU selection
+- Metadata-only retention after payload eviction without automatic branch pruning
+- Re-materialization planning that validates token or checksum spans before replay
+- Mismatch handling that leaves the mismatched metadata-only node unchanged and admits divergence under the deepest validated ancestor
+- Equivalent same-namespace branch reuse or canonicalization without descriptor sharing
+- Branch metadata admission rejection when safe pruning cannot satisfy the soft metadata budget
+- Cold cleanup ownership checks for evicted or pruned branch payloads
+- Stage 8 metrics for retention, re-materialization, validation mismatch, mismatch parent selection, deduplication, pruning, cold cleanup, and admission rejection
 
 ## Report cross-check
 
@@ -53,6 +63,9 @@ Stage 5 is closed. Stage 6 is implementation complete with review PASS. Phase 3 
 | `cache-handling-phase3-implementation.md` | Current base hybrid cache behavior. Use it for non-destructive hits, state serialization, namespace isolation, and multi-slot reuse. |
 | `cache-handling-phase4-implementation.md` | Current Stage 4 implementation record. Use Parts 6 and 7 for the review-fix evidence that equivalent-entry refresh enforces budget and protected eviction decisions are counted. |
 | `cache-handling-phase5-implementation.md` | Closed Stage 5 implementation record. Use Parts 6, 8, 9, 10, and 11 for descriptor validation, pair-state checks, Stage 5 metrics, accepted exact empty-side rollback behavior, focused QA evidence closure, and manager closure. |
+| `cache-handling-phase6-implementation.md` | Closed Stage 6 implementation record. Use it for cold payload storage, asynchronous I/O, demotion, promotion, startup validation, fault injection, and cold metrics. |
+| `cache-handling-phase7-implementation.md` | Closed Stage 7 implementation record. Use it for branch graph foundation, slot refs, namespace validation, metadata accounting, global payload LRU, Stage 7 metrics, and Stage 1-6 regression status. |
+| `cache-handling-phase8-implementation.md` | Current Stage 8 implementation record. Use it for metadata-only retention, re-materialization, mismatch handling, equivalent deduplication, cold cleanup ownership, Prometheus metrics labels, and branch-metadata admission rejection. |
 | `cache-handling-phase-1-and-2-adjustments.md` | Current upstream-scope correction. This is the source for stable `/health`, no `/cache/stats`, cache metrics in `/metrics`, hidden test helpers, degraded metadata, and minimal public CLI surface. |
 | `cache-handling-phases-1-and-2-implementation-gaps.md` | Current gap and corrective-action record. This is the source for open model-backed restore coverage and target/draft failure coverage. Its focused coverage notes belong to the separate unit-test plan. |
 
@@ -84,13 +97,13 @@ The current implemented cache surface is:
 | Empty-preimage rollback | If a pre-restore target or draft side has no serialized bytes, rollback clears that sequence. Unsupported clear paths fail before target payload application. |
 | Stage 5 observability | `/metrics` exports descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors in addition to the Stage 4 counters. |
 | Stage 6 cold layer | Cold payload storage is opt-in via `--cache-cold-path`. When unconfigured, the server behaves identically to Stage 5. When configured, hot payloads are demoted to cold files under budget pressure and promoted back to hot on cache hit. Startup validation rejects invalid `--cache-cold-path` configurations. `/metrics` exports demotion and promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency, and eviction exclusion of demoted payloads. Target and draft sides demote and promote as one unit. Protected root demotion emits a warning. |
+| Stage 7 branch graph | Hybrid saves create branch nodes in a namespace-aware forest. Slot references block unsafe payload eviction. Branch metadata bytes are accounted and exposed. Checksum and token-span lookup select same-namespace candidates. The hot payload LRU is global across namespaces. |
+| Stage 8 metadata-only graph | Payload eviction can leave branch metadata in place. Selected metadata-only nodes require validation before replay. Mismatches become misses and divergence branches. Equivalent nodes are reused in the same namespace. Metadata admission can reject a new node when protected or referenced topology prevents safe pruning. Cold cleanup must prove descriptor ownership. |
 
 ## Exclusions
 
 Do not write acceptance tests for these features yet:
 
-- Metadata-only branch nodes and re-materialization.
-- Shared branch graph traversal.
 - Checkpoint-first restore strategy.
 - Native Jinja boundary capture as a production contract.
 - Public request-controlled protected-root markers.
@@ -100,6 +113,7 @@ Do not write acceptance tests for these features yet:
 - Cache policy selection such as `--cache-eviction-policy`.
 - Namespace fairness or per-namespace quotas.
 - Cold residency or cold-store restore across server restarts. Cold files may persist on disk, but the design does not guarantee that a future server start will accept them as valid restore sources.
+- Public metadata-budget CLI configuration. Stage 8 metadata-budget checks use internal or focused-test configuration unless a later stage opens public flags.
 
 Tests may mention these as future work only when they verify that the current build does not expose the feature.
 

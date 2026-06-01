@@ -1,7 +1,7 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 Scope: server integration tests and focused evidence mapping for implemented cache behavior
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
@@ -52,7 +52,7 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, and Stage 7, read:
+Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, and Stage 8, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -72,6 +72,14 @@ Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 
 - [cache-handling-phase7-design/part-06-acceptance-criteria.md](./cache-handling-phase7-design/part-06-acceptance-criteria.md)
 - [cache-handling-phase7-implementation.md](./cache-handling-phase7-implementation.md)
 - [cache-handling-phase7-implementation/part-10-implementation-re-review.md](./cache-handling-phase7-implementation/part-10-implementation-re-review.md)
+- [cache-handling-phase8-design.md](./cache-handling-phase8-design.md)
+- [cache-handling-phase8-design/part-01-overview-and-objectives.md](./cache-handling-phase8-design/part-01-overview-and-objectives.md)
+- [cache-handling-phase8-design/part-02-interfaces-and-lifecycle-rules.md](./cache-handling-phase8-design/part-02-interfaces-and-lifecycle-rules.md)
+- [cache-handling-phase8-design/part-03-rematerialization-and-mismatch-handling.md](./cache-handling-phase8-design/part-03-rematerialization-and-mismatch-handling.md)
+- [cache-handling-phase8-design/part-04-deduplication-pruning-and-cleanup.md](./cache-handling-phase8-design/part-04-deduplication-pruning-and-cleanup.md)
+- [cache-handling-phase8-design/part-05-observability-testability-and-review-readiness.md](./cache-handling-phase8-design/part-05-observability-testability-and-review-readiness.md)
+- [cache-handling-phase8-implementation.md](./cache-handling-phase8-implementation.md)
+- [cache-handling-phase8-implementation/part-10-architect-implementation-re-review-20260601.md](./cache-handling-phase8-implementation/part-10-architect-implementation-re-review-20260601.md)
 
 ## Test coverage summary
 
@@ -84,6 +92,7 @@ The integration plan covers:
 - Stage 5 payload descriptor separation, hot payload ownership, descriptor validation, target/draft pair validation, draft runtime mode namespace isolation, transactional restore rollback, paired eviction and byte accounting, Stage 5 metrics, legacy compatibility, and Stage 4 regression coverage.
 - Stage 6 cold payload storage, asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, cold store opt-in behavior, target/draft pair demotion and promotion as a unit, fault tolerance for cold file corruption and I/O failures, protected root demotion warning, cold layer metrics, and Stage 4 and Stage 5 regression with cold store configured.
 - Stage 7 branch graph foundation, branch node lifecycle, namespace validation, slot references, checksum-assisted lookup, branch metadata RAM accounting and soft-limit diagnostics, global hot-payload LRU selection across namespaces, Stage 7 metrics, and Stage 1-6 regression with the forest-backed controller.
+- Stage 8 metadata-only retention, safe re-materialization planning, mismatch-parent handling, equivalent-branch deduplication, branch-metadata admission rejection, cold cleanup ownership, Stage 8 Prometheus metrics labels, and Stage 4-7 regression with metadata-only behavior enabled.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -125,8 +134,15 @@ Implemented behavior that must be covered:
 - Branch metadata RAM is accounted and exposed through metrics and focused stats. The Stage 7 metadata soft max is internal/test-only and diagnostics-only.
 - Protected-root graph metadata survives payload eviction and demotion. Protected-root payload bytes still count against the hot budget.
 - Stage 7 Prometheus metrics expose branch lookup, namespace, metadata budget, payload eviction, protected-root payload, slot-ref, forest-lock, and namespace-validation signals.
+- Payload eviction can retain a branch as metadata-only without pruning topology.
+- Re-materialization validates the selected metadata-only path before replay and falls back without slot mutation on mismatch or unavailable source payload.
+- Mismatch handling creates or finds a divergent branch under the deepest validated ancestor.
+- Equivalent branch admission reuses a same-namespace canonical node instead of adding duplicates.
+- Branch-metadata admission rejects a new node when safe pruning cannot satisfy the soft metadata budget.
+- Cold cleanup proves descriptor ownership before deleting cold bytes during eviction or pruning.
+- Stage 8 Prometheus metrics expose the accepted names and labels for metadata-only retention, re-materialization, mismatch, deduplication, pruning, cold cleanup, and metadata admission rejection.
 
-Do not treat metadata-only branch nodes, equivalent-branch deduplication, checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, or separate hot/metadata/cold budget flags as current acceptance criteria.
+Do not treat checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
 ## Contents
 
@@ -141,6 +157,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 7: test report quality and templates](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md)
 - [Part 8: Stage 6 cold layer integration](./cache-handling-test-plan/part-08-stage6-cold-layer-integration.md)
 - [Part 9: Stage 7 branch graph foundation](./cache-handling-test-plan/part-09-stage7-branch-graph-foundation.md)
+- [Part 10: Stage 8 metadata-only re-materialization](./cache-handling-test-plan/part-10-stage8-metadata-only-rematerialization.md)
 
 ## Review reports
 
@@ -149,6 +166,8 @@ This document is split into smaller part files. Read the parts in order when you
 - [Stage 6 test-plan review: 2026-05-30](./cache-handling-test-plan/stage-6-test-plan-review-20260530.md)
 - [Stage 7 test-plan review: 2026-05-31](./cache-handling-test-plan/stage-7-test-plan-review-20260531.md)
 - [Stage 7 manager test-plan gate: 2026-05-31](./cache-handling-test-plan/stage-7-manager-test-plan-gate-20260531.md)
+- [Stage 8 test-plan review: 2026-06-01](./cache-handling-test-plan/stage-8-test-plan-review-20260601.md)
+- [Stage 8 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-8-manager-test-plan-gate-20260601.md)
 
 ## Test scripts
 

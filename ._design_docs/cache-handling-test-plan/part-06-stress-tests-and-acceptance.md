@@ -26,12 +26,16 @@ The implemented PowerShell runner currently covers:
 - **H71:** Protected root demotion warning
 - **H72-H74:** Target/draft pair demotion and promotion as a unit
 - **R10-R12:** Stage 4 and Stage 5 regression with cold store configured
+- **S80-S99:** Stage 8 metadata-only and re-materialization scenarios are acceptance scenarios. Most rows need focused Stage 8, controller, stats-capable, or fault-injection evidence before they can pass.
+- **R20-R23:** Stage 4 through Stage 7 regression after Stage 8.
 
 See Parts 3 and 4 of this test plan for the complete test matrix.
 
 Stage 4 H30-H39 remain acceptance scenarios in Part 3. A test report may mark those rows `PASS` only when it captures the Stage 4 evidence listed in Part 5, including measured resident payload size, budget choice, recency order, equivalent refresh behavior, protected priority or fallback evidence, and metrics, stats-capable harness evidence, or focused C++ controller stats. A script result that only proves requests completed is not enough. Public chat with degraded metadata is not protected-root evidence for H35-H37.
 
 Stage 5 H40-H58 are acceptance scenarios in Part 3. Public HTTP can prove only the public portions of those rows. Descriptor corruption, store-ref mismatch, owner mismatch, residency mismatch, pair-state/runtime mismatch, cross-mode draft namespace isolation, target/draft transactional failure, empty-preimage rollback, and unsupported clear preflight need focused controller, cross-run cache persistence, or fault-injection evidence. If the session lacks that evidence source, report the row as `BLOCKED` or `SKIP` with the missing precondition; do not convert it to a pass by weakening the expected behavior.
+
+Stage 8 S80-S99 and R20-R23 are acceptance scenarios in Part 10. Public HTTP can prove only public surface, metrics output, and model-backed regression. Metadata-only transitions, re-materialization validation, mismatch-parent selection, equivalent deduplication, cold cleanup ownership, and metadata admission rejection need focused Stage 8, focused controller, stats-capable, or fault-injection evidence. If the session lacks that evidence source, report the row as `BLOCKED` with the missing precondition.
 
 ## Future enhancements
 
@@ -42,6 +46,7 @@ The current runner does not yet implement:
 - `-IncludeStress` switch (stress tests not yet implemented)
 - Complete automation for every Stage 4 protected-root branch
 - Complete public automation for every Stage 5 descriptor and transactional restore branch
+- Dedicated public automation for Stage 8 metadata-only and re-materialization rows
 - Public automation for the local Qwen3-8B target plus Qwen3-0.6B normal separate draft model fixture
 - Public or focused automation for `draft-mtp` modes, after the selected local model or model pair is proven MTP-capable
 - Direct public JSON stats collection, because `/cache/stats` is intentionally absent
@@ -195,7 +200,9 @@ For each run, record:
 - Metrics snapshots around cache save, hit, miss, eviction, and restore failure cases.
 - Stage 4 snapshots around payload eviction and protected-root decisions.
 - Stage 5 snapshots around descriptor validation, pairing violations, fallback restores, hot descriptors, and evicted descriptors.
+- Stage 8 snapshots around metadata-only retention, re-materialization, validation mismatch, mismatch-parent selection, deduplication, branch pruning, cold cleanup, and admission rejection.
 - Focused evidence mapping for descriptor validation, pair-state mismatch, paired byte accounting, transactional rollback, and unsupported clear preflight when public HTTP cannot create the precondition.
+- Focused evidence mapping for metadata-only topology, re-materialization plans, mismatch handling, equivalent deduplication, cold cleanup ownership, and metadata admission rejection when public HTTP cannot create the precondition.
 - Known gaps with references to implementation gap documents.
 
 Do not report focused cache-controller line coverage here. Integration evidence should describe server runs, model paths, HTTP requests, and metrics changes.

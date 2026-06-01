@@ -320,6 +320,13 @@ target_include_directories(test-step12-branch-graph PRIVATE ${CMAKE_SOURCE_DIR}/
 target_compile_definitions(test-step12-branch-graph PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-step12-branch-graph)
 
+# test-step13-stage8 covers the Stage 8 metadata-only nodes and re-materialization module
+llama_build(test-step13-stage8.cpp get-model.cpp)
+target_link_libraries(test-step13-stage8 PRIVATE server-context)
+target_include_directories(test-step13-stage8 PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-step13-stage8 PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-step13-stage8)
+
 if (NOT LLAMA_SANITIZE_ADDRESS AND NOT GGML_SCHED_NO_REALLOC)
   # TODO: repair known memory leaks
   llama_build_and_test(test-opt.cpp)

@@ -396,7 +396,49 @@ void hybrid_cache_controller::update() {
     // Phase 6: Process any pending I/O completions from the worker
     process_completions();
 
+    // Stage 8 Step 8.9: Branch-metadata budget enforcement (5-step pressure pipeline)
+    // Step 1: Demotion (handled by evict_until_within_budget -> mark_payload_evicted -> demote_payload)
+    // Step 2: Payload eviction (handled by evict_until_within_budget)
     evict_until_within_budget();
+
+    // Step 3: Cold cleanup - delete orphaned cold payloads
+    {
+        std::unordered_set<uint64_t> referenced = forest.cleanup_cold();
+        std::unordered_set<uint64_t> cold_to_delete;
+        for (const auto & desc : payload_descriptors) {
+            if (desc.second.residency == payload_residency_state::cold &&
+                referenced.find(desc.first) == referenced.end()) {
+                cold_to_delete.insert(desc.first);
+            }
+        }
+        if (!cold_to_delete.empty()) {
+            size_t n_deleted = cold_store.delete_ids(cold_to_delete);
+            if (n_deleted > 0) {
+                n_cache_cold_cleanup_total += n_deleted;
+                SRV_DBG(" - hybrid cache: cold cleanup deleted %zu orphaned cold payloads\n", n_deleted);
+            }
+            if (n_deleted == cold_to_delete.size()) {
+                for (uint64_t id : cold_to_delete) {
+                    payload_descriptors.erase(id);
+                }
+            } else {
+                SRV_WRN(" - hybrid cache: cold cleanup deleted %zu of %zu orphaned cold payloads; descriptors retained for retry\n",
+                        n_deleted, cold_to_delete.size());
+            }
+        }
+    }
+
+    // Step 4: Metadata pruning
+    if (branch_metadata_ram_soft_max > 0) {
+        size_t freed = forest.enforce_metadata_budget(branch_metadata_ram_soft_max);
+        if (freed > 0) {
+            n_cache_branch_prunings++;
+            n_cache_branch_pruned_metadata_bytes += freed;
+            SRV_DBG(" - hybrid cache: metadata pruning freed %zu bytes\n", freed);
+        }
+    }
+
+    // Step 5: Admission rejection is handled at admission time (save_slot, try_restore_from_cache)
 
     while (!entries.empty() && limit_tokens > 0 && calculate_total_tokens() > limit_tokens) {
         auto candidates = build_policy_candidates();
@@ -582,6 +624,17 @@ json hybrid_cache_controller::get_stats() const {
         {"n_evicted_payload_descriptors", evicted_descriptors},
         {"n_target_only_payload_descriptors", target_only_descriptors},
         {"n_target_and_draft_payload_descriptors", target_and_draft_descriptors},
+        // Stage 8: Re-materialization and metadata-only metrics
+        {"cache_metadata_only_retentions_total", n_cache_metadata_only_retentions},
+        {"cache_node_rematerializations_total", n_cache_node_rematerializations},
+        {"cache_node_rematerialization_bytes_total", n_cache_node_rematerialization_bytes},
+        {"cache_validation_mismatches_total", n_cache_validation_mismatches},
+        {"cache_mismatch_parent_selections_total", n_cache_mismatch_parent_selections},
+        {"cache_equivalent_branch_deduplications_total", n_cache_equivalent_branch_deduplications},
+        {"cache_branch_pruning_total", n_cache_branch_prunings},
+        {"cache_branch_pruned_metadata_bytes_total", n_cache_branch_pruned_metadata_bytes},
+        {"cache_cold_cleanup_total", n_cache_cold_cleanup_total},
+        {"cache_branch_metadata_admission_rejections_total", n_cache_branch_metadata_admission_rejections},
         {"namespaces",  namespaces},
     };
 }
@@ -688,32 +741,31 @@ bool hybrid_cache_controller::debug_try_admit_entry_for_tests(
         return false;
     }
 
-    hybrid_cache_entry entry;
-    entry.tokens = std::move(tokens);
-    entry.namespace_id = compute_namespace_id(metadata);
-    entry.metadata = metadata;
-    entry.protected_root = protected_root;
-    assign_entry_identity(entry);
-    entry.mark_used(next_use_sequence());
+    const std::string namespace_id = compute_namespace_id(metadata);
     std::vector<uint8_t> target(target_bytes, 0x11);
     std::vector<uint8_t> draft(draft_bytes, 0x22);
-    if (!attach_payload(entry, std::move(target), std::move(draft), draft_bytes > 0)) {
-        return false;
-    }
-
-    auto existing = find_exact_match(entry.tokens, entry.namespace_id);
+    auto existing = find_equivalent_entry(tokens, namespace_id);
     if (existing != entries.end()) {
-        refresh_existing_entry(existing, protected_root);
-        return true;
+        n_cache_equivalent_branch_deduplications++;
+        if (entry_has_payload_for_restore(*existing)) {
+            refresh_existing_entry(existing, protected_root);
+            return true;
+        }
+        return materialize_entry_payload(existing, std::move(target), std::move(draft), draft_bytes > 0);
     }
 
-    entries.push_back(std::move(entry));
-    auto it = std::prev(entries.end());
-    create_branch_node_for_entry(*it);
-    add_to_lru_index(it);
-    add_to_prefix_index(it);
-    evict_until_within_budget();
-    return true;
+    std::string failure_reason;
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(tokens, namespace_id);
+    return admit_entry_with_payload(
+        std::move(tokens),
+        metadata,
+        namespace_id,
+        protected_root,
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        parent_node_id,
+        &failure_reason) != entries.end();
 }
 
 bool hybrid_cache_controller::debug_refresh_entry_for_tests(
@@ -994,11 +1046,10 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
             return true;
         }
 
-        // Immediate eviction: remove from indices and erase the entry.
-        // The descriptor was already set to evicted by mark_payload_evicted.
+        // Immediate eviction: keep branch metadata and token metadata so Stage 8
+        // can validate and re-materialize the node later.
         remove_from_lru_index(it);
         remove_from_prefix_index(it);
-        entries.erase(it);
         n_evictions++;
         n_payload_evictions++;
         n_payload_eviction_bytes += payload_bytes;
@@ -1033,6 +1084,108 @@ bool hybrid_cache_controller::debug_evict_first_payload_for_tests() {
     }
     mark_payload_evicted(entries.front());
     return true;
+}
+
+bool hybrid_cache_controller::debug_evict_last_payload_for_tests() {
+    if (entries.empty()) {
+        return false;
+    }
+    mark_payload_evicted(entries.back());
+    return true;
+}
+
+bool hybrid_cache_controller::debug_rematerialize_first_entry_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_attach) {
+    if (entries.empty()) {
+        return false;
+    }
+    std::vector<uint8_t> target(fail_attach ? 0 : target_bytes, 0x44);
+    std::vector<uint8_t> draft(draft_bytes, 0x55);
+    return materialize_entry_payload(entries.begin(), std::move(target), std::move(draft), draft_bytes > 0);
+}
+
+bool hybrid_cache_controller::debug_first_entry_metadata_only_for_tests() const {
+    if (entries.empty()) {
+        return false;
+    }
+    return forest.is_metadata_only_node(entries.front().branch_node_id);
+}
+
+bool hybrid_cache_controller::debug_first_entry_has_payload_for_tests() const {
+    return !entries.empty() && entry_has_payload_for_restore(entries.front());
+}
+
+bool hybrid_cache_controller::debug_try_admit_stage8_for_tests(
+        server_tokens tokens,
+        const std::string & namespace_id,
+        size_t target_bytes,
+        size_t draft_bytes) {
+    prepared_prompt_metadata metadata;
+    std::vector<uint8_t> target(target_bytes, 0x66);
+    std::vector<uint8_t> draft(draft_bytes, 0x77);
+    auto existing = find_equivalent_entry(tokens, namespace_id);
+    if (existing != entries.end()) {
+        n_cache_equivalent_branch_deduplications++;
+        if (entry_has_payload_for_restore(*existing)) {
+            refresh_existing_entry(existing, false);
+            return true;
+        }
+        return materialize_entry_payload(existing, std::move(target), std::move(draft), draft_bytes > 0);
+    }
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(tokens, namespace_id);
+    return admit_entry_with_payload(
+        std::move(tokens),
+        metadata,
+        namespace_id,
+        false,
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        parent_node_id) != entries.end();
+}
+
+bool hybrid_cache_controller::debug_add_child_entry_for_tests(
+        server_tokens tokens,
+        const std::string & namespace_id,
+        size_t target_bytes,
+        size_t draft_bytes) {
+    if (entries.empty()) {
+        return false;
+    }
+    prepared_prompt_metadata metadata;
+    std::vector<uint8_t> target(target_bytes, 0x88);
+    std::vector<uint8_t> draft(draft_bytes, 0x99);
+    const uint64_t parent_node_id = entries.front().branch_node_id;
+    return admit_entry_with_payload(
+        std::move(tokens),
+        metadata,
+        namespace_id,
+        false,
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        parent_node_id) != entries.end();
+}
+
+int hybrid_cache_controller::debug_select_restore_source_tokens_for_tests(
+        server_tokens tokens,
+        const std::string & namespace_id) {
+    const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens);
+    auto candidates = forest.find_nodes_by_token_span(namespace_id, lookup_tokens, lookup_tokens.size());
+    for (uint64_t node_id : candidates) {
+        auto it = find_entry_by_branch_node(node_id);
+        if (it == entries.end() || it->tokens.get_common_prefix(tokens) != (int) tokens.size()) {
+            continue;
+        }
+        bool validation_mismatch = false;
+        bool unavailable = false;
+        auto selected = select_restore_source_for_metadata_only(
+            it, namespace_id, lookup_tokens, &validation_mismatch, &unavailable);
+        if (selected == entries.end() || validation_mismatch || unavailable) {
+            return -1;
+        }
+        return selected->n_tokens();
+    }
+    return -1;
 }
 
 bool hybrid_cache_controller::debug_inject_first_payload_fault_for_tests(payload_debug_fault fault) {
@@ -1307,11 +1460,11 @@ void hybrid_cache_controller::refresh_existing_entry(std::list<hybrid_cache_entr
     evict_until_within_budget();
 }
 
-uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entry & entry) {
+uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entry & entry, uint64_t parent_node_id) {
     const auto token_vec = cache_tokens_to_vector(entry.tokens);
     const uint64_t node_id = forest.create_node(
         entry.namespace_id,
-        0,
+        parent_node_id,
         token_vec,
         token_vec.empty() ? 0 : 0,
         token_vec.empty() ? 0 : static_cast<int64_t>(token_vec.size() - 1),
@@ -1325,6 +1478,207 @@ uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entr
     sync_branch_node_from_entry(entry);
     record_branch_metadata_pressure();
     return node_id;
+}
+
+bool hybrid_cache_controller::entry_has_payload_for_restore(const hybrid_cache_entry & entry) const {
+    if (entry.payload_id == 0 || !entry.has_target_payload_cached) {
+        return false;
+    }
+    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    return descriptor_it->second.residency == payload_residency_state::hot &&
+        descriptor_it->second.resident_payload_bytes > 0 &&
+        hot_payloads.find(descriptor_it->second.store_ref.id) != hot_payloads.end();
+}
+
+bool hybrid_cache_controller::materialize_entry_payload(
+        std::list<hybrid_cache_entry>::iterator it,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        std::string * failure_reason) {
+    if (it == entries.end() || it->branch_node_id == 0) {
+        if (failure_reason) {
+            *failure_reason = "entry not found";
+        }
+        return false;
+    }
+
+    const auto request_tokens = cache_tokens_to_vector(it->tokens);
+    const rematerialization_plan plan = forest.plan_rematerialization(
+        it->namespace_id,
+        request_tokens,
+        it->branch_node_id);
+    if (plan.fallback_reason == cache_fallback_reason::validation_mismatch) {
+        n_cache_validation_mismatches++;
+        n_cache_mismatch_parent_selections++;
+        if (failure_reason) {
+            *failure_reason = "metadata validation mismatch";
+        }
+        return false;
+    }
+    if (plan.fallback_reason != cache_fallback_reason::none &&
+        plan.fallback_reason != cache_fallback_reason::no_payload_ancestor) {
+        if (failure_reason) {
+            *failure_reason = "metadata validation failed";
+        }
+        return false;
+    }
+
+    const uint64_t old_payload_id = it->payload_id;
+    std::string attach_failure;
+    if (!attach_payload(*it, std::move(target), std::move(draft), runtime_has_draft, &attach_failure)) {
+        if (failure_reason) {
+            *failure_reason = attach_failure;
+        }
+        return false;
+    }
+    remove_payload(old_payload_id);
+    const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
+    remove_from_prefix_index(it);
+    it->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it);
+    update_lru_index(it, old_key);
+    add_to_prefix_index(it);
+    n_cache_node_rematerializations++;
+    n_cache_node_rematerialization_bytes += it->resident_payload_bytes_cached;
+    evict_until_within_budget();
+    return true;
+}
+
+std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_equivalent_entry(
+        const server_tokens & tokens,
+        const std::string & namespace_id) {
+    if (tokens.empty()) {
+        return entries.end();
+    }
+
+    const std::vector<llama_token> token_vec = cache_tokens_to_vector(tokens);
+    const uint64_t canonical = forest.canonical_node_id(
+        namespace_id,
+        token_vec,
+        0,
+        token_vec.empty() ? 0 : static_cast<int64_t>(token_vec.size() - 1));
+    if (canonical != 0) {
+        auto it = find_entry_by_branch_node(canonical);
+        if (it != entries.end()) {
+            return it;
+        }
+    }
+    return find_exact_match(tokens, namespace_id);
+}
+
+uint64_t hybrid_cache_controller::select_mismatch_parent_for_admission(
+        const server_tokens & tokens,
+        const std::string & namespace_id) {
+    const std::vector<llama_token> request_tokens = cache_tokens_to_vector(tokens);
+    uint64_t selected_parent = 0;
+    size_t best_validated = 0;
+    for (const auto & entry : entries) {
+        if (entry.namespace_id != namespace_id || entry.branch_node_id == 0) {
+            continue;
+        }
+        if (!forest.is_metadata_only_node(entry.branch_node_id)) {
+            continue;
+        }
+        const int common_prefix = entry.tokens.get_common_prefix(tokens);
+        if (common_prefix <= 0 || common_prefix == entry.n_tokens()) {
+            continue;
+        }
+        const rematerialization_plan plan = forest.plan_rematerialization(
+            namespace_id,
+            request_tokens,
+            entry.branch_node_id);
+        if (plan.fallback_reason != cache_fallback_reason::validation_mismatch) {
+            continue;
+        }
+        n_cache_validation_mismatches++;
+        n_cache_mismatch_parent_selections++;
+        if (plan.validated_tokens >= best_validated) {
+            best_validated = plan.validated_tokens;
+            selected_parent = plan.deepest_validated_node_id;
+        }
+    }
+    return selected_parent;
+}
+
+std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::admit_entry_with_payload(
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        const std::string & namespace_id,
+        bool protected_root,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        uint64_t parent_node_id,
+        std::string * failure_reason) {
+    hybrid_cache_entry entry;
+    entry.tokens = std::move(tokens);
+    entry.namespace_id = namespace_id;
+    entry.metadata = metadata;
+    entry.protected_root = protected_root;
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
+
+    if (!attach_payload(entry, std::move(target), std::move(draft), runtime_has_draft, failure_reason)) {
+        return entries.end();
+    }
+
+    entries.push_back(std::move(entry));
+    auto it = std::prev(entries.end());
+    if (create_branch_node_for_entry(*it, parent_node_id) == 0) {
+        remove_payload(it->payload_id);
+        entries.erase(it);
+        if (failure_reason) {
+            *failure_reason = "branch node creation failed";
+        }
+        return entries.end();
+    }
+    if (!enforce_branch_metadata_admission_budget(it, namespace_id, failure_reason)) {
+        remove_payload(it->payload_id);
+        forest.remove_node(it->branch_node_id);
+        entries.erase(it);
+        return entries.end();
+    }
+    add_to_lru_index(it);
+    add_to_prefix_index(it);
+    evict_until_within_budget();
+    return it;
+}
+
+bool hybrid_cache_controller::enforce_branch_metadata_admission_budget(
+        std::list<hybrid_cache_entry>::iterator it,
+        const std::string & namespace_id,
+        std::string * failure_reason) {
+    if (branch_metadata_ram_soft_max == 0 || it == entries.end()) {
+        return true;
+    }
+
+    const size_t before_bytes = forest.total_metadata_ram_bytes();
+    const size_t freed = forest.enforce_metadata_budget(branch_metadata_ram_soft_max);
+    if (freed > 0) {
+        n_cache_branch_prunings++;
+        n_cache_branch_pruned_metadata_bytes += freed;
+    }
+
+    const bool admitted_node_pruned = it->branch_node_id == 0 || forest.get_node(it->branch_node_id) == nullptr;
+    const size_t after_bytes = forest.total_metadata_ram_bytes();
+    if (!admitted_node_pruned && after_bytes <= branch_metadata_ram_soft_max) {
+        return true;
+    }
+
+    n_cache_branch_metadata_admission_rejections++;
+    n_branch_metadata_over_limit_events++;
+    if (failure_reason) {
+        *failure_reason = admitted_node_pruned ?
+            "branch metadata budget pruned admitted node" :
+            "branch metadata budget remains over limit";
+    }
+    SRV_WRN(" - hybrid cache: branch metadata admission rejected (namespace: %s, metadata bytes before: %zu, after: %zu, soft max bytes: %zu)\n",
+            namespace_id.c_str(), before_bytes, after_bytes, branch_metadata_ram_soft_max);
+    return false;
 }
 
 void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_entry & entry) {
@@ -1355,6 +1709,21 @@ void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_ent
                 node->residency_state = branch_node::residency::evicted;
                 break;
         }
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            node->is_metadata_only = true;
+            node->absent_reason = branch_node::payload_absent_reason::demoted;
+        } else if (descriptor_it->second.residency == payload_residency_state::evicted) {
+            node->is_metadata_only = true;
+            node->absent_reason = branch_node::payload_absent_reason::evicted_hot;
+        } else {
+            node->is_metadata_only = false;
+            node->absent_reason = branch_node::payload_absent_reason::none;
+        }
+    } else {
+        node->is_metadata_only = !node->has_target_payload && !node->has_draft_payload;
+        node->absent_reason = node->is_metadata_only ?
+            branch_node::payload_absent_reason::never_owned :
+            branch_node::payload_absent_reason::none;
     }
 }
 
@@ -1368,6 +1737,63 @@ std::list<hybrid_cache_entry>::const_iterator hybrid_cache_controller::find_entr
     return std::find_if(entries.begin(), entries.end(), [node_id](const hybrid_cache_entry & entry) {
         return entry.branch_node_id == node_id;
     });
+}
+
+std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::select_restore_source_for_metadata_only(
+        std::list<hybrid_cache_entry>::iterator selected,
+        const std::string & namespace_id,
+        const std::vector<llama_token> & lookup_tokens,
+        bool * validation_mismatch,
+        bool * unavailable) {
+    if (validation_mismatch) {
+        *validation_mismatch = false;
+    }
+    if (unavailable) {
+        *unavailable = false;
+    }
+    if (selected == entries.end()) {
+        if (unavailable) {
+            *unavailable = true;
+        }
+        return entries.end();
+    }
+
+    const auto descriptor_it = payload_descriptors.find(selected->payload_id);
+    const bool has_promotable_or_pending_payload =
+        descriptor_it != payload_descriptors.end() &&
+        (descriptor_it->second.residency == payload_residency_state::cold ||
+         descriptor_it->second.residency == payload_residency_state::demoting ||
+         descriptor_it->second.residency == payload_residency_state::promoting);
+    if (has_promotable_or_pending_payload ||
+        entry_has_payload_for_restore(*selected) ||
+        !forest.is_metadata_only_node(selected->branch_node_id)) {
+        return selected;
+    }
+
+    const rematerialization_plan plan = forest.plan_rematerialization(
+        namespace_id,
+        lookup_tokens,
+        selected->branch_node_id);
+    if (plan.fallback_reason == cache_fallback_reason::validation_mismatch) {
+        if (validation_mismatch) {
+            *validation_mismatch = true;
+        }
+        return entries.end();
+    }
+    if (plan.source_payload_node_id == 0) {
+        if (unavailable) {
+            *unavailable = true;
+        }
+        return entries.end();
+    }
+    auto source_it = find_entry_by_branch_node(plan.source_payload_node_id);
+    if (source_it == entries.end() || !entry_has_payload_for_restore(*source_it)) {
+        if (unavailable) {
+            *unavailable = true;
+        }
+        return entries.end();
+    }
+    return source_it;
 }
 
 void hybrid_cache_controller::record_branch_metadata_pressure() {
@@ -1432,7 +1858,11 @@ void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
     entry.resident_payload_bytes_cached = 0;
     entry.has_target_payload_cached = false;
     entry.has_draft_payload_cached = false;
-    sync_branch_node_from_entry(entry);
+    if (entry.branch_node_id != 0 && forest.evict_payload(entry.branch_node_id)) {
+        n_cache_metadata_only_retentions++;
+    } else {
+        sync_branch_node_from_entry(entry);
+    }
 }
 
 uint64_t hybrid_cache_controller::payload_checksum(const std::vector<uint8_t> & bytes) const {

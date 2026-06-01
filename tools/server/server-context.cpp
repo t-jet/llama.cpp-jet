@@ -4439,6 +4439,19 @@ void server_routes::init_routes() {
                             << label_a_value << "\"," << label_b_name << "=\""
                             << label_b_value << "\"} " << value << "\n";
             };
+            const auto write_cache_metric_with_three_labels = [&prometheus, &mode](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    const char * label_c_name, const std::string & label_c_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << label_a_value << "\"," << label_b_name << "=\""
+                            << label_b_value << "\"," << label_c_name << "=\""
+                            << label_c_value << "\"} " << value << "\n";
+            };
 
             write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
             write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
@@ -4549,6 +4562,16 @@ void server_routes::init_routes() {
             // Step 10: Demotion failure reason counters
             write_cache_metric("counter", "llamacpp_cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
             write_cache_metric("counter", "llamacpp_cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
+            write_cache_metric_with_two_labels("counter", "cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
+            write_cache_metric_with_label("counter", "cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_validation_mismatches_total", "Token or checksum validation mismatches.", "namespace", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "namespace", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+            write_cache_metric_with_three_labels("counter", "cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
+            write_cache_metric_with_label("counter", "cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
@@ -5454,24 +5477,15 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
         return false;
     }
 
-    hybrid_cache_entry entry;
-    entry.namespace_id = namespace_id;
-    entry.tokens = slot.prompt.tokens.clone();
-    entry.use_count = 0;
-    entry.checkpoints = slot.prompt.checkpoints;
-    entry.metadata = metadata;
-    entry.namespace_id = namespace_id;
-    entry.protected_root = protected_root;
-    assign_entry_identity(entry);
-    entry.mark_used(next_use_sequence());
+    server_tokens entry_tokens = slot.prompt.tokens.clone();
 
-    // Check for duplicate entry before expensive serialization (Phase 3 deduplication)
-    auto existing = find_exact_match(entry.tokens, entry.namespace_id);
-    if (existing != entries.end()) {
+    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
+    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+        n_cache_equivalent_branch_deduplications++;
         refresh_existing_entry(existing, protected_root);
         acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
-        SRV_DBG(" - hybrid cache: updated existing entry with %zu tokens (namespace: %s)\n",
-                entry.tokens.size(), entry.namespace_id.c_str());
+        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
+                entry_tokens.size(), namespace_id.c_str());
         return true;
     }
 
@@ -5509,18 +5523,39 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
     }
 
     std::string descriptor_failure;
-    if (!attach_payload(entry, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+    if (existing != entries.end()) {
+        n_cache_equivalent_branch_deduplications++;
+        if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+            SRV_WRN(" - hybrid cache: metadata-only re-materialization rejected (%s)\n", descriptor_failure.c_str());
+            return false;
+        }
+        existing->protected_root = existing->protected_root || protected_root;
+        existing->checkpoints = slot.prompt.checkpoints;
+        existing->metadata = metadata;
+        sync_branch_node_from_entry(*existing);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_INF(" - hybrid cache: re-materialized slot %d (namespace: %s, entries: %zu)\n",
+                slot.id, existing->namespace_id.c_str(), entries.size());
+        return true;
+    }
+
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(entry_tokens, namespace_id);
+    auto it_new = admit_entry_with_payload(
+        std::move(entry_tokens),
+        metadata,
+        namespace_id,
+        protected_root,
+        std::move(target_payload),
+        std::move(draft_payload),
+        runtime_has_draft,
+        parent_node_id,
+        &descriptor_failure);
+    if (it_new == entries.end()) {
         SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
         return false;
     }
-
-    entries.push_back(std::move(entry));
-    auto it_new = std::prev(entries.end());
-    create_branch_node_for_entry(*it_new);
+    it_new->checkpoints = slot.prompt.checkpoints;
     acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
-    add_to_lru_index(it_new);
-    add_to_prefix_index(it_new);
-    evict_until_within_budget();
 
     SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
             slot.id, it_new->namespace_id.c_str(), entries.size());
@@ -5593,7 +5628,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     }
 
     // Exact match found - restore state
-    const int match_len = it_best->n_tokens();
+    int match_len = it_best->n_tokens();
     SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
             match_len, it_best->namespace_id.c_str(), it_best->use_count);
 
@@ -5601,6 +5636,33 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
+
+    const uint64_t selected_node_id = it_best->branch_node_id;
+    bool metadata_validation_mismatch = false;
+    bool metadata_source_unavailable = false;
+    auto restore_source = select_restore_source_for_metadata_only(
+        it_best, lookup_namespace_id, lookup_tokens, &metadata_validation_mismatch, &metadata_source_unavailable);
+    if (metadata_validation_mismatch) {
+        n_cache_validation_mismatches++;
+        n_cache_mismatch_parent_selections++;
+        n_misses++;
+        SRV_WRN(" - hybrid cache: try_restore - metadata-only validation mismatch (namespace: %s, selected node: %" PRIu64 ")\n",
+                lookup_namespace_id.c_str(), selected_node_id);
+        return false;
+    }
+    if (metadata_source_unavailable || restore_source == entries.end()) {
+        n_misses++;
+        SRV_DBG(" - hybrid cache: try_restore - metadata-only source payload is unavailable (namespace: %s, selected node: %" PRIu64 ")\n",
+                lookup_namespace_id.c_str(), selected_node_id);
+        return false;
+    }
+    if (restore_source != it_best) {
+        const uint64_t source_node_id = restore_source->branch_node_id;
+        it_best = restore_source;
+        SRV_INF(" - hybrid cache: try_restore - using source payload node %" PRIu64 " to re-materialize metadata-only node %" PRIu64 " after prompt replay\n",
+                source_node_id, selected_node_id);
+    }
+    match_len = it_best->n_tokens();
 
     // Phase 6: Check if the payload is in cold state - attempt promotion
     auto descriptor_it = payload_descriptors.find(it_best->payload_id);

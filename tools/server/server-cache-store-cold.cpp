@@ -400,6 +400,20 @@ bool server_cache_store_cold::remove(cold_ref ref) {
     return true;
 }
 
+size_t server_cache_store_cold::delete_ids(const std::unordered_set<uint64_t> & ids) {
+    if (!configured_ || ids.empty()) {
+        return 0;
+    }
+
+    size_t deleted = 0;
+    for (uint64_t id : ids) {
+        if (remove(id)) {
+            deleted++;
+        }
+    }
+    return deleted;
+}
+
 std::string server_cache_store_cold::final_path(uint64_t payload_id) const {
     // Hex-encode the payload_id for the filename
     std::stringstream ss;

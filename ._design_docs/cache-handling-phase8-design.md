@@ -1,15 +1,17 @@
 # Stage 8 design: metadata-only nodes and re-materialization
 
-Status: Ready for independent design review  
-Date: 2026-05-31  
-Stage: 8 (Metadata-only nodes and re-materialization)  
+Status: Design and implementation-plan gates passed; implementation re-review PASS
+Date: 2026-05-31
+Stage: 8 (Metadata-only nodes and re-materialization)
 Prerequisite Stage: 7 (Branch graph foundation) -- CLOSED
 
 ## Scope
 
 Stage 8 turns the Stage 7 branch forest into a graph that can keep useful topology after payload bytes are gone. It separates payload eviction from branch pruning, lets retained nodes become metadata-only, validates re-materialization before replay, handles validation mismatch as prompt divergence, deduplicates equivalent branches, and enforces the branch-metadata budget with safe pruning rules.
 
-This stage advances exactly one gate: design authoring. It does not implement code, write a test plan, approve implementation, or close the design review gate.
+This design document records the accepted Stage 8 design baseline. Design
+review and manager design gate are closed. Implementation planning is also
+approved. The Stage 8 implementation passed Architect re-review on 2026-06-01.
 
 ## Prerequisites
 
@@ -44,13 +46,16 @@ This stage advances exactly one gate: design authoring. It does not implement co
 - [Part 3: Re-materialization and mismatch handling](cache-handling-phase8-design/part-03-rematerialization-and-mismatch-handling.md)
 - [Part 4: Deduplication, pruning, and cleanup](cache-handling-phase8-design/part-04-deduplication-pruning-and-cleanup.md)
 - [Part 5: Observability, testability, and review readiness](cache-handling-phase8-design/part-05-observability-testability-and-review-readiness.md)
+- [Design Review Gate 01](cache-handling-phase8-design/design-review-gate-01.md)
+- [Part 6: Manager design gate](cache-handling-phase8-design/part-06-manager-design-gate.md)
 
 ## Gate status
 
 | Gate | Status |
 | --- | --- |
 | Stage 7 closure prerequisite | PASS |
-| Stage 8 design authoring | READY FOR REVIEW |
-| Stage 8 independent design review | NOT STARTED |
-| Stage 8 manager design gate | NOT STARTED |
-| Stage 8 implementation planning | NOT STARTED |
+| Stage 8 design authoring | PASS |
+| Stage 8 independent design review | PASS (see [review gate 01](cache-handling-phase8-design/design-review-gate-01.md)) |
+| Stage 8 manager design gate | PASS (see [part 6](cache-handling-phase8-design/part-06-manager-design-gate.md)) |
+| Stage 8 implementation planning | PASS (see [implementation part 5](cache-handling-phase8-implementation/part-05-manager-implementation-plan-gate.md)) |
+| Stage 8 implementation | ARCHITECT RE-REVIEW PASS |

@@ -302,11 +302,18 @@ public:
     bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
     bool debug_corrupt_first_payload_for_tests();
     bool debug_evict_first_payload_for_tests();
+    bool debug_evict_last_payload_for_tests();
     bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
     bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
     bool debug_empty_preimage_draft_failure_for_tests();
     bool debug_unsupported_empty_clear_for_tests();
     bool debug_rollback_failure_for_tests();
+    bool debug_rematerialize_first_entry_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_attach = false);
+    bool debug_first_entry_metadata_only_for_tests() const;
+    bool debug_first_entry_has_payload_for_tests() const;
+    bool debug_try_admit_stage8_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
+    bool debug_add_child_entry_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
+    int debug_select_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id);
 
     // Phase 6 Step 6: Demotion protocol test hooks
     void debug_set_cold_store_for_tests(const std::string & path) {
@@ -374,11 +381,18 @@ private:
     bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
     bool debug_corrupt_first_payload_for_tests();
     bool debug_evict_first_payload_for_tests();
+    bool debug_evict_last_payload_for_tests();
     bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
     bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
     bool debug_empty_preimage_draft_failure_for_tests();
     bool debug_unsupported_empty_clear_for_tests();
     bool debug_rollback_failure_for_tests();
+    bool debug_rematerialize_first_entry_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_attach = false);
+    bool debug_first_entry_metadata_only_for_tests() const;
+    bool debug_first_entry_has_payload_for_tests() const;
+    bool debug_try_admit_stage8_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
+    bool debug_add_child_entry_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
+    int debug_select_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id);
 #endif
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
@@ -493,6 +507,18 @@ private:
     size_t n_demotion_failure_write_error = 0;
     size_t n_demotion_failure_other = 0;
 
+    // Stage 8: Re-materialization and metadata-only metrics
+    size_t n_cache_metadata_only_retentions = 0;
+    size_t n_cache_node_rematerializations = 0;
+    size_t n_cache_node_rematerialization_bytes = 0;
+    size_t n_cache_validation_mismatches = 0;
+    size_t n_cache_mismatch_parent_selections = 0;
+    size_t n_cache_equivalent_branch_deduplications = 0;
+    size_t n_cache_branch_prunings = 0;
+    size_t n_cache_branch_pruned_metadata_bytes = 0;
+    size_t n_cache_cold_cleanup_total = 0;
+    size_t n_cache_branch_metadata_admission_rejections = 0;
+
     // Find best matching entry for given tokens and metadata
     // Returns iterator to best match, or entries.end() if no suitable match
     std::list<hybrid_cache_entry>::iterator find_best_match(
@@ -509,11 +535,44 @@ private:
     bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
     void evict_until_within_budget();
     void refresh_existing_entry(std::list<hybrid_cache_entry>::iterator it, bool protected_root);
-    uint64_t create_branch_node_for_entry(hybrid_cache_entry & entry);
+    uint64_t create_branch_node_for_entry(hybrid_cache_entry & entry, uint64_t parent_node_id = 0);
     void sync_branch_node_from_entry(const hybrid_cache_entry & entry);
+    bool entry_has_payload_for_restore(const hybrid_cache_entry & entry) const;
+    bool materialize_entry_payload(
+        std::list<hybrid_cache_entry>::iterator it,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr);
+    std::list<hybrid_cache_entry>::iterator find_equivalent_entry(
+        const server_tokens & tokens,
+        const std::string & namespace_id);
+    uint64_t select_mismatch_parent_for_admission(
+        const server_tokens & tokens,
+        const std::string & namespace_id);
+    std::list<hybrid_cache_entry>::iterator admit_entry_with_payload(
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        const std::string & namespace_id,
+        bool protected_root,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        uint64_t parent_node_id,
+        std::string * failure_reason = nullptr);
+    bool enforce_branch_metadata_admission_budget(
+        std::list<hybrid_cache_entry>::iterator it,
+        const std::string & namespace_id,
+        std::string * failure_reason = nullptr);
     bool acquire_branch_node_ref_for_slot(server_slot & slot, uint64_t node_id);
     std::list<hybrid_cache_entry>::iterator find_entry_by_branch_node(uint64_t node_id);
     std::list<hybrid_cache_entry>::const_iterator find_entry_by_branch_node(uint64_t node_id) const;
+    std::list<hybrid_cache_entry>::iterator select_restore_source_for_metadata_only(
+        std::list<hybrid_cache_entry>::iterator selected,
+        const std::string & namespace_id,
+        const std::vector<llama_token> & lookup_tokens,
+        bool * validation_mismatch = nullptr,
+        bool * unavailable = nullptr);
     void record_branch_metadata_pressure();
     void remove_payload(uint64_t payload_id);
     void mark_payload_evicted(hybrid_cache_entry & entry);

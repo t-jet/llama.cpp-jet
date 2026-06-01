@@ -7,7 +7,33 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+// Stage 8: Fallback reason for re-materialization planning
+enum class cache_fallback_reason {
+    none,
+    no_payload_ancestor,
+    namespace_mismatch,
+    pair_state_mismatch,
+    validation_mismatch,
+    materialization_failed,
+    promotion_failed,
+};
+
+// Stage 8: Re-materialization plan result
+struct rematerialization_plan {
+    uint64_t selected_node_id = 0;
+    uint64_t source_payload_node_id = 0;   // 0 means replay from root
+    uint64_t materialize_node_id = 0;      // selected node or equivalent target
+    uint64_t deepest_validated_node_id = 0;
+    uint64_t mismatch_node_id = 0;
+    std::vector<uint64_t> path_node_ids;
+    size_t validated_tokens = 0;
+    bool requires_new_branch = false;
+    uint64_t new_branch_parent_id = 0;
+    cache_fallback_reason fallback_reason = cache_fallback_reason::none;
+};
 
 struct branch_traversal_counts {
     size_t path_to_root = 0;
@@ -41,6 +67,16 @@ struct branch_node {
 
     bool protected_root = false;
     bool is_metadata_only = false;
+
+    // Reason payload is absent (meaningful when is_metadata_only is true)
+    enum class payload_absent_reason {
+        none,           // Payload is present (is_metadata_only should be false)
+        evicted_hot,    // Hot payload was evicted to free RAM
+        evicted_cold,   // Cold payload was deleted
+        demoted,        // Payload was demoted to cold store (metadata-only in hot layer)
+        never_owned,    // Node was created without a payload (e.g., intermediate branch)
+    };
+    payload_absent_reason absent_reason = payload_absent_reason::none;
 
     uint64_t exact_blob_payload_id = 0;
     uint64_t checkpoint_payload_id = 0;
@@ -125,6 +161,88 @@ public:
     bool acquire_slot_ref(uint64_t node_id);
     bool release_slot_ref(uint64_t node_id);
     uint32_t slot_ref_count(uint64_t node_id) const;
+
+    // Stage 8: Payload eviction with metadata-only retention.
+    // Evicts payload from a node, clearing descriptor references and setting
+    // is_metadata_only=true. Returns false if slot refs block eviction.
+    // If pair_evict is true and the node has a paired payload (target+draft),
+    // both sides are cleared together.
+    bool evict_payload(uint64_t node_id, bool pair_evict = true);
+
+    // Query whether a node is metadata-only (has no owned payload)
+    bool is_metadata_only_node(uint64_t node_id) const;
+
+    // Get the payload absent reason for a metadata-only node
+    branch_node::payload_absent_reason get_payload_absent_reason(uint64_t node_id) const;
+
+    // Stage 8: Branch pruning with safety checks.
+    // Removes a metadata-only node after validating:
+    // - No active slot references
+    // - Not a protected root
+    // - No retained descendants
+    // Returns true if the node was pruned.
+    bool prune_node(uint64_t node_id);
+
+    // Stage 8: Equivalent-branch lookup.
+    // Finds nodes in the given namespace with matching token path.
+    std::vector<uint64_t> find_equivalent_nodes(
+        const std::string & namespace_id,
+        const std::vector<llama_token> & token_path,
+        int64_t pos_min,
+        int64_t pos_max) const;
+
+    // Stage 8: Canonical node selection from equivalent candidates.
+    // Uses deterministic ordering: payload-bearing before metadata-only,
+    // more descendants before fewer, protected-root ancestry, use_sequence,
+    // insertion_sequence, node_id.
+    uint64_t canonical_node_id(
+        const std::string & namespace_id,
+        const std::vector<llama_token> & token_path,
+        int64_t pos_min,
+        int64_t pos_max) const;
+
+    // Stage 8: Rank candidates by deterministic ordering.
+    // 8-tier tie-breaking: token match length, checksum confidence,
+    // payload-bearing before metadata-only, protected-root ancestry,
+    // use_sequence, insertion_sequence, node_id.
+    std::vector<uint64_t> rank_candidates(
+        const std::string & namespace_id,
+        const std::vector<uint64_t> & candidate_ids,
+        const std::vector<llama_token> & request_tokens) const;
+
+    // Stage 8: Select mismatch parent from validated candidates.
+    // Returns the deepest validated ancestor node_id, or 0 if none.
+    uint64_t select_mismatch_parent(
+        const std::string & namespace_id,
+        const std::vector<llama_token> & request_tokens,
+        const std::vector<uint64_t> & candidate_ids) const;
+
+    // Stage 8: Plan re-materialization for a metadata-only node.
+    // Validates token/checksum spans along the path from the nearest
+    // payload-bearing ancestor to the selected node.
+    rematerialization_plan plan_rematerialization(
+        const std::string & namespace_id,
+        const std::vector<llama_token> & request_tokens,
+        uint64_t selected_node_id) const;
+
+    // Stage 8: Build metadata prune candidates.
+    // Returns metadata-only leaf nodes that are safe to prune:
+    // - No active slot references
+    // - Not a protected root
+    // - No retained descendants
+    // Sorted by pruning score (oldest use_sequence first).
+    std::vector<uint64_t> metadata_prune_candidates() const;
+
+    // Stage 8: Enforce metadata budget by pruning candidates.
+    // Returns the number of bytes freed by pruning.
+    // Stops when under budget or no safe candidate remains.
+    size_t enforce_metadata_budget(size_t soft_max_bytes);
+
+    // Stage 8: Cold cleanup ownership safety.
+    // Iterates all retained branch nodes, collects referenced descriptor IDs,
+    // and returns the set of descriptor IDs that are safe to delete
+    // (not referenced by any retained node).
+    std::unordered_set<uint64_t> cleanup_cold() const;
 
     std::vector<uint64_t> payload_eviction_candidates(size_t max_count) const;
     bool is_protected(uint64_t node_id) const;
