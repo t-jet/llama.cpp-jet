@@ -18,6 +18,8 @@ The Stage 7 plan adds the branch graph foundation. Public HTTP can cover model-b
 
 The Stage 8 plan adds metadata-only retention and re-materialization. Public HTTP can cover public surface, model-backed regression, and metrics output. Metadata-only topology, re-materialization validation, mismatch-parent selection, equivalent deduplication, cold cleanup ownership, and metadata admission rejection rely on focused Stage 8, focused controller, stats-capable, or fault-injection evidence unless a later script creates those preconditions directly.
 
+The Stage 9 plan adds checkpoint payloads and workload profiles. Public HTTP can cover task-flow boundary propagation, model-backed checkpoint-dependent restore when a suitable SWA, recurrent, hybrid, or MTP fixture exists, and public `/metrics` shape. Workload profile namespace isolation, descriptor admission rollback, exact-first and checkpoint-first ranking, target/draft checkpoint pair validation, cold checkpoint promotion, budget eviction, cleanup ownership, and leak checks rely on focused controller, metrics, branch graph, or Stage 8 evidence unless a later script creates those preconditions directly.
+
 ## Scripts
 
 ### `run_cache_integration.ps1`
@@ -88,6 +90,8 @@ Stage 5 H40-H58 scenarios are part of the plan. The main runner does not impleme
 Stage 7 G70-G89 scenarios are part of the plan. The main runner does not implement a dedicated Stage 7 matrix. Use it for public HTTP regression and metrics evidence, then cite `test-step12-branch-graph`, `test-cache-controller`, and `tools/server/tests/unit/test_cache_modes.py` for focused graph and metric-shape evidence. Do not mark graph-internal rows `PASS` from public requests alone.
 
 Stage 8 S80-S99 scenarios are part of the plan. The main runner does not implement a dedicated Stage 8 matrix. Use it for public HTTP regression and metrics evidence, then cite `test-step13-stage8`, `test-cache-controller`, and `tools/server/tests/unit/test_cache_modes.py` for focused graph, controller, and metric-shape evidence. Do not mark metadata-only or re-materialization rows `PASS` from metric presence alone.
+
+Stage 9 Q90-Q112 scenarios are part of the plan. The main runner does not implement a dedicated Stage 9 matrix. Use it for public HTTP boundary and `/metrics` evidence when possible, then cite `test-cache-controller`, `test-step10-metrics`, `test-step12-branch-graph`, `test-step13-stage8`, and `tools/server/tests/unit/test_cache_modes.py` for focused checkpoint, metrics, graph, regression, and metric-shape evidence. Do not mark Q103 `PASS` unless the run used a checkpoint-dependent model fixture.
 
 ### `run_stage4_h30_h37.ps1`
 
@@ -162,6 +166,8 @@ pytest tools/server/tests/unit/test_cache_modes.py
 ```
 
 `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` is a Windows workaround for Python startup and metric-shape checks. Do not use it as evidence for model-backed save, restore, hit, miss, eviction, or re-materialization behavior.
+
+For Stage 9 planning or execution sessions, use the focused `ctest` and Python commands in Part 11. Do not use `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` for rows that claim model-backed checkpoint save, restore, hit, miss, promotion, demotion, eviction, or boundary propagation.
 
 ## Usage
 
@@ -277,6 +283,8 @@ For Stage 7 cases, also capture:
 - Stage 7 metric names and labels from `/metrics` when public observability is in scope
 
 For Stage 8 cases, also capture evidence source, selected metadata-only node, restore source, validation result, fallback reason, token sequences, namespace IDs, candidate order, mismatch-parent choice, canonical node identity, descriptor ownership, cold references, and Stage 8 metric names and labels when public observability is in scope.
+
+For Stage 9 cases, also capture evidence source, workload profile, namespace or fixture identity, selected payload kind, descriptor validation result, pair state, boundary source or degraded fallback reason, cold residency transition, metrics labels, public `/metrics` scrape when available, and explicit fixture search result for checkpoint-dependent model-backed rows.
 
 ## Maintenance
 

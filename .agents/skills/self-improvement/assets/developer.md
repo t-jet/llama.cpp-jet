@@ -1,24 +1,24 @@
 # Developer improvement memory
 
-## Improvement: Dirty documentation handoff
+## Improvement: Dirty worktree handoff
 
 Condition:
 
-- When adding or updating durable planning documents in a worktree that already has uncommitted documentation changes
+- When changing code or durable planning documents in a worktree that already has uncommitted changes
 
 Action:
 
-- Do capture the pre-existing dirty state before edits and distinguish newly changed paths from existing user or prior-agent changes in the handoff.
+- Do capture the pre-existing dirty state before edits; when the relevant files already have large unrelated diffs, identify the current task's changed paths and behavior with focused searches or line anchors, and distinguish those changes from existing user or prior-agent work in the handoff.
 
 ## Improvement: Verify untracked documentation edits
 
 Condition:
 
-- When editing a documentation file that is untracked in git
+- When editing a documentation file that is untracked in git, or when the parent documentation directory is untracked
 
 Action:
 
-- Do verify the changed lines, status text, and line counts directly with file reads or searches, then report the path as changed; don't rely on plain `git diff`, because it does not show untracked file content.
+- Do verify the changed lines, status text, line counts, and trailing-whitespace state directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. Don't rely on plain `git diff`, because it does not show untracked file content.
 
 ## Improvement: Windows server pytest path
 
@@ -38,7 +38,7 @@ Condition:
 
 Action:
 
-- Do make the first assistant action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, including when the note only says memory will be loaded.
+- Do make the first assistant action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, AGENTS.md discussion, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, including when the user pasted repo instructions or the note only says memory will be loaded.
 
 ## Improvement: Test-results review gate classification
 
@@ -48,7 +48,7 @@ Condition:
 
 Action:
 
-- Do classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage, and update the stage implementation status with the exact next gate action.
+- Do classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage; for model-backed rows, verify that the run created the required precondition metrics or logs before calling it a product bug, and update the stage implementation status with the exact next gate action.
 
 ## Improvement: Replace stale test-report references
 
@@ -84,11 +84,11 @@ Action:
 
 Condition:
 
-- When hybrid cache metrics report a hit but public completion timing still reports `cache_n=0`
+- When hybrid cache metrics report a hit, checkpoint admission succeeds, or public completion timing still reports `cache_n=0`
 
 Action:
 
-- Do trace the full handoff from controller restore through slot launch and prompt processing; check request `cache_prompt`, explicit `id_slot` routing, and checkpoint/SWA replay guards before treating the mismatch as response serialization only.
+- Do trace the full handoff from checkpoint export flags and descriptor span metadata through controller restore, slot launch, and prompt processing; check request `cache_prompt`, explicit `id_slot` routing, restored token count, and checkpoint/SWA replay guards before treating the mismatch as response serialization or test-shaping only.
 
 ## Improvement: Split near-limit planning docs early
 
@@ -139,3 +139,13 @@ Condition:
 Action:
 
 - Do build those targets sequentially or use one combined build command; don't launch parallel tool calls for separate MSBuild targets that can race on `ZERO_CHECK` state or shared object outputs.
+
+## Improvement: Scope whitespace checks in dirty worktrees
+
+Condition:
+
+- When `git diff --check` fails in a dirty worktree because unrelated pre-existing files have whitespace errors
+
+Action:
+
+- Do rerun `git diff --check -- <touched paths>` for the current task files and report both the scoped result and the unrelated global failure; don't fix unrelated whitespace unless the user asked for cleanup.

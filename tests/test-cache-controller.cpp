@@ -14,6 +14,8 @@
 #include <list>
 #include <map>
 #include <unordered_map>
+#include <filesystem>
+#include <thread>
 
 #undef NDEBUG
 
@@ -1682,6 +1684,205 @@ void test_debug_fault_injection_transient_states() {
     printf("  PASSED\n");
 }
 
+void test_stage9_workload_profile_namespace() {
+    printf("test-cache-controller: Stage 9 workload profile namespace...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    assert(ctrl.debug_detect_workload_profile_for_tests() == cache_workload_profile::unsupported);
+
+    auto unsupported_key = ctrl.debug_get_compatibility_key_for_tests(false, cache_workload_profile::unsupported);
+    auto plain_key = ctrl.debug_get_compatibility_key_for_tests(false, cache_workload_profile::plain_transformer);
+    auto checkpoint_key = ctrl.debug_get_compatibility_key_for_tests(false, cache_workload_profile::checkpoint_dependent);
+
+    assert(unsupported_key.workload_profile == "unsupported");
+    assert(plain_key.workload_profile == "plain_transformer");
+    assert(checkpoint_key.workload_profile == "checkpoint_dependent");
+    assert(unsupported_key.compute() != plain_key.compute());
+    assert(plain_key.compute() != checkpoint_key.compute());
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_checkpoint_admission_transaction() {
+    printf("test-cache-controller: Stage 9 checkpoint admission transaction...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({10, 11, 12}), false, "stage9-admit", 128, 0);
+
+    assert(!ctrl.debug_first_entry_has_checkpoint_for_tests());
+    assert(!ctrl.debug_admit_checkpoint_for_tests(64, 0, true));
+    assert(!ctrl.debug_first_entry_has_checkpoint_for_tests());
+    json failed_stats = ctrl.get_stats();
+    assert(failed_stats["n_checkpoint_payload_descriptors"] == 0);
+    assert(failed_stats["cache_checkpoint_admission_failures_total"] == 1);
+
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    assert(ctrl.debug_first_entry_has_checkpoint_for_tests());
+    json stats = ctrl.get_stats();
+    assert(stats["n_exact_blob_payload_descriptors"] == 1);
+    assert(stats["n_checkpoint_payload_descriptors"] == 1);
+    assert(stats["cache_checkpoint_admissions_total"] == 1);
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_checkpoint_boundary_metadata() {
+    printf("test-cache-controller: Stage 9 checkpoint boundary metadata...\n");
+
+    const auto tokens = create_tokens({31, 32, 33, 34});
+    const uint64_t checksum = token_checksum({31, 32, 33, 34});
+    prepared_prompt_metadata metadata;
+    metadata.boundaries_native = true;
+    metadata.add_span(prompt_boundary::MESSAGE_END, 0, 4, checksum, false, "msg-1");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(tokens.clone(), metadata);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    assert(ctrl.debug_first_checkpoint_metadata_for_tests("msg-1", 0, 4, checksum));
+    assert(ctrl.debug_validate_first_checkpoint_for_tests());
+
+    assert(ctrl.debug_corrupt_first_checkpoint_boundary_checksum_for_tests());
+    assert(!ctrl.debug_validate_first_checkpoint_for_tests());
+
+    prepared_prompt_metadata bad_span;
+    bad_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
+    hybrid_cache_controller span_mismatch(params, 2, 1000, nullptr, nullptr);
+    span_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_span);
+    assert(!span_mismatch.debug_admit_checkpoint_for_tests(64, 0));
+
+    prepared_prompt_metadata bad_id;
+    bad_id.add_span(prompt_boundary::MESSAGE_END, 0, 4, checksum, false, "msg-2");
+    hybrid_cache_controller id_mismatch(params, 2, 1000, nullptr, nullptr);
+    id_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_id);
+    assert(id_mismatch.debug_admit_checkpoint_for_tests(64, 0));
+    assert(id_mismatch.debug_first_checkpoint_metadata_for_tests("msg-2", 0, 4, checksum));
+
+    hybrid_cache_controller fallback(params, 2, 1000, nullptr, nullptr);
+    fallback.debug_add_entry_for_tests(tokens.clone(), false, "stage9-fallback", 64, 0);
+    assert(fallback.debug_admit_checkpoint_for_tests(64, 0));
+    assert(fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_restore_ranking() {
+    printf("test-cache-controller: Stage 9 restore ranking...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller plain(params, 2, 1000, nullptr, nullptr);
+    plain.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "stage9-rank", 128, 0);
+    assert(plain.debug_admit_checkpoint_for_tests(64, 0));
+
+    const int plain_tokens = plain.debug_select_stage9_restore_source_tokens_for_tests(
+        create_tokens({1, 2, 3}), "stage9-rank", cache_workload_profile::plain_transformer);
+    assert(plain_tokens == 3);
+    assert(plain.get_stats()["cache_checkpoint_hits_total"] == 0);
+
+    const int checkpoint_tokens = plain.debug_select_stage9_restore_source_tokens_for_tests(
+        create_tokens({1, 2, 3}), "stage9-rank", cache_workload_profile::checkpoint_dependent);
+    assert(checkpoint_tokens == 3);
+    assert(plain.get_stats()["cache_checkpoint_hits_total"] == 1);
+
+    hybrid_cache_controller exact_only(params, 2, 1000, nullptr, nullptr);
+    exact_only.debug_add_entry_for_tests(create_tokens({4, 5, 6}), false, "stage9-exact-only", 128, 0);
+    assert(exact_only.debug_select_stage9_restore_source_tokens_for_tests(
+        create_tokens({4, 5, 6}), "stage9-exact-only", cache_workload_profile::checkpoint_dependent) == -1);
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_checkpoint_restore_uses_descriptor_span() {
+    printf("test-cache-controller: Stage 9 checkpoint restore descriptor span...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({70, 71, 72, 73}), false, "stage9-span", 128, 0);
+
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, 2));
+    assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 2);
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_checkpoint_cold_residency() {
+    printf("test-cache-controller: Stage 9 checkpoint cold residency...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({20, 21}), false, "stage9-cold", 128, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage9_checkpoint_cold_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    ctrl.debug_stop_io_worker_for_tests();
+
+    auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    for (int i = 0; residency == payload_residency_state::demoting && i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    }
+    assert(residency == payload_residency_state::cold);
+
+    assert(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+        create_tokens({20, 21}), "stage9-cold", cache_workload_profile::checkpoint_dependent) == 2);
+
+    ctrl.debug_start_io_worker_for_tests();
+    assert(ctrl.debug_request_stage9_checkpoint_promotion_for_tests(create_tokens({20, 21}), "stage9-cold"));
+    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::promoting);
+    json stats = ctrl.get_stats();
+    assert(stats["cache_checkpoint_restores_by_shape"].is_array());
+    assert(!stats["cache_checkpoint_restores_by_shape"].empty());
+    const std::string serialized = stats.dump();
+    assert(serialized.find("\"profile\":\"checkpoint_dependent\"") != std::string::npos);
+    assert(serialized.find("\"payload_residency\":\"cold\"") != std::string::npos);
+    assert(serialized.find("\"pair_state\":\"target_only\"") != std::string::npos);
+    assert(serialized.find("\"result\":\"failure\"") != std::string::npos);
+    assert(serialized.find("stage9-cold") == std::string::npos);
+    assert(serialized.find("20,21") == std::string::npos);
+    ctrl.debug_stop_io_worker_for_tests();
+
+    printf("  PASSED\n");
+}
+
+void test_stage9_checkpoint_budget_eviction_and_metrics_shape() {
+    printf("test-cache-controller: Stage 9 checkpoint budget eviction and metrics shape...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(180);
+    ctrl.debug_add_entry_for_tests(create_tokens({40, 41}), false, "stage9-budget", 100, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(100, 0));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({42, 43}), false, "stage9-budget", 100, 0);
+    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted);
+
+    hybrid_cache_controller metrics(params, 2, 1000, nullptr, nullptr);
+    metrics.debug_add_entry_for_tests(create_tokens({50, 51}), false, "stage9-metrics", 64, 0);
+    assert(metrics.debug_admit_checkpoint_for_tests(64, 0));
+    assert(metrics.debug_validate_first_checkpoint_for_tests());
+    json stats = metrics.get_stats();
+    assert(stats["cache_checkpoint_hits_by_shape"].is_array());
+    assert(!stats["cache_checkpoint_hits_by_shape"].empty());
+    const std::string serialized = stats.dump();
+    assert(serialized.find("stage9-metrics") == std::string::npos);
+    assert(serialized.find("50,51") == std::string::npos);
+    assert(serialized.find("profile") != std::string::npos);
+    assert(serialized.find("payload_residency") != std::string::npos);
+    assert(serialized.find("pair_state") != std::string::npos);
+
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -1750,10 +1951,17 @@ int main() {
     test_branch_ref_blocks_production_eviction_plan();
     test_branch_global_eviction_across_namespaces();
     test_branch_checksum_lookup_selects_restore_candidate();
+    test_stage9_workload_profile_namespace();
+    test_stage9_checkpoint_admission_transaction();
+    test_stage9_checkpoint_boundary_metadata();
+    test_stage9_restore_ranking();
+    test_stage9_checkpoint_restore_uses_descriptor_span();
+    test_stage9_checkpoint_cold_residency();
+    test_stage9_checkpoint_budget_eviction_and_metrics_shape();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 53 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused)\n");
+    printf("Total: 60 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused)\n");
     printf("==================================================\n");
     
     return 0;

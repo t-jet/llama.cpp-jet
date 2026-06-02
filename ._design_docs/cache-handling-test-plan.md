@@ -2,7 +2,7 @@
 
 Status: Active
 Last updated: 2026-06-01
-Scope: server integration tests and focused evidence mapping for implemented cache behavior
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 9
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -52,7 +52,7 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, and Stage 8, read:
+Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, Stage 8, and Stage 9, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -80,6 +80,14 @@ Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 
 - [cache-handling-phase8-design/part-05-observability-testability-and-review-readiness.md](./cache-handling-phase8-design/part-05-observability-testability-and-review-readiness.md)
 - [cache-handling-phase8-implementation.md](./cache-handling-phase8-implementation.md)
 - [cache-handling-phase8-implementation/part-10-architect-implementation-re-review-20260601.md](./cache-handling-phase8-implementation/part-10-architect-implementation-re-review-20260601.md)
+- [cache-handling-phase9-design.md](./cache-handling-phase9-design.md)
+- [cache-handling-phase9-design/part-01-scope-and-workload-profiles.md](./cache-handling-phase9-design/part-01-scope-and-workload-profiles.md)
+- [cache-handling-phase9-design/part-02-checkpoint-payload-lifecycle-and-interfaces.md](./cache-handling-phase9-design/part-02-checkpoint-payload-lifecycle-and-interfaces.md)
+- [cache-handling-phase9-design/part-03-restore-strategy-and-prepared-prompt-boundaries.md](./cache-handling-phase9-design/part-03-restore-strategy-and-prepared-prompt-boundaries.md)
+- [cache-handling-phase9-design/part-04-pairing-cold-store-metrics-and-diagnostics.md](./cache-handling-phase9-design/part-04-pairing-cold-store-metrics-and-diagnostics.md)
+- [cache-handling-phase9-design/part-05-testability-traceability-exclusions-and-risks.md](./cache-handling-phase9-design/part-05-testability-traceability-exclusions-and-risks.md)
+- [cache-handling-phase9-implementation.md](./cache-handling-phase9-implementation.md)
+- [cache-handling-phase9-implementation/part-10-architect-implementation-re-review-20260601.md](./cache-handling-phase9-implementation/part-10-architect-implementation-re-review-20260601.md)
 
 ## Test coverage summary
 
@@ -93,6 +101,7 @@ The integration plan covers:
 - Stage 6 cold payload storage, asynchronous I/O worker, hot-to-cold demotion, cold-to-hot promotion, startup validation for `--cache-cold-path`, cold store opt-in behavior, target/draft pair demotion and promotion as a unit, fault tolerance for cold file corruption and I/O failures, protected root demotion warning, cold layer metrics, and Stage 4 and Stage 5 regression with cold store configured.
 - Stage 7 branch graph foundation, branch node lifecycle, namespace validation, slot references, checksum-assisted lookup, branch metadata RAM accounting and soft-limit diagnostics, global hot-payload LRU selection across namespaces, Stage 7 metrics, and Stage 1-6 regression with the forest-backed controller.
 - Stage 8 metadata-only retention, safe re-materialization planning, mismatch-parent handling, equivalent-branch deduplication, branch-metadata admission rejection, cold cleanup ownership, Stage 8 Prometheus metrics labels, and Stage 4-7 regression with metadata-only behavior enabled.
+- Stage 9 workload profile detection, checkpoint descriptor admission, checkpoint-first restore for checkpoint-dependent profiles, exact-first restore for plain transformers, target/draft checkpoint pair validation, checkpoint hot/cold residency, metrics labels, public boundary propagation, public `/metrics` evidence where possible, model-backed fixture rules, and Stage 4-8 regression after checkpoint integration.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -141,8 +150,11 @@ Implemented behavior that must be covered:
 - Branch-metadata admission rejects a new node when safe pruning cannot satisfy the soft metadata budget.
 - Cold cleanup proves descriptor ownership before deleting cold bytes during eviction or pruning.
 - Stage 8 Prometheus metrics expose the accepted names and labels for metadata-only retention, re-materialization, mismatch, deduplication, pruning, cold cleanup, and metadata admission rejection.
+- Workload profile is part of the Stage 9 cache namespace. Plain transformer workloads prefer exact blobs. Checkpoint-dependent workloads require checkpoint-bearing restore paths, reject exact-only candidates as canonical continuity, and use cold checkpoint promotion as an async miss before later reuse.
+- Checkpoint descriptors are validated with payload kind, pair state, version, size, checksum, owner, store reference, residency, namespace, and boundary metadata. Checkpoint target/draft payloads restore, demote, promote, evict, and account as one pair.
+- Stage 9 Prometheus metrics expose checkpoint hit and restore rows with `profile`, `payload_residency`, `pair_state`, and `result` labels without prompt text, marker strings, file paths, or serialized payload content.
 
-Do not treat checkpoint-first traversal, native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
+Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
 ## Contents
 
@@ -158,6 +170,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 8: Stage 6 cold layer integration](./cache-handling-test-plan/part-08-stage6-cold-layer-integration.md)
 - [Part 9: Stage 7 branch graph foundation](./cache-handling-test-plan/part-09-stage7-branch-graph-foundation.md)
 - [Part 10: Stage 8 metadata-only re-materialization](./cache-handling-test-plan/part-10-stage8-metadata-only-rematerialization.md)
+- [Part 11: Stage 9 checkpoint integration and workload profiles](./cache-handling-test-plan/part-11-stage9-checkpoint-integration.md)
 
 ## Review reports
 
@@ -168,6 +181,8 @@ This document is split into smaller part files. Read the parts in order when you
 - [Stage 7 manager test-plan gate: 2026-05-31](./cache-handling-test-plan/stage-7-manager-test-plan-gate-20260531.md)
 - [Stage 8 test-plan review: 2026-06-01](./cache-handling-test-plan/stage-8-test-plan-review-20260601.md)
 - [Stage 8 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-8-manager-test-plan-gate-20260601.md)
+- [Stage 9 test-plan review: 2026-06-01](./cache-handling-test-plan/stage-9-test-plan-review-20260601.md)
+- [Stage 9 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-9-manager-test-plan-gate-20260601.md)
 
 ## Test scripts
 

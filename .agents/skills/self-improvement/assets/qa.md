@@ -112,7 +112,15 @@ Condition:
 - When editing reusable QA markdown that must stay under repository line-count, ASCII, and whitespace rules
 
 Action:
-- Do run line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect; preserve existing line endings where practical, and if a tool changes them, normalize deliberately and rerun `git diff --check`.
+- Do check initial line counts before editing near-limit QA docs, keep additions within the remaining line budget, then rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect; preserve existing line endings where practical, and if a tool changes them, normalize deliberately and rerun `git diff --check`.
+
+## Improvement: separate own QA edits from dirty sources
+
+Condition:
+- When a QA review task uses or indexes documents that are already modified or untracked in the working tree
+
+Action:
+- Do check `git status --short` for the reviewed and edited paths, distinguish pre-existing plan/source changes from files changed in the review, and report only the review-owned edits as your own handoff changes.
 
 ## Improvement: wait for model-specific readiness in public probes
 
@@ -120,7 +128,23 @@ Condition:
 - When a public HTTP harness starts `llama-server` with secondary model resources such as draft, MTP, multimodal, or adapter fixtures
 
 Action:
-- Do treat `/health` as process readiness only; wait for a model-specific log marker or other direct evidence that the secondary resource loaded before sending behavior probes, and keep startup log verbosity low unless diagnostics require it.
+- Do treat `/health` as process readiness only; wait for a model-specific log marker when the build emits one, or make the first behavior request a guarded readiness/admission probe and require direct secondary-resource evidence such as `draft_n > 0` before accepting later restore or hit claims; preserve marker-less setup attempts separately from product evidence, and keep startup log verbosity low unless diagnostics require it.
+
+## Improvement: classify available fixture no-evidence runs
+
+Condition:
+- When a suitable model-backed fixture is available and the public probe starts successfully but the expected cache-specific counters, timings, or checkpoint rows remain at zero or placeholder values
+
+Action:
+- Do classify the fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP, preserve request, response, metrics, and startup artifacts, and separately note any focused substitute evidence that still passed.
+
+## Improvement: prove public checkpoint admission before restore claims
+
+Condition:
+- When a public checkpoint-dependent probe needs a long prompt, small batch size, or boundary metadata to exercise checkpoint restore or public checkpoint metrics
+
+Action:
+- Do first prove the request fits the context and increments accepted checkpoint admission; if the run only creates live checkpoints, fails admission, or returns a request-shape error, preserve it as setup or blocker evidence and classify restore/hit rows as BLOCKED/SKIP unless model-backed checkpoint restore evidence is captured.
 
 ## Improvement: load required memory before status updates
 

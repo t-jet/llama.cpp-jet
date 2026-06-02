@@ -378,7 +378,8 @@ std::vector<uint64_t> branch_forest_index::payload_eviction_candidates(size_t ma
     std::vector<const branch_node *> protected_roots;
     for (const auto & item : nodes_) {
         const branch_node & node = item.second;
-        if (node.slot_ref_count.load(std::memory_order_relaxed) > 0 || node.exact_blob_payload_id == 0 ||
+        if (node.slot_ref_count.load(std::memory_order_relaxed) > 0 ||
+            (node.exact_blob_payload_id == 0 && node.checkpoint_payload_id == 0) ||
             node.resident_payload_bytes == 0 || (!node.has_target_payload && !node.has_draft_payload)) {
             continue;
         }

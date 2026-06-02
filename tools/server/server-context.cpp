@@ -4452,6 +4452,21 @@ void server_routes::init_routes() {
                             << label_b_value << "\"," << label_c_name << "=\""
                             << label_c_value << "\"} " << value << "\n";
             };
+            const auto write_cache_metric_with_four_labels = [&prometheus, &mode](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    const char * label_c_name, const std::string & label_c_value,
+                    const char * label_d_name, const std::string & label_d_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << label_a_value << "\"," << label_b_name << "=\""
+                            << label_b_value << "\"," << label_c_name << "=\""
+                            << label_c_value << "\"," << label_d_name << "=\""
+                            << label_d_value << "\"} " << value << "\n";
+            };
 
             write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
             write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
@@ -4572,6 +4587,49 @@ void server_routes::init_routes() {
             write_cache_metric_with_label("counter", "cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
             write_cache_metric_with_two_labels("counter", "cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
             write_cache_metric_with_two_labels("counter", "cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
+            const auto write_checkpoint_hits = [&]() {
+                const json rows = cache_stats.contains("cache_checkpoint_hits_by_shape") ?
+                    cache_stats["cache_checkpoint_hits_by_shape"] : json::array();
+                if (rows.empty()) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "profile", "none", "payload_residency", "none", "pair_state", "none",
+                        json_value(cache_stats, "cache_checkpoint_hits_total", 0));
+                    return;
+                }
+                for (const auto & row : rows) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "profile", json_value(row, "profile", std::string("unknown")),
+                        "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
+                        "pair_state", json_value(row, "pair_state", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            };
+            const auto write_checkpoint_restores = [&]() {
+                const json rows = cache_stats.contains("cache_checkpoint_restores_by_shape") ?
+                    cache_stats["cache_checkpoint_restores_by_shape"] : json::array();
+                if (rows.empty()) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "profile", "none", "payload_residency", "none", "pair_state", "none", "result", "none",
+                        json_value(cache_stats, "cache_checkpoint_restores_total", 0));
+                    return;
+                }
+                for (const auto & row : rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "profile", json_value(row, "profile", std::string("unknown")),
+                        "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
+                        "pair_state", json_value(row, "pair_state", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            };
+            write_checkpoint_restores();
+            write_checkpoint_hits();
+            write_cache_metric("counter", "cache_checkpoint_admissions_total", "Checkpoint payload admissions by mode.", json_value(cache_stats, "cache_checkpoint_admissions_total", 0));
+            write_cache_metric("counter", "cache_checkpoint_admission_failures_total", "Checkpoint payload admission failures by mode.", json_value(cache_stats, "cache_checkpoint_admission_failures_total", 0));
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
@@ -5532,6 +5590,12 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
         existing->protected_root = existing->protected_root || protected_root;
         existing->checkpoints = slot.prompt.checkpoints;
         existing->metadata = metadata;
+        if (!slot.prompt.checkpoints.empty()) {
+            std::string checkpoint_failure;
+            if (!admit_latest_checkpoint(*existing, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+                SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+            }
+        }
         sync_branch_node_from_entry(*existing);
         acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
         SRV_INF(" - hybrid cache: re-materialized slot %d (namespace: %s, entries: %zu)\n",
@@ -5555,6 +5619,12 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
         return false;
     }
     it_new->checkpoints = slot.prompt.checkpoints;
+    if (!slot.prompt.checkpoints.empty()) {
+        std::string checkpoint_failure;
+        if (!admit_latest_checkpoint(*it_new, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+            SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+        }
+    }
     acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
 
     SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
@@ -5568,12 +5638,12 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
 // Returns true if a match was found and successfully restored
 bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const server_task & task) {
     const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+    record_workload_profile(profile);
     
     SRV_DBG(" - hybrid cache: try_restore - looking up %zu tokens in namespace %s\n",
             task.tokens.size(), lookup_namespace_id.c_str());
 
-    // Find best matching entry
-    std::list<hybrid_cache_entry>::iterator it_best = entries.end();
     record_branch_lookup(lookup_namespace_id, "token_span");
     
     const auto lookup_tokens = cache_tokens_to_vector(task.tokens);
@@ -5593,6 +5663,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             }
         }
     }
+    std::vector<uint64_t> compatible_candidates;
     for (uint64_t node_id : forest_candidates) {
         auto it = find_entry_by_branch_node(node_id);
         if (it == entries.end()) {
@@ -5604,28 +5675,29 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             continue;
         }
         n_namespace_validation_passes++;
+        compatible_candidates.push_back(node_id);
 
         const int common_prefix = it->tokens.get_common_prefix(task.tokens);
         
         // For hybrid cache, we need the entire task prompt to match the entry prefix
         // The entry may have more tokens (continuation), but the task prompt must be fully contained
         if (common_prefix == (int)task.tokens.size()) {
-            it_best = it;
             SRV_INF(" - hybrid cache: try_restore - found match: task %d tokens, entry %d tokens, prefix %d\n", 
                     (int)task.tokens.size(), it->n_tokens(), common_prefix);
-            n_branch_lookup_hits++;
-            break;
         } else {
             SRV_DBG(" - hybrid cache: try_restore - partial match %d tokens (entry: %d, task: %zu)\n",
                     common_prefix, it->n_tokens(), task.tokens.size());
         }
     }
+    std::list<hybrid_cache_entry>::iterator it_best =
+        select_restore_candidate(compatible_candidates, task.tokens, profile);
 
     if (it_best == entries.end()) {
         SRV_INF("%s", " - hybrid cache: try_restore - no exact match found\n");
         n_misses++;
         return false;
     }
+    n_branch_lookup_hits++;
 
     // Exact match found - restore state
     int match_len = it_best->n_tokens();
@@ -5636,6 +5708,20 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    if (profile == cache_workload_profile::checkpoint_dependent) {
+        std::string checkpoint_path_failure;
+        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+            n_misses++;
+            n_fallback_restores++;
+            SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent restore rejected (%s)\n",
+                    checkpoint_path_failure.c_str());
+            return false;
+        }
+        selected_payload_kind = payload_kind::checkpoint;
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    }
 
     const uint64_t selected_node_id = it_best->branch_node_id;
     bool metadata_validation_mismatch = false;
@@ -5659,40 +5745,73 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     if (restore_source != it_best) {
         const uint64_t source_node_id = restore_source->branch_node_id;
         it_best = restore_source;
+        selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+        if (profile == cache_workload_profile::checkpoint_dependent) {
+            std::string checkpoint_path_failure;
+            if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+                n_misses++;
+                n_fallback_restores++;
+                SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent source rejected (%s)\n",
+                        checkpoint_path_failure.c_str());
+                return false;
+            }
+            selected_payload_kind = payload_kind::checkpoint;
+            selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+        }
         SRV_INF(" - hybrid cache: try_restore - using source payload node %" PRIu64 " to re-materialize metadata-only node %" PRIu64 " after prompt replay\n",
                 source_node_id, selected_node_id);
     }
     match_len = it_best->n_tokens();
 
     // Phase 6: Check if the payload is in cold state - attempt promotion
-    auto descriptor_it = payload_descriptors.find(it_best->payload_id);
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
     if (descriptor_it != payload_descriptors.end()) {
         if (descriptor_it->second.residency == payload_residency_state::cold) {
             SRV_INF(" - hybrid cache: try_restore - payload %" PRIu64 " is cold, initiating promotion\n",
-                    it_best->payload_id);
-            promote_payload(it_best->payload_id);
+                    selected_payload_id);
+            promote_payload(selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
             n_misses++;
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::demoting) {
             SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is demoting, cannot restore yet\n",
-                    it_best->payload_id);
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             n_misses++;
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::promoting) {
             SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is promoting, cannot restore yet\n",
-                    it_best->payload_id);
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             n_misses++;
             return false;
         }
     }
 
-    if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
         SRV_ERR(" - hybrid cache: try_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint) {
+            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
+            if (failed_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(failed_descriptor_it->second, false);
+            } else {
+                n_checkpoint_restore_failures++;
+            }
+        }
         return false;
     }
+    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
 
     server_prompt prompt_before = slot.prompt.clone();
     const int cache_before = slot.n_prompt_tokens_cache;
@@ -5771,7 +5890,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             payload->target.data(),
             payload->target.size(),
             slot.id,
-            LLAMA_STATE_SEQ_FLAGS_NONE);
+            restore_flags);
 
         if (n_tgt != payload->target.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore target state\n");
@@ -5791,7 +5910,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             payload->draft.data(),
             payload->draft.size(),
             slot.id,
-            LLAMA_STATE_SEQ_FLAGS_NONE);
+            restore_flags);
 
         if (n_dft != payload->draft.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore draft state\n");
@@ -5812,26 +5931,35 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
 
     // Update slot state with restored data
     slot.prompt.tokens.clear();
-    for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {
+    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
         slot.prompt.tokens.push_back(it_best->tokens[i]);
     }
 
     slot.prompt.checkpoints = it_best->checkpoints;
-    slot.n_prompt_tokens_cache = match_len;
-    slot.n_prompt_tokens_processed = match_len;
+    slot.n_prompt_tokens_cache = restored_token_count;
+    slot.n_prompt_tokens_processed = restored_token_count;
     slot.hybrid_cache_restored = true;
     slot.prompt_metadata = it_best->metadata;
     
     n_hits++;
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
+        if (success_descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(success_descriptor_it->second, true);
+        } else {
+            n_checkpoint_restore_successes++;
+        }
+    }
 
     SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d (hits: %zu, misses: %zu)\n",
-            match_len, slot.id, n_hits, n_misses);
+            restored_token_count, slot.id, n_hits, n_misses);
 
     return true;
 }
 
 bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & task) {
     auto it_best = find_best_match(task.tokens, task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
 
     if (it_best == entries.end()) {
         SRV_INF("%s", " - hybrid cache: no match found\n");
@@ -5854,35 +5982,68 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    if (profile == cache_workload_profile::checkpoint_dependent) {
+        std::string checkpoint_path_failure;
+        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+            n_misses++;
+            n_fallback_restores++;
+            SRV_WRN(" - hybrid cache: load_slot - checkpoint-dependent restore rejected (%s)\n",
+                    checkpoint_path_failure.c_str());
+            return false;
+        }
+        selected_payload_kind = payload_kind::checkpoint;
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    }
 
     // Phase 6: Check if the payload is in cold/demoting/promoting state
-    auto descriptor_it = payload_descriptors.find(it_best->payload_id);
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
     if (descriptor_it != payload_descriptors.end()) {
         if (descriptor_it->second.residency == payload_residency_state::cold) {
             SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
-                    it_best->payload_id);
-            promote_payload(it_best->payload_id);
+                    selected_payload_id);
+            promote_payload(selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             n_misses++;
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::demoting) {
             SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is demoting, cannot restore yet\n",
-                    it_best->payload_id);
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             n_misses++;
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::promoting) {
             SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is promoting, cannot restore yet\n",
-                    it_best->payload_id);
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
             n_misses++;
             return false;
         }
     }
 
-    if (!validate_payload_for_restore(*it_best, runtime_has_draft, &restore_failure, &payload)) {
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
         SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint) {
+            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
+            if (failed_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(failed_descriptor_it->second, false);
+            } else {
+                n_checkpoint_restore_failures++;
+            }
+        }
         return false;
     }
+    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
 
     server_prompt prompt_before = slot.prompt.clone();
     const int cache_before = slot.n_prompt_tokens_cache;
@@ -5960,7 +6121,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             payload->target.data(),
             payload->target.size(),
             slot.id,
-            LLAMA_STATE_SEQ_FLAGS_NONE);
+            restore_flags);
 
         if (n_tgt != payload->target.size()) {
             SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
@@ -5979,7 +6140,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             payload->draft.data(),
             payload->draft.size(),
             slot.id,
-            LLAMA_STATE_SEQ_FLAGS_NONE);
+            restore_flags);
 
         if (n_dft != payload->draft.size()) {
             SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
@@ -5999,18 +6160,26 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
 
     slot.prompt.tokens.clear();
-    for (int i = 0; i < match_len && i < (int) it_best->tokens.size(); i++) {
+    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
         slot.prompt.tokens.push_back(it_best->tokens[i]);
     }
 
     slot.prompt.checkpoints = it_best->checkpoints;
-    slot.n_prompt_tokens_cache = match_len;
-    slot.n_prompt_tokens_processed = match_len;
+    slot.n_prompt_tokens_cache = restored_token_count;
+    slot.n_prompt_tokens_processed = restored_token_count;
     slot.prompt_metadata = it_best->metadata;
     n_hits++;
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
+        if (success_descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(success_descriptor_it->second, true);
+        } else {
+            n_checkpoint_restore_successes++;
+        }
+    }
 
     SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
-            match_len, slot.id, it_best->use_count);
+            restored_token_count, slot.id, it_best->use_count);
 
     return true;
 }

@@ -63,6 +63,12 @@ enum class payload_kind {
     checkpoint,
 };
 
+enum class cache_workload_profile {
+    plain_transformer,
+    checkpoint_dependent,
+    unsupported,
+};
+
 enum class payload_pair_state {
     target_only,
     target_and_draft,
@@ -164,6 +170,16 @@ struct payload_descriptor {
     uint64_t owner_entry_id = 0;
     uint64_t created_sequence = 0;
     uint64_t last_validated_sequence = 0;
+    int64_t token_span_start = 0;
+    int64_t token_span_end = 0;
+    llama_pos position_start = 0;
+    llama_pos position_end = 0;
+    bool checkpoint_boundary_required = false;
+    bool checkpoint_boundary_native = false;
+    int checkpoint_boundary_kind = -1;
+    uint64_t boundary_checksum = 0;
+    std::string boundary_id;
+    std::string workload_profile;
 };
 
 struct hot_payload_record {
@@ -179,6 +195,7 @@ struct hybrid_cache_entry {
     prepared_prompt_metadata metadata;             // Prompt boundary metadata for this entry
     std::string namespace_id;                      // Namespace (model + config identifier)
     uint64_t payload_id = 0;                       // Descriptor-owned exact-blob payload
+    uint64_t checkpoint_payload_id = 0;             // Descriptor-owned checkpoint payload
     uint64_t branch_node_id = 0;                   // Forest node metadata identity
 
     uint64_t entry_id = 0;                         // Stable identifier for policy plans
@@ -314,6 +331,20 @@ public:
     bool debug_try_admit_stage8_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     bool debug_add_child_entry_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     int debug_select_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id);
+    cache_workload_profile debug_detect_workload_profile_for_tests() const;
+    cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft, cache_workload_profile profile) const;
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes);
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_after_descriptor);
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end);
+    bool debug_validate_first_checkpoint_for_tests();
+    bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
+    int debug_first_checkpoint_restore_token_count_for_tests() const;
+    bool debug_corrupt_first_checkpoint_boundary_checksum_for_tests();
+    bool debug_first_entry_has_checkpoint_for_tests() const;
+    uint64_t debug_first_checkpoint_payload_id_for_tests() const;
+    bool debug_demote_first_checkpoint_for_tests();
+    int debug_select_stage9_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id, cache_workload_profile profile);
+    bool debug_request_stage9_checkpoint_promotion_for_tests(server_tokens tokens, const std::string & namespace_id);
 
     // Phase 6 Step 6: Demotion protocol test hooks
     void debug_set_cold_store_for_tests(const std::string & path) {
@@ -393,6 +424,20 @@ private:
     bool debug_try_admit_stage8_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     bool debug_add_child_entry_for_tests(server_tokens tokens, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     int debug_select_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id);
+    cache_workload_profile debug_detect_workload_profile_for_tests() const;
+    cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft, cache_workload_profile profile) const;
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes);
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_after_descriptor);
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end);
+    bool debug_validate_first_checkpoint_for_tests();
+    bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
+    int debug_first_checkpoint_restore_token_count_for_tests() const;
+    bool debug_corrupt_first_checkpoint_boundary_checksum_for_tests();
+    bool debug_first_entry_has_checkpoint_for_tests() const;
+    uint64_t debug_first_checkpoint_payload_id_for_tests() const;
+    bool debug_demote_first_checkpoint_for_tests();
+    int debug_select_stage9_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id, cache_workload_profile profile);
+    bool debug_request_stage9_checkpoint_promotion_for_tests(server_tokens tokens, const std::string & namespace_id);
 #endif
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
@@ -518,6 +563,16 @@ private:
     size_t n_cache_branch_pruned_metadata_bytes = 0;
     size_t n_cache_cold_cleanup_total = 0;
     size_t n_cache_branch_metadata_admission_rejections = 0;
+    size_t n_checkpoint_admission_successes = 0;
+    size_t n_checkpoint_admission_failures = 0;
+    size_t n_checkpoint_hits = 0;
+    size_t n_checkpoint_restore_successes = 0;
+    size_t n_checkpoint_restore_failures = 0;
+    std::map<std::string, size_t> n_checkpoint_hits_by_shape;
+    std::map<std::string, size_t> n_checkpoint_restores_by_shape;
+    size_t n_workload_profile_plain = 0;
+    size_t n_workload_profile_checkpoint_dependent = 0;
+    size_t n_workload_profile_unsupported = 0;
 
     // Find best matching entry for given tokens and metadata
     // Returns iterator to best match, or entries.end() if no suitable match
@@ -576,18 +631,52 @@ private:
     void record_branch_metadata_pressure();
     void remove_payload(uint64_t payload_id);
     void mark_payload_evicted(hybrid_cache_entry & entry);
+    bool mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind);
     bool attach_payload(
         hybrid_cache_entry & entry,
         std::vector<uint8_t> target,
         std::vector<uint8_t> draft,
         bool runtime_has_draft,
         std::string * failure_reason = nullptr);
+    bool attach_payload(
+        hybrid_cache_entry & entry,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        payload_kind kind,
+        std::string * failure_reason = nullptr);
+    bool attach_checkpoint_payload(
+        hybrid_cache_entry & entry,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        const common_prompt_checkpoint * checkpoint = nullptr,
+        const prepared_prompt_metadata * metadata = nullptr,
+        std::string * failure_reason = nullptr,
+        bool fail_after_descriptor = false);
+    bool admit_latest_checkpoint(
+        hybrid_cache_entry & entry,
+        const common_prompt_checkpoint & checkpoint,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr);
     const hot_payload_record * resolve_hot_payload(const hybrid_cache_entry & entry, std::string * failure_reason) const;
+    const hot_payload_record * resolve_hot_payload(uint64_t payload_id, std::string * failure_reason) const;
     bool validate_payload_for_restore(
         const hybrid_cache_entry & entry,
         bool runtime_has_draft,
         std::string * failure_reason = nullptr,
         const hot_payload_record ** record_out = nullptr);
+    bool validate_payload_for_restore(
+        const hybrid_cache_entry & entry,
+        payload_kind kind,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr,
+        const hot_payload_record ** record_out = nullptr);
+    bool validate_checkpoint_descriptor_metadata(
+        const hybrid_cache_entry & entry,
+        const payload_descriptor & descriptor,
+        const prepared_prompt_metadata * metadata,
+        std::string * failure_reason = nullptr) const;
     bool validate_descriptor_against_record(
         const hybrid_cache_entry & entry,
         const payload_descriptor & descriptor,
@@ -598,6 +687,23 @@ private:
     void record_payload_validation_failure(const std::string & reason);
     uint64_t payload_checksum(const std::vector<uint8_t> & bytes) const;
     bool runtime_pair_matches(payload_pair_state pair_state, bool runtime_has_draft, std::string * failure_reason) const;
+    cache_workload_profile detect_workload_profile() const;
+    std::list<hybrid_cache_entry>::iterator select_restore_candidate(
+        const std::vector<uint64_t> & forest_candidates,
+        const server_tokens & tokens_new,
+        cache_workload_profile profile);
+    payload_kind select_restore_payload_kind(const hybrid_cache_entry & entry, cache_workload_profile profile) const;
+    llama_state_seq_flags restore_state_flags_for_payload(payload_kind kind) const;
+    int restored_token_count_for_payload(const hybrid_cache_entry & entry, payload_kind kind) const;
+    bool checkpoint_path_valid_for_restore(const hybrid_cache_entry & entry, std::string * failure_reason = nullptr) const;
+    bool entry_has_payload_descriptor_for_restore(const hybrid_cache_entry & entry, payload_kind kind) const;
+    bool entry_has_payload_kind_for_restore(const hybrid_cache_entry & entry, payload_kind kind) const;
+    uint64_t entry_payload_id_for_kind(const hybrid_cache_entry & entry, payload_kind kind) const;
+    void set_entry_payload_id_for_kind(hybrid_cache_entry & entry, payload_kind kind, uint64_t payload_id);
+    void refresh_entry_payload_accounting(hybrid_cache_entry & entry);
+    void record_workload_profile(cache_workload_profile profile);
+    void record_checkpoint_hit(const payload_descriptor & descriptor);
+    void record_checkpoint_restore(const payload_descriptor & descriptor, bool success);
 
     // Check if entry should be protected from eviction
     bool should_protect(const hybrid_cache_entry & entry) const;
@@ -621,6 +727,7 @@ private:
     std::string compute_namespace_id() const;
     std::string compute_namespace_id(const prepared_prompt_metadata & metadata) const;
     cache_compatibility_key build_compatibility_key(bool runtime_has_draft) const;
+    cache_compatibility_key build_compatibility_key(bool runtime_has_draft, cache_workload_profile profile) const;
 
     // Phase 6: Cold layer demotion and promotion completion handlers
     void handle_demotion_completion(io_completion_result & result);

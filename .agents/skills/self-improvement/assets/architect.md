@@ -14,7 +14,7 @@ Condition:
 - When task instructions require reading self-improvement memory before any other task action, including tasks that start with AGENTS.md content, repository instructions, a long delegated-agent brief, or multiple required skills
 
 Action:
-- Do make the first assistant action and first tool call a single-purpose memory read that reads only the self-improvement skill instructions and Architect memory before any acknowledgement, commentary update, one-line skill-use announcement, plan, analysis, other skill reads, or non-memory tool use; if a skill-use announcement is required, send it only after the memory read completes; don't use `multi_tool_use.parallel` or any batched shell call to include architect, humanizer, repository docs, status checks, or other task reads in that first call, don't send a user-facing update first, and don't let AGENTS.md, environment context, a long user brief, efficiency concerns, a required skill list, or an urge to be efficient tempt you into batching memory reads with task reads.
+- Do make the first assistant action and first tool call a single-purpose memory read that reads only the self-improvement skill instructions and Architect memory before any acknowledgement, commentary update, one-line skill-use announcement, plan, analysis, other skill reads, or non-memory tool use; if a skill-use announcement is required, send it only after the memory read completes and the result is available; don't use `multi_tool_use.parallel` or any batched shell call to include architect, humanizer, repository docs, status checks, or other task reads in that first call, don't send a user-facing update first, and don't let AGENTS.md, environment context, a long user brief, efficiency concerns, a required skill list, or an urge to be efficient tempt you into batching memory reads with task reads.
 
 ## Improvement: Gate wording with open findings
 
@@ -22,7 +22,7 @@ Condition:
 - When an architecture, design, implementation-plan, implementation evidence, or re-review deliverable changes a gate state or closes an earlier finding, or when current entry docs still carry stale limitation, owner, or handoff wording
 
 Action:
-- Do check the live entry documents, current-status sections, and linked gate-status part files first, distinguish historical quoted findings from current contradictions, then keep durable gate-status locations in the same state, such as reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, or blocked; don't leave stale limitation, re-review-ready, handoff-closed, or ready-for-implementation wording after a finding has been closed or while an open finding remains
+- Do check the live entry documents, active fix reports, `document-index.md` summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files first, distinguish historical quoted findings from current contradictions, then keep durable gate-status locations in the same state, such as reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, or blocked; don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, or not-started wording after a gate has advanced or while an open finding remains
 
 ## Improvement: Changed paths for untracked review docs
 
@@ -30,7 +30,7 @@ Condition:
 - When adding or updating review part files in a document tree that is untracked or only partly tracked by git
 
 Action:
-- Do track the paths edited during the task, verify their contents directly, separate task-local edits from pre-existing dirty paths, and report that task-local path list; don't rely on `git diff` or `git status` alone to prove what changed
+- Do track the paths edited during the task, patch new review files, entry docs, and index rows as separate steps when the tree is dirty or untracked, verify their contents directly, separate task-local edits from pre-existing dirty paths, and report that task-local path list; don't rely on `git diff` or `git status` alone to prove what changed
 
 ## Improvement: Code-review findings tied to approved docs
 
@@ -123,3 +123,19 @@ Condition:
 
 Action:
 - Do mark the authored design as ready for independent review while leaving design review, manager gate, implementation planning, implementation, and QA gates unstarted; don't use the new design document to approve later gates or imply implementation authorization
+
+## Improvement: Multi-payload implementation reviews
+
+Condition:
+- When reviewing an implementation that adds a second payload kind, descriptor reference, or residency path to an existing cache entry or branch node
+
+Action:
+- Do trace admission, restore selection, pre-restore residency filtering, byte accounting, eviction, demotion, promotion, cleanup, metrics, and tests for each payload kind separately and together; verify cold or transient descriptors can still reach the intended promotion, fallback, or rejection path instead of being filtered out as absent; don't accept aggregate entry-level accounting or debug-only coverage as proof that all payload kinds participate in the production lifecycle
+
+## Improvement: PASS with residual evidence limits
+
+Condition:
+- When an implementation re-review has focused substitute evidence for a design requirement but still lacks model-backed, public HTTP, or live Prometheus evidence requested for later QA closure
+
+Action:
+- Do decide the implementation gate from the approved code contract and available substitute evidence, then carry missing runtime evidence as an explicit QA risk or next-owner item when it is not required to prove code correctness; don't keep a REWORK verdict solely because QA still needs fixture-backed confirmation

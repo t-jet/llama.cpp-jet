@@ -14,6 +14,87 @@ static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tok
     return std::vector<llama_token>(raw.begin(), raw.end());
 }
 
+static const char * cache_workload_profile_name(cache_workload_profile profile) {
+    switch (profile) {
+        case cache_workload_profile::plain_transformer:
+            return "plain_transformer";
+        case cache_workload_profile::checkpoint_dependent:
+            return "checkpoint_dependent";
+        case cache_workload_profile::unsupported:
+            return "unsupported";
+    }
+    return "unsupported";
+}
+
+static const char * payload_residency_name(payload_residency_state residency) {
+    switch (residency) {
+        case payload_residency_state::hot:
+            return "hot";
+        case payload_residency_state::demoting:
+            return "demoting";
+        case payload_residency_state::promoting:
+            return "promoting";
+        case payload_residency_state::cold:
+            return "cold";
+        case payload_residency_state::evicted:
+            return "evicted";
+    }
+    return "unknown";
+}
+
+static const char * payload_pair_state_name(payload_pair_state pair_state) {
+    switch (pair_state) {
+        case payload_pair_state::target_only:
+            return "target_only";
+        case payload_pair_state::target_and_draft:
+            return "target_and_draft";
+    }
+    return "unknown";
+}
+
+static std::string checkpoint_metric_shape_key(const payload_descriptor & descriptor, const char * result = nullptr) {
+    std::stringstream ss;
+    ss << "profile=" << descriptor.workload_profile
+       << "|payload_residency=" << payload_residency_name(descriptor.residency)
+       << "|pair_state=" << payload_pair_state_name(descriptor.pair_state);
+    if (result) {
+        ss << "|result=" << result;
+    }
+    return ss.str();
+}
+
+static uint64_t cache_token_span_checksum(const server_tokens & tokens, size_t token_start, size_t token_end) {
+    const llama_tokens & token_ids = tokens.get_tokens();
+    token_start = std::min(token_start, token_ids.size());
+    token_end = std::min(std::max(token_end, token_start), token_ids.size());
+
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = token_start; i < token_end; ++i) {
+        hash ^= static_cast<uint64_t>(static_cast<uint32_t>(token_ids[i]));
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static json checkpoint_shape_map_to_json(const std::map<std::string, size_t> & values) {
+    json result = json::array();
+    for (const auto & item : values) {
+        json row = json::object();
+        std::stringstream ss(item.first);
+        std::string field;
+        while (std::getline(ss, field, '|')) {
+            const size_t eq = field.find('=');
+            if (eq == std::string::npos) {
+                continue;
+            }
+            row[field.substr(0, eq)] = field.substr(eq + 1);
+        }
+        row["value"] = item.second;
+        result.push_back(row);
+    }
+    return result;
+}
+
 hybrid_cache_controller::hybrid_cache_controller(
     const common_params & params,
     int32_t limit_size_mib,
@@ -236,7 +317,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
         hot_payloads.erase(descriptor.payload_id);
         n_demotion_successes++;
         for (auto & entry : entries) {
-            if (entry.payload_id == descriptor.payload_id) {
+            if (entry.payload_id == descriptor.payload_id || entry.checkpoint_payload_id == descriptor.payload_id) {
                 sync_branch_node_from_entry(entry);
             }
         }
@@ -264,10 +345,8 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
             descriptor.residency = payload_residency_state::evicted;
             descriptor.resident_payload_bytes = 0;
             for (auto & entry : entries) {
-                if (entry.payload_id == descriptor.payload_id) {
-                    entry.resident_payload_bytes_cached = 0;
-                    entry.has_target_payload_cached = false;
-                    entry.has_draft_payload_cached = false;
+                if (entry.payload_id == descriptor.payload_id || entry.checkpoint_payload_id == descriptor.payload_id) {
+                    refresh_entry_payload_accounting(entry);
                     sync_branch_node_from_entry(entry);
                 }
             }
@@ -337,10 +416,8 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         descriptor.residency = payload_residency_state::hot;
         hot_payloads[record.payload_id] = std::move(record);
         for (auto & entry : entries) {
-            if (entry.payload_id == descriptor.payload_id) {
-                entry.resident_payload_bytes_cached = descriptor.target_size_bytes + descriptor.draft_size_bytes;
-                entry.has_target_payload_cached = descriptor.target_size_bytes > 0;
-                entry.has_draft_payload_cached = descriptor.draft_size_bytes > 0;
+            if (entry.payload_id == descriptor.payload_id || entry.checkpoint_payload_id == descriptor.payload_id) {
+                refresh_entry_payload_accounting(entry);
                 sync_branch_node_from_entry(entry);
             }
         }
@@ -361,10 +438,8 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         descriptor.residency = payload_residency_state::evicted;
         descriptor.resident_payload_bytes = 0;
         for (auto & entry : entries) {
-            if (entry.payload_id == descriptor.payload_id) {
-                entry.resident_payload_bytes_cached = 0;
-                entry.has_target_payload_cached = false;
-                entry.has_draft_payload_cached = false;
+            if (entry.payload_id == descriptor.payload_id || entry.checkpoint_payload_id == descriptor.payload_id) {
+                refresh_entry_payload_accounting(entry);
                 sync_branch_node_from_entry(entry);
             }
         }
@@ -487,6 +562,8 @@ json hybrid_cache_controller::get_stats() const {
     size_t evicted_descriptors = 0;
     size_t target_only_descriptors = 0;
     size_t target_and_draft_descriptors = 0;
+    size_t exact_blob_descriptors = 0;
+    size_t checkpoint_descriptors = 0;
     for (const auto & item : payload_descriptors) {
         const auto & descriptor = item.second;
         if (descriptor.residency == payload_residency_state::hot) {
@@ -504,6 +581,11 @@ json hybrid_cache_controller::get_stats() const {
             target_only_descriptors++;
         } else if (descriptor.pair_state == payload_pair_state::target_and_draft) {
             target_and_draft_descriptors++;
+        }
+        if (descriptor.kind == payload_kind::exact_blob) {
+            exact_blob_descriptors++;
+        } else if (descriptor.kind == payload_kind::checkpoint) {
+            checkpoint_descriptors++;
         }
     }
 
@@ -624,6 +706,8 @@ json hybrid_cache_controller::get_stats() const {
         {"n_evicted_payload_descriptors", evicted_descriptors},
         {"n_target_only_payload_descriptors", target_only_descriptors},
         {"n_target_and_draft_payload_descriptors", target_and_draft_descriptors},
+        {"n_exact_blob_payload_descriptors", exact_blob_descriptors},
+        {"n_checkpoint_payload_descriptors", checkpoint_descriptors},
         // Stage 8: Re-materialization and metadata-only metrics
         {"cache_metadata_only_retentions_total", n_cache_metadata_only_retentions},
         {"cache_node_rematerializations_total", n_cache_node_rematerializations},
@@ -635,6 +719,16 @@ json hybrid_cache_controller::get_stats() const {
         {"cache_branch_pruned_metadata_bytes_total", n_cache_branch_pruned_metadata_bytes},
         {"cache_cold_cleanup_total", n_cache_cold_cleanup_total},
         {"cache_branch_metadata_admission_rejections_total", n_cache_branch_metadata_admission_rejections},
+        {"cache_checkpoint_admissions_total", n_checkpoint_admission_successes},
+        {"cache_checkpoint_admission_failures_total", n_checkpoint_admission_failures},
+        {"cache_checkpoint_hits_total", n_checkpoint_hits},
+        {"cache_checkpoint_restores_total", n_checkpoint_restore_successes},
+        {"cache_checkpoint_restore_failures_total", n_checkpoint_restore_failures},
+        {"cache_checkpoint_hits_by_shape", checkpoint_shape_map_to_json(n_checkpoint_hits_by_shape)},
+        {"cache_checkpoint_restores_by_shape", checkpoint_shape_map_to_json(n_checkpoint_restores_by_shape)},
+        {"cache_workload_profile_plain_transformer_total", n_workload_profile_plain},
+        {"cache_workload_profile_checkpoint_dependent_total", n_workload_profile_checkpoint_dependent},
+        {"cache_workload_profile_unsupported_total", n_workload_profile_unsupported},
         {"namespaces",  namespaces},
     };
 }
@@ -857,6 +951,16 @@ cache_compatibility_key hybrid_cache_controller::debug_get_compatibility_key_for
     return build_compatibility_key(runtime_has_draft);
 }
 
+cache_workload_profile hybrid_cache_controller::debug_detect_workload_profile_for_tests() const {
+    return detect_workload_profile();
+}
+
+cache_compatibility_key hybrid_cache_controller::debug_get_compatibility_key_for_tests(
+        bool runtime_has_draft,
+        cache_workload_profile profile) const {
+    return build_compatibility_key(runtime_has_draft, profile);
+}
+
 void hybrid_cache_controller::record_branch_lookup(const std::string & namespace_id, const char * method) {
     if (std::string(method) == "checksum_span") {
         n_branch_checksum_lookups++;
@@ -865,6 +969,210 @@ void hybrid_cache_controller::record_branch_lookup(const std::string & namespace
     }
     n_branch_token_lookups++;
     n_branch_token_lookups_by_namespace[namespace_id]++;
+}
+
+void hybrid_cache_controller::record_workload_profile(cache_workload_profile profile) {
+    switch (profile) {
+        case cache_workload_profile::plain_transformer:
+            n_workload_profile_plain++;
+            break;
+        case cache_workload_profile::checkpoint_dependent:
+            n_workload_profile_checkpoint_dependent++;
+            break;
+        case cache_workload_profile::unsupported:
+            n_workload_profile_unsupported++;
+            break;
+    }
+}
+
+void hybrid_cache_controller::record_checkpoint_hit(const payload_descriptor & descriptor) {
+    n_checkpoint_hits++;
+    n_checkpoint_hits_by_shape[checkpoint_metric_shape_key(descriptor)]++;
+}
+
+void hybrid_cache_controller::record_checkpoint_restore(const payload_descriptor & descriptor, bool success) {
+    if (success) {
+        n_checkpoint_restore_successes++;
+    } else {
+        n_checkpoint_restore_failures++;
+    }
+    n_checkpoint_restores_by_shape[checkpoint_metric_shape_key(descriptor, success ? "success" : "failure")]++;
+}
+
+uint64_t hybrid_cache_controller::entry_payload_id_for_kind(const hybrid_cache_entry & entry, payload_kind kind) const {
+    return kind == payload_kind::checkpoint ? entry.checkpoint_payload_id : entry.payload_id;
+}
+
+void hybrid_cache_controller::set_entry_payload_id_for_kind(hybrid_cache_entry & entry, payload_kind kind, uint64_t payload_id) {
+    if (kind == payload_kind::checkpoint) {
+        entry.checkpoint_payload_id = payload_id;
+    } else {
+        entry.payload_id = payload_id;
+    }
+}
+
+void hybrid_cache_controller::refresh_entry_payload_accounting(hybrid_cache_entry & entry) {
+    size_t resident_bytes = 0;
+    bool has_target = false;
+    bool has_draft = false;
+    for (payload_kind kind : { payload_kind::exact_blob, payload_kind::checkpoint }) {
+        const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+        auto descriptor_it = payload_descriptors.find(payload_id);
+        if (descriptor_it == payload_descriptors.end()) {
+            continue;
+        }
+        const payload_descriptor & descriptor = descriptor_it->second;
+        if (descriptor.residency != payload_residency_state::hot ||
+            descriptor.resident_payload_bytes == 0 ||
+            hot_payloads.find(descriptor.store_ref.id) == hot_payloads.end()) {
+            continue;
+        }
+        resident_bytes += descriptor.resident_payload_bytes;
+        has_target = has_target || descriptor.target_size_bytes > 0;
+        has_draft = has_draft || descriptor.draft_size_bytes > 0;
+    }
+    entry.resident_payload_bytes_cached = resident_bytes;
+    entry.has_target_payload_cached = has_target;
+    entry.has_draft_payload_cached = has_draft;
+}
+
+bool hybrid_cache_controller::entry_has_payload_kind_for_restore(const hybrid_cache_entry & entry, payload_kind kind) const {
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+    if (payload_id == 0) {
+        return false;
+    }
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    const payload_descriptor & descriptor = descriptor_it->second;
+    return descriptor.kind == kind &&
+        descriptor.residency == payload_residency_state::hot &&
+        descriptor.resident_payload_bytes > 0 &&
+        hot_payloads.find(descriptor.store_ref.id) != hot_payloads.end();
+}
+
+bool hybrid_cache_controller::entry_has_payload_descriptor_for_restore(const hybrid_cache_entry & entry, payload_kind kind) const {
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+    if (payload_id == 0) {
+        return false;
+    }
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    const payload_descriptor & descriptor = descriptor_it->second;
+    if (descriptor.kind != kind ||
+        descriptor.owner_entry_id != entry.entry_id ||
+        descriptor.payload_id == 0 ||
+        descriptor.store_ref.id != descriptor.payload_id ||
+        descriptor.target_size_bytes == 0) {
+        return false;
+    }
+    return descriptor.residency == payload_residency_state::hot ||
+        descriptor.residency == payload_residency_state::cold ||
+        descriptor.residency == payload_residency_state::demoting ||
+        descriptor.residency == payload_residency_state::promoting;
+}
+
+payload_kind hybrid_cache_controller::select_restore_payload_kind(
+        const hybrid_cache_entry & entry,
+        cache_workload_profile profile) const {
+    if (profile == cache_workload_profile::checkpoint_dependent &&
+        entry_has_payload_descriptor_for_restore(entry, payload_kind::checkpoint)) {
+        return payload_kind::checkpoint;
+    }
+    if (entry_has_payload_descriptor_for_restore(entry, payload_kind::exact_blob)) {
+        return payload_kind::exact_blob;
+    }
+    if (entry_has_payload_descriptor_for_restore(entry, payload_kind::checkpoint)) {
+        return payload_kind::checkpoint;
+    }
+    return payload_kind::exact_blob;
+}
+
+llama_state_seq_flags hybrid_cache_controller::restore_state_flags_for_payload(payload_kind kind) const {
+    return kind == payload_kind::checkpoint ? LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY : LLAMA_STATE_SEQ_FLAGS_NONE;
+}
+
+int hybrid_cache_controller::restored_token_count_for_payload(
+        const hybrid_cache_entry & entry,
+        payload_kind kind) const {
+    if (kind != payload_kind::checkpoint) {
+        return entry.n_tokens();
+    }
+
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return entry.n_tokens();
+    }
+
+    const payload_descriptor & descriptor = descriptor_it->second;
+    if (descriptor.token_span_start != 0 ||
+        descriptor.token_span_end <= 0 ||
+        descriptor.token_span_end > entry.n_tokens()) {
+        return entry.n_tokens();
+    }
+
+    return static_cast<int>(descriptor.token_span_end);
+}
+
+bool hybrid_cache_controller::checkpoint_path_valid_for_restore(
+        const hybrid_cache_entry & entry,
+        std::string * failure_reason) const {
+    if (!entry_has_payload_descriptor_for_restore(entry, payload_kind::checkpoint)) {
+        if (failure_reason) {
+            *failure_reason = "missing checkpoint-bearing path";
+        }
+        return false;
+    }
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, payload_kind::checkpoint);
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        if (failure_reason) {
+            *failure_reason = "missing checkpoint descriptor";
+        }
+        return false;
+    }
+    return validate_checkpoint_descriptor_metadata(entry, descriptor_it->second, &entry.metadata, failure_reason);
+}
+
+std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::select_restore_candidate(
+        const std::vector<uint64_t> & forest_candidates,
+        const server_tokens & tokens_new,
+        cache_workload_profile profile) {
+    auto it_best = entries.end();
+    int lcp_best = -1;
+    int payload_rank_best = -1;
+
+    for (uint64_t node_id : forest_candidates) {
+        auto entry_it = find_entry_by_branch_node(node_id);
+        if (entry_it == entries.end()) {
+            continue;
+        }
+        const int lcp_cur = entry_it->tokens.get_common_prefix(tokens_new);
+        if (lcp_cur != entry_it->n_tokens() && lcp_cur != (int) tokens_new.size()) {
+            continue;
+        }
+        const bool has_checkpoint = entry_has_payload_descriptor_for_restore(*entry_it, payload_kind::checkpoint);
+        if (profile == cache_workload_profile::checkpoint_dependent && !has_checkpoint) {
+            continue;
+        }
+        const bool has_exact = entry_has_payload_descriptor_for_restore(*entry_it, payload_kind::exact_blob);
+        const int payload_rank = profile == cache_workload_profile::checkpoint_dependent ?
+            (has_checkpoint ? 2 : 0) :
+            (has_exact ? 2 : (has_checkpoint ? 1 : 0));
+        if (payload_rank == 0) {
+            continue;
+        }
+        if (lcp_cur > lcp_best || (lcp_cur == lcp_best && payload_rank > payload_rank_best)) {
+            lcp_best = lcp_cur;
+            payload_rank_best = payload_rank;
+            it_best = entry_it;
+        }
+    }
+    return it_best;
 }
 
 std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match(
@@ -879,11 +1187,10 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
     }
     
     const std::string ns_id = compute_namespace_id(metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+    record_workload_profile(profile);
     record_branch_lookup(ns_id, "token_span");
     
-    auto it_best = entries.end();
-    int lcp_best = -1;
-
     const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens_new);
     std::vector<uint64_t> forest_candidates = forest.find_nodes_by_token_span(ns_id, lookup_tokens, lookup_tokens.size());
     std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
@@ -900,6 +1207,7 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
             }
         }
     }
+    std::vector<uint64_t> compatible_candidates;
     for (uint64_t node_id : forest_candidates) {
         auto entry_it = find_entry_by_branch_node(node_id);
         if (entry_it == entries.end()) {
@@ -910,12 +1218,9 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
             continue;
         }
         n_namespace_validation_passes++;
-        const int lcp_cur = entry_it->tokens.get_common_prefix(tokens_new);
-        if (lcp_cur == entry_it->n_tokens() && lcp_cur > lcp_best) {
-            lcp_best = lcp_cur;
-            it_best = entry_it;
-        }
+        compatible_candidates.push_back(node_id);
     }
+    auto it_best = select_restore_candidate(compatible_candidates, tokens_new, profile);
 
     if (it_best != entries.end()) {
         n_branch_lookup_hits++;
@@ -944,8 +1249,12 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
                 continue;
             }
 
-            if (lcp_cur > lcp_best) {
-                lcp_best = lcp_cur;
+            if (!entry_has_payload_kind_for_restore(*it, payload_kind::exact_blob) &&
+                !entry_has_payload_kind_for_restore(*it, payload_kind::checkpoint)) {
+                continue;
+            }
+
+            if (it_best == entries.end() || lcp_cur > it_best->n_tokens()) {
                 it_best = it;
             }
         }
@@ -1028,16 +1337,20 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
         // demotion is initiated, leaving the entry in the list with cleared
         // budget accounting. If demotion fails or cold store is not configured,
         // it falls through to immediate eviction.
-        uint64_t payload_id = it->payload_id;
+        const uint64_t exact_payload_id = it->payload_id;
+        const uint64_t checkpoint_payload_id = it->checkpoint_payload_id;
         const size_t payload_bytes = it->resident_payload_bytes();
         mark_payload_evicted(*it);
 
-        // Check if the payload was demoted (descriptor is now demoting or cold)
+        // Check if either payload was demoted rather than immediately evicted.
         // rather than evicted.
-        auto desc_it = payload_descriptors.find(payload_id);
-        if (desc_it != payload_descriptors.end() &&
-            (desc_it->second.residency == payload_residency_state::demoting ||
-             desc_it->second.residency == payload_residency_state::cold)) {
+        const auto demoted = [&](uint64_t payload_id) {
+            auto desc_it = payload_descriptors.find(payload_id);
+            return desc_it != payload_descriptors.end() &&
+                (desc_it->second.residency == payload_residency_state::demoting ||
+                 desc_it->second.residency == payload_residency_state::cold);
+        };
+        if (demoted(exact_payload_id) || demoted(checkpoint_payload_id)) {
             // Demotion initiated or completed: keep the entry but remove from
             // LRU and prefix indices so it won't be selected for eviction again.
             remove_from_lru_index(it);
@@ -1186,6 +1499,156 @@ int hybrid_cache_controller::debug_select_restore_source_tokens_for_tests(
         return selected->n_tokens();
     }
     return -1;
+}
+
+bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes) {
+    return debug_admit_checkpoint_for_tests(target_bytes, draft_bytes, false);
+}
+
+bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
+        size_t target_bytes,
+        size_t draft_bytes,
+        int64_t token_span_end) {
+    if (entries.empty() || target_bytes == 0 || token_span_end <= 0) {
+        return false;
+    }
+    std::vector<uint8_t> target(target_bytes, 0x33);
+    std::vector<uint8_t> draft(draft_bytes, 0x44);
+    common_prompt_checkpoint checkpoint;
+    checkpoint.update_pos(token_span_end, 0, static_cast<llama_pos>(token_span_end));
+    std::string failure_reason;
+    return attach_checkpoint_payload(
+        entries.front(),
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        &checkpoint,
+        &entries.front().metadata,
+        &failure_reason,
+        false);
+}
+
+bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
+        size_t target_bytes,
+        size_t draft_bytes,
+        bool fail_after_descriptor) {
+    if (entries.empty() || target_bytes == 0) {
+        return false;
+    }
+    std::vector<uint8_t> target(target_bytes, 0x33);
+    std::vector<uint8_t> draft(draft_bytes, 0x44);
+    std::string failure_reason;
+    return attach_checkpoint_payload(
+        entries.front(),
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        nullptr,
+        &entries.front().metadata,
+        &failure_reason,
+        fail_after_descriptor);
+}
+
+bool hybrid_cache_controller::debug_validate_first_checkpoint_for_tests() {
+    if (entries.empty() || entries.front().checkpoint_payload_id == 0) {
+        return false;
+    }
+    const hot_payload_record * record = nullptr;
+    return validate_payload_for_restore(entries.front(), payload_kind::checkpoint, false, nullptr, &record);
+}
+
+bool hybrid_cache_controller::debug_first_checkpoint_metadata_for_tests(
+        const std::string & boundary_id,
+        int64_t token_span_start,
+        int64_t token_span_end,
+        uint64_t boundary_checksum) const {
+    if (entries.empty() || entries.front().checkpoint_payload_id == 0) {
+        return false;
+    }
+    auto descriptor_it = payload_descriptors.find(entries.front().checkpoint_payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    const payload_descriptor & descriptor = descriptor_it->second;
+    return descriptor.boundary_id == boundary_id &&
+        descriptor.token_span_start == token_span_start &&
+        descriptor.token_span_end == token_span_end &&
+        descriptor.boundary_checksum == boundary_checksum;
+}
+
+int hybrid_cache_controller::debug_first_checkpoint_restore_token_count_for_tests() const {
+    if (entries.empty()) {
+        return -1;
+    }
+    return restored_token_count_for_payload(entries.front(), payload_kind::checkpoint);
+}
+
+bool hybrid_cache_controller::debug_corrupt_first_checkpoint_boundary_checksum_for_tests() {
+    if (entries.empty() || entries.front().checkpoint_payload_id == 0) {
+        return false;
+    }
+    auto descriptor_it = payload_descriptors.find(entries.front().checkpoint_payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    descriptor_it->second.boundary_checksum ^= 0xff;
+    return true;
+}
+
+bool hybrid_cache_controller::debug_first_entry_has_checkpoint_for_tests() const {
+    return !entries.empty() && entries.front().checkpoint_payload_id != 0;
+}
+
+uint64_t hybrid_cache_controller::debug_first_checkpoint_payload_id_for_tests() const {
+    return entries.empty() ? 0 : entries.front().checkpoint_payload_id;
+}
+
+bool hybrid_cache_controller::debug_demote_first_checkpoint_for_tests() {
+    if (entries.empty() || entries.front().checkpoint_payload_id == 0) {
+        return false;
+    }
+    return demote_payload(entries.front().checkpoint_payload_id);
+}
+
+int hybrid_cache_controller::debug_select_stage9_restore_source_tokens_for_tests(
+        server_tokens tokens,
+        const std::string & namespace_id,
+        cache_workload_profile profile) {
+    const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens);
+    std::vector<uint64_t> candidates = forest.find_nodes_by_token_span(namespace_id, lookup_tokens, lookup_tokens.size());
+    auto selected = select_restore_candidate(candidates, tokens, profile);
+    if (selected == entries.end()) {
+        return -1;
+    }
+    const payload_kind kind = select_restore_payload_kind(*selected, profile);
+    if (kind == payload_kind::checkpoint) {
+        auto descriptor_it = payload_descriptors.find(entry_payload_id_for_kind(*selected, kind));
+        if (descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_hit(descriptor_it->second);
+        }
+    }
+    return selected->n_tokens();
+}
+
+bool hybrid_cache_controller::debug_request_stage9_checkpoint_promotion_for_tests(
+        server_tokens tokens,
+        const std::string & namespace_id) {
+    const std::vector<llama_token> lookup_tokens = cache_tokens_to_vector(tokens);
+    std::vector<uint64_t> candidates = forest.find_nodes_by_token_span(namespace_id, lookup_tokens, lookup_tokens.size());
+    auto selected = select_restore_candidate(candidates, tokens, cache_workload_profile::checkpoint_dependent);
+    if (selected == entries.end() || !checkpoint_path_valid_for_restore(*selected)) {
+        return false;
+    }
+    const uint64_t payload_id = entry_payload_id_for_kind(*selected, payload_kind::checkpoint);
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        return false;
+    }
+    record_checkpoint_restore(descriptor_it->second, false);
+    if (descriptor_it->second.residency != payload_residency_state::cold) {
+        return false;
+    }
+    return promote_payload(payload_id);
 }
 
 bool hybrid_cache_controller::debug_inject_first_payload_fault_for_tests(payload_debug_fault fault) {
@@ -1481,16 +1944,7 @@ uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entr
 }
 
 bool hybrid_cache_controller::entry_has_payload_for_restore(const hybrid_cache_entry & entry) const {
-    if (entry.payload_id == 0 || !entry.has_target_payload_cached) {
-        return false;
-    }
-    auto descriptor_it = payload_descriptors.find(entry.payload_id);
-    if (descriptor_it == payload_descriptors.end()) {
-        return false;
-    }
-    return descriptor_it->second.residency == payload_residency_state::hot &&
-        descriptor_it->second.resident_payload_bytes > 0 &&
-        hot_payloads.find(descriptor_it->second.store_ref.id) != hot_payloads.end();
+    return entry_has_payload_kind_for_restore(entry, payload_kind::exact_blob);
 }
 
 bool hybrid_cache_controller::materialize_entry_payload(
@@ -1528,6 +1982,17 @@ bool hybrid_cache_controller::materialize_entry_payload(
     }
 
     const uint64_t old_payload_id = it->payload_id;
+    for (auto descriptor_it = payload_descriptors.begin(); descriptor_it != payload_descriptors.end(); ) {
+        const payload_descriptor & descriptor = descriptor_it->second;
+        if (descriptor.owner_entry_id == it->entry_id &&
+            descriptor.kind == payload_kind::exact_blob &&
+            descriptor.residency == payload_residency_state::evicted) {
+            hot_payloads.erase(descriptor.store_ref.id);
+            descriptor_it = payload_descriptors.erase(descriptor_it);
+            continue;
+        }
+        ++descriptor_it;
+    }
     std::string attach_failure;
     if (!attach_payload(*it, std::move(target), std::move(draft), runtime_has_draft, &attach_failure)) {
         if (failure_reason) {
@@ -1691,10 +2156,12 @@ void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_ent
     node->insertion_sequence = entry.insertion_sequence;
     node->protected_root = node->protected_root || entry.protected_root;
     node->exact_blob_payload_id = entry.payload_id;
+    node->checkpoint_payload_id = entry.checkpoint_payload_id;
     node->resident_payload_bytes = entry.resident_payload_bytes_cached;
     node->has_target_payload = entry.has_target_payload_cached;
     node->has_draft_payload = entry.has_draft_payload_cached;
-    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    const uint64_t status_payload_id = entry.checkpoint_payload_id != 0 ? entry.checkpoint_payload_id : entry.payload_id;
+    auto descriptor_it = payload_descriptors.find(status_payload_id);
     if (descriptor_it != payload_descriptors.end()) {
         switch (descriptor_it->second.residency) {
             case payload_residency_state::hot:
@@ -1817,50 +2284,48 @@ void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
     payload_descriptors.erase(payload_id);
 }
 
-void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
-    if (entry.payload_id == 0) {
-        return;
+bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind) {
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+    if (payload_id == 0) {
+        return false;
     }
 
-    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it != payload_descriptors.end()) {
-        // Phase 6: If cold store is configured and payload is hot, attempt demotion
-        // instead of immediate eviction. If demotion is initiated, the descriptor
-        // transitions to demoting state and hot bytes are retained until the
-        // demotion completion callback releases them (NB-5).
         if (cold_store.is_configured() &&
             descriptor_it->second.residency == payload_residency_state::hot) {
-            // Emit warning if a protected root is being demoted
             if (entry.protected_root) {
                 n_protected_root_demotions++;
-                SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", entry.payload_id);
+                SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
             }
-            if (demote_payload(entry.payload_id)) {
-                // Demotion initiated: hot bytes retained, descriptor is now demoting.
-                // Clear budget accounting so the payload is not counted as resident
-                // during the demoting state. Actual hot byte release happens in
-                // handle_demotion_completion().
+            if (demote_payload(payload_id)) {
                 descriptor_it->second.resident_payload_bytes = 0;
-                entry.resident_payload_bytes_cached = 0;
-                entry.has_target_payload_cached = false;
-                entry.has_draft_payload_cached = false;
-                return;
+                refresh_entry_payload_accounting(entry);
+                return true;
             }
-            // Demotion failed (queue full, etc.): fall through to immediate eviction
             SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", falling back to immediate eviction\n",
-                    entry.payload_id);
+                    payload_id);
         }
 
         descriptor_it->second.residency = payload_residency_state::evicted;
         descriptor_it->second.resident_payload_bytes = 0;
     }
-    hot_payloads.erase(entry.payload_id);
-    entry.resident_payload_bytes_cached = 0;
-    entry.has_target_payload_cached = false;
-    entry.has_draft_payload_cached = false;
+    hot_payloads.erase(payload_id);
+    set_entry_payload_id_for_kind(entry, kind, 0);
+    refresh_entry_payload_accounting(entry);
     if (entry.branch_node_id != 0 && forest.evict_payload(entry.branch_node_id)) {
         n_cache_metadata_only_retentions++;
     } else {
+        sync_branch_node_from_entry(entry);
+    }
+    return true;
+}
+
+void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
+    bool changed = false;
+    changed = mark_payload_kind_evicted(entry, payload_kind::exact_blob) || changed;
+    changed = mark_payload_kind_evicted(entry, payload_kind::checkpoint) || changed;
+    if (changed) {
         sync_branch_node_from_entry(entry);
     }
 }
@@ -1910,7 +2375,7 @@ bool hybrid_cache_controller::validate_descriptor_against_record(
     if (descriptor.format_version != 1) {
         return fail("unsupported descriptor version");
     }
-    if (descriptor.kind != payload_kind::exact_blob) {
+    if (descriptor.kind != payload_kind::exact_blob && descriptor.kind != payload_kind::checkpoint) {
         return fail("unsupported payload kind");
     }
     if (descriptor.owner_entry_id != entry.entry_id) {
@@ -1978,6 +2443,16 @@ bool hybrid_cache_controller::attach_payload(
         std::vector<uint8_t> draft,
         bool runtime_has_draft,
         std::string * failure_reason) {
+    return attach_payload(entry, std::move(target), std::move(draft), runtime_has_draft, payload_kind::exact_blob, failure_reason);
+}
+
+bool hybrid_cache_controller::attach_payload(
+        hybrid_cache_entry & entry,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        payload_kind kind,
+        std::string * failure_reason) {
     hot_payload_record record;
     record.payload_id = next_payload_id++;
     record.target = std::move(target);
@@ -1985,7 +2460,7 @@ bool hybrid_cache_controller::attach_payload(
 
     payload_descriptor descriptor;
     descriptor.payload_id = record.payload_id;
-    descriptor.kind = payload_kind::exact_blob;
+    descriptor.kind = kind;
     descriptor.pair_state = runtime_has_draft ? payload_pair_state::target_and_draft : payload_pair_state::target_only;
     descriptor.format_version = 1;
     descriptor.target_size_bytes = record.target.size();
@@ -1997,25 +2472,237 @@ bool hybrid_cache_controller::attach_payload(
     descriptor.residency = payload_residency_state::hot;
     descriptor.owner_entry_id = entry.entry_id;
     descriptor.created_sequence = next_use_sequence();
+    descriptor.workload_profile = cache_workload_profile_name(detect_workload_profile());
+    descriptor.token_span_start = 0;
+    descriptor.token_span_end = entry.n_tokens();
+    descriptor.position_start = 0;
+    descriptor.position_end = entry.n_tokens();
 
     if (!validate_descriptor_against_record(entry, descriptor, record, runtime_has_draft, true, failure_reason)) {
         record_payload_validation_failure(failure_reason ? *failure_reason : "admission validation failed");
         return false;
     }
 
-    entry.payload_id = descriptor.payload_id;
-    entry.resident_payload_bytes_cached = descriptor.resident_payload_bytes;
-    entry.has_target_payload_cached = descriptor.target_size_bytes > 0;
-    entry.has_draft_payload_cached = descriptor.draft_size_bytes > 0;
     payload_descriptors[descriptor.payload_id] = descriptor;
     hot_payloads[record.payload_id] = std::move(record);
+    set_entry_payload_id_for_kind(entry, kind, descriptor.payload_id);
+    refresh_entry_payload_accounting(entry);
     return true;
+}
+
+bool hybrid_cache_controller::validate_checkpoint_descriptor_metadata(
+        const hybrid_cache_entry & entry,
+        const payload_descriptor & descriptor,
+        const prepared_prompt_metadata * metadata,
+        std::string * failure_reason) const {
+    const auto fail = [failure_reason](const char * reason) {
+        if (failure_reason) {
+            *failure_reason = reason;
+        }
+        return false;
+    };
+
+    if (descriptor.kind != payload_kind::checkpoint) {
+        return true;
+    }
+    if (descriptor.workload_profile.empty() ||
+        descriptor.workload_profile == cache_workload_profile_name(cache_workload_profile::unsupported)) {
+        return fail("unsupported checkpoint workload profile");
+    }
+    if (descriptor.token_span_start < 0 ||
+        descriptor.token_span_end <= descriptor.token_span_start ||
+        descriptor.token_span_end > entry.n_tokens()) {
+        return fail("checkpoint token span mismatch");
+    }
+    if (descriptor.position_end < descriptor.position_start) {
+        return fail("checkpoint position span mismatch");
+    }
+
+    const prepared_prompt_metadata * source_metadata = metadata ? metadata : &entry.metadata;
+    if (source_metadata && source_metadata->has_boundaries()) {
+        if (!descriptor.checkpoint_boundary_required || descriptor.boundary_id.empty() ||
+            descriptor.boundary_checksum == 0 || descriptor.checkpoint_boundary_kind < 0) {
+            return fail("missing checkpoint boundary metadata");
+        }
+        for (const auto & boundary : source_metadata->boundaries) {
+            if (static_cast<int>(boundary.type) != descriptor.checkpoint_boundary_kind ||
+                boundary.metadata != descriptor.boundary_id ||
+                boundary.token_start != static_cast<size_t>(descriptor.token_span_start) ||
+                boundary.token_end != static_cast<size_t>(descriptor.token_span_end) ||
+                boundary.checksum != descriptor.boundary_checksum) {
+                continue;
+            }
+            if (cache_token_span_checksum(entry.tokens, boundary.token_start, boundary.token_end) != boundary.checksum) {
+                return fail("checkpoint boundary checksum mismatch");
+            }
+            return true;
+        }
+        return fail("checkpoint boundary metadata mismatch");
+    }
+
+    if (descriptor.checkpoint_boundary_required) {
+        return fail("missing boundary metadata for checkpoint");
+    }
+    const uint64_t span_checksum = cache_token_span_checksum(
+        entry.tokens,
+        static_cast<size_t>(descriptor.token_span_start),
+        static_cast<size_t>(descriptor.token_span_end));
+    if (descriptor.boundary_checksum != 0 && descriptor.boundary_checksum != span_checksum) {
+        return fail("checkpoint token checksum mismatch");
+    }
+    return true;
+}
+
+bool hybrid_cache_controller::attach_checkpoint_payload(
+        hybrid_cache_entry & entry,
+        std::vector<uint8_t> target,
+        std::vector<uint8_t> draft,
+        bool runtime_has_draft,
+        const common_prompt_checkpoint * checkpoint,
+        const prepared_prompt_metadata * metadata,
+        std::string * failure_reason,
+        bool fail_after_descriptor) {
+    if (target.empty()) {
+        if (failure_reason) {
+            *failure_reason = "missing checkpoint target payload";
+        }
+        n_checkpoint_admission_failures++;
+        return false;
+    }
+    const uint64_t old_checkpoint_payload_id = entry.checkpoint_payload_id;
+    const size_t old_cached_bytes = entry.resident_payload_bytes_cached;
+    const bool old_has_target = entry.has_target_payload_cached;
+    const bool old_has_draft = entry.has_draft_payload_cached;
+
+    if (!attach_payload(entry, std::move(target), std::move(draft), runtime_has_draft, payload_kind::checkpoint, failure_reason)) {
+        n_checkpoint_admission_failures++;
+        return false;
+    }
+    const uint64_t new_checkpoint_payload_id = entry.checkpoint_payload_id;
+    auto new_descriptor_it = payload_descriptors.find(new_checkpoint_payload_id);
+    if (new_descriptor_it != payload_descriptors.end()) {
+        payload_descriptor & descriptor = new_descriptor_it->second;
+        if (checkpoint) {
+            descriptor.token_span_start = 0;
+            descriptor.token_span_end = checkpoint->n_tokens;
+            descriptor.position_start = checkpoint->pos_min;
+            descriptor.position_end = checkpoint->pos_max;
+        }
+        const prepared_prompt_metadata * source_metadata = metadata ? metadata : &entry.metadata;
+        if (source_metadata && source_metadata->has_boundaries()) {
+            bool attached_boundary = false;
+            for (const auto & boundary : source_metadata->boundaries) {
+                if (boundary.checksum == 0 || boundary.token_start != static_cast<size_t>(descriptor.token_span_start) ||
+                    boundary.token_end != static_cast<size_t>(descriptor.token_span_end)) {
+                    continue;
+                }
+                descriptor.checkpoint_boundary_required = true;
+                descriptor.checkpoint_boundary_native = source_metadata->boundaries_native;
+                descriptor.checkpoint_boundary_kind = static_cast<int>(boundary.type);
+                descriptor.boundary_checksum = boundary.checksum;
+                descriptor.boundary_id = boundary.metadata;
+                attached_boundary = true;
+                break;
+            }
+            if (!attached_boundary) {
+                descriptor.checkpoint_boundary_required = true;
+            }
+        } else {
+            descriptor.checkpoint_boundary_required = false;
+            descriptor.boundary_checksum = cache_token_span_checksum(
+                entry.tokens,
+                static_cast<size_t>(descriptor.token_span_start),
+                static_cast<size_t>(descriptor.token_span_end));
+        }
+        if (!validate_checkpoint_descriptor_metadata(entry, descriptor, source_metadata, failure_reason)) {
+            set_entry_payload_id_for_kind(entry, payload_kind::checkpoint, old_checkpoint_payload_id);
+            entry.resident_payload_bytes_cached = old_cached_bytes;
+            entry.has_target_payload_cached = old_has_target;
+            entry.has_draft_payload_cached = old_has_draft;
+            remove_payload(new_checkpoint_payload_id);
+            sync_branch_node_from_entry(entry);
+            n_checkpoint_admission_failures++;
+            return false;
+        }
+    }
+    if (fail_after_descriptor) {
+        set_entry_payload_id_for_kind(entry, payload_kind::checkpoint, old_checkpoint_payload_id);
+        entry.resident_payload_bytes_cached = old_cached_bytes;
+        entry.has_target_payload_cached = old_has_target;
+        entry.has_draft_payload_cached = old_has_draft;
+        remove_payload(new_checkpoint_payload_id);
+        sync_branch_node_from_entry(entry);
+        n_checkpoint_admission_failures++;
+        if (failure_reason) {
+            *failure_reason = "injected checkpoint attach failure";
+        }
+        return false;
+    }
+
+    if (entry.branch_node_id != 0) {
+        branch_node * node = forest.get_node(entry.branch_node_id);
+        if (!node) {
+            set_entry_payload_id_for_kind(entry, payload_kind::checkpoint, old_checkpoint_payload_id);
+            entry.resident_payload_bytes_cached = old_cached_bytes;
+            entry.has_target_payload_cached = old_has_target;
+            entry.has_draft_payload_cached = old_has_draft;
+            remove_payload(new_checkpoint_payload_id);
+            n_checkpoint_admission_failures++;
+            if (failure_reason) {
+                *failure_reason = "checkpoint graph attach failed";
+            }
+            return false;
+        }
+        node->checkpoint_payload_id = new_checkpoint_payload_id;
+    }
+    if (old_checkpoint_payload_id != 0) {
+        remove_payload(old_checkpoint_payload_id);
+    }
+    sync_branch_node_from_entry(entry);
+    n_checkpoint_admission_successes++;
+    return true;
+}
+
+bool hybrid_cache_controller::admit_latest_checkpoint(
+        hybrid_cache_entry & entry,
+        const common_prompt_checkpoint & checkpoint,
+        bool runtime_has_draft,
+        std::string * failure_reason) {
+    if (checkpoint.data_tgt.empty()) {
+        if (failure_reason) {
+            *failure_reason = "checkpoint target payload is empty";
+        }
+        n_checkpoint_admission_failures++;
+        return false;
+    }
+    if (runtime_has_draft && checkpoint.data_dft.empty()) {
+        if (failure_reason) {
+            *failure_reason = "checkpoint draft payload is empty";
+        }
+        n_checkpoint_admission_failures++;
+        n_pairing_violations++;
+        return false;
+    }
+    return attach_checkpoint_payload(
+        entry,
+        checkpoint.data_tgt,
+        runtime_has_draft ? checkpoint.data_dft : std::vector<uint8_t>{},
+        runtime_has_draft,
+        &checkpoint,
+        &entry.metadata,
+        failure_reason);
 }
 
 const hot_payload_record * hybrid_cache_controller::resolve_hot_payload(
         const hybrid_cache_entry & entry,
         std::string * failure_reason) const {
-    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    return resolve_hot_payload(entry.payload_id, failure_reason);
+}
+
+const hot_payload_record * hybrid_cache_controller::resolve_hot_payload(
+        uint64_t payload_id,
+        std::string * failure_reason) const {
+    auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         if (failure_reason) {
             *failure_reason = "missing descriptor";
@@ -2043,17 +2730,32 @@ bool hybrid_cache_controller::validate_payload_for_restore(
         bool runtime_has_draft,
         std::string * failure_reason,
         const hot_payload_record ** record_out) {
+    return validate_payload_for_restore(entry, payload_kind::exact_blob, runtime_has_draft, failure_reason, record_out);
+}
+
+bool hybrid_cache_controller::validate_payload_for_restore(
+        const hybrid_cache_entry & entry,
+        payload_kind kind,
+        bool runtime_has_draft,
+        std::string * failure_reason,
+        const hot_payload_record ** record_out) {
     std::string local_reason;
     std::string * reason = failure_reason ? failure_reason : &local_reason;
-    const hot_payload_record * record = resolve_hot_payload(entry, reason);
+    const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
+    const hot_payload_record * record = resolve_hot_payload(payload_id, reason);
     if (!record) {
         record_payload_validation_failure(*reason);
         return false;
     }
 
-    auto descriptor_it = payload_descriptors.find(entry.payload_id);
+    auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         *reason = "missing descriptor";
+        record_payload_validation_failure(*reason);
+        return false;
+    }
+    if (descriptor_it->second.kind != kind) {
+        *reason = "payload kind mismatch";
         record_payload_validation_failure(*reason);
         return false;
     }
@@ -2062,8 +2764,16 @@ bool hybrid_cache_controller::validate_payload_for_restore(
         record_payload_validation_failure(*reason);
         return false;
     }
+    if (kind == payload_kind::checkpoint &&
+        !validate_checkpoint_descriptor_metadata(entry, descriptor_it->second, &entry.metadata, reason)) {
+        record_payload_validation_failure(*reason);
+        return false;
+    }
 
     descriptor_it->second.last_validated_sequence = next_use_sequence();
+    if (kind == payload_kind::checkpoint) {
+        record_checkpoint_hit(descriptor_it->second);
+    }
     if (record_out) {
         *record_out = record;
     }
@@ -2304,6 +3014,28 @@ cache_compatibility_key hybrid_cache_controller::build_compatibility_key() const
 }
 
 cache_compatibility_key hybrid_cache_controller::build_compatibility_key(bool runtime_has_draft) const {
+    return build_compatibility_key(runtime_has_draft, detect_workload_profile());
+}
+
+cache_workload_profile hybrid_cache_controller::detect_workload_profile() const {
+    if (!ctx_tgt) {
+        return cache_workload_profile::unsupported;
+    }
+    const llama_model * model = llama_get_model(ctx_tgt);
+    if (!model) {
+        return cache_workload_profile::unsupported;
+    }
+    if ((llama_model_n_swa(model) > 0 && !params.swa_full) ||
+        llama_model_is_recurrent(model) ||
+        llama_model_is_hybrid(model)) {
+        return cache_workload_profile::checkpoint_dependent;
+    }
+    return cache_workload_profile::plain_transformer;
+}
+
+cache_compatibility_key hybrid_cache_controller::build_compatibility_key(
+        bool runtime_has_draft,
+        cache_workload_profile profile) const {
     cache_compatibility_key key;
     key.draft_context_mode = draft_context_mode_id(params, runtime_has_draft);
     
@@ -2399,8 +3131,7 @@ cache_compatibility_key hybrid_cache_controller::build_compatibility_key(bool ru
     // KV unified flag from params
     key.kv_unified = params.kv_unified;
     
-    // Workload profile (reserved for future extension)
-    key.workload_profile = "default";
+    key.workload_profile = cache_workload_profile_name(profile);
     
     return key;
 }
