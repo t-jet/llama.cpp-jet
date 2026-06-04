@@ -1,0 +1,54 @@
+srv  demote_paylo:  - hybrid cache: demote_payload: payload_id 1 is not hot (residency=1)
+srv  demote_paylo:  - hybrid cache: demote_payload: cold store not configured
+srv     configure:  - cold store: configured root 'step6_demotion_demoting_state', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_queue_full', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 2 (ref 2)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_completion_success', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_completion_failure', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_hot_bytes_pinned', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_drain_queue', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 2 (ref 2)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_eviction_demotion', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_protected_root', format version 1
+srv         start:  - cold store I/O worker: started
+srv  evict_until_:  - hybrid cache: protected-root budget pressure detected (protected bytes: 1433600, resident bytes: 1433600, protected entries: 2, budget bytes: 1048576)
+srv  evict_entry_:  - hybrid cache: evicting protected root due to payload budget pressure (namespace: test, tokens: 3, payload bytes: 716800, budget bytes: 1048576, use sequence: 1)
+srv  mark_payload:  - hybrid cache: protected root demoted (payload_id=1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_target_and_draft', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_nonexistent', format version 1
+srv  demote_paylo:  - hybrid cache: demote_payload: descriptor not found for payload_id 999
+srv     configure:  - cold store: configured root 'step6_demotion_already_demoting', format version 1
+srv         start:  - cold store I/O worker: started
+srv  demote_paylo:  - hybrid cache: demote_payload: payload_id 1 is not hot (residency=1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step6_demotion_cold_bytes', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 2 (ref 2)

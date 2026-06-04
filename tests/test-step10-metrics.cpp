@@ -19,6 +19,7 @@
 #include "server-cache-hybrid.h"
 #include "server-cache-store-cold.h"
 #include "server-cache-io-worker.h"
+#include "server-context.h"
 #include "server-task.h"
 #include "common.h"
 
@@ -325,6 +326,134 @@ void test_cold_payload_count_gauge() {
     printf("  PASSED\n");
 }
 
+// Test 9: Stage 10 Prometheus rows preserve bounded public dimensions
+void test_stage10_prometheus_export_dimensions() {
+    printf("step10: Stage 10 Prometheus export dimensions...\n");
+
+    json cache_stats = json::object();
+    cache_stats["type"] = "hybrid";
+    cache_stats["cache_exact_blob_restores_by_shape"] = json::array({
+        {
+            {"payload_kind", "exact_blob"},
+            {"profile", "plain_transformer"},
+            {"pair_state", "single"},
+            {"residency", "hot"},
+            {"result", "success"},
+            {"reason", "accepted"},
+            {"value", 2},
+        },
+    });
+    cache_stats["cache_payload_transitions_by_shape"] = json::array({
+        {
+            {"operation", "promotion"},
+            {"payload_kind", "checkpoint"},
+            {"pair_state", "paired"},
+            {"result", "success"},
+            {"reason", "completed"},
+            {"value", 3},
+        },
+        {
+            {"operation", "demotion"},
+            {"payload_kind", "exact_blob"},
+            {"pair_state", "single"},
+            {"result", "failure"},
+            {"reason", "queue\"full\n"},
+            {"value", 4},
+        },
+    });
+
+    const std::string prometheus = server_cache_stage10_prometheus_rows_for_tests(cache_stats);
+    TEST_ASSERT(prometheus.find(
+        "cache_exact_blob_restores_total{mode=\"hybrid\",payload_kind=\"exact_blob\",profile=\"plain_transformer\",pair_state=\"single\",residency=\"hot\",result=\"success\",reason=\"accepted\"} 2") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_payload_transitions_total{mode=\"hybrid\",operation=\"promotion\",payload_kind=\"checkpoint\",pair_state=\"paired\",result=\"success\",reason=\"completed\"} 3") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_payload_transitions_total{mode=\"hybrid\",operation=\"demotion\",payload_kind=\"exact_blob\",pair_state=\"single\",result=\"failure\",reason=\"queue\\\"full\\n\"} 4") != std::string::npos);
+    printf("  PASSED\n");
+}
+
+// Test 10: Stage 10 Prometheus export covers additional bounded rows
+// (T114 - 2026-06-04 bug-fix loop). This exercises the additional by-shape
+// arrays that the public exporter walks.
+void test_stage10_prometheus_export_extended_rows() {
+    printf("step10: Stage 10 Prometheus export extended rows...\n");
+
+    json cache_stats = json::object();
+    cache_stats["type"] = "hybrid";
+    cache_stats["cache_exact_blob_restores_by_shape"] = json::array({
+        {
+            {"payload_kind", "exact_blob"},
+            {"profile", "plain_transformer"},
+            {"pair_state", "single"},
+            {"residency", "cold"},
+            {"result", "success"},
+            {"reason", "promoted"},
+            {"value", 5},
+        },
+    });
+    cache_stats["cache_payload_transitions_by_shape"] = json::array({
+        {
+            {"operation", "promotion"},
+            {"payload_kind", "checkpoint"},
+            {"pair_state", "paired"},
+            {"result", "failure"},
+            {"reason", "read_error"},
+            {"value", 1},
+        },
+    });
+    cache_stats["cache_payload_evictions_by_shape"] = json::array({
+        {
+            {"payload_kind", "exact_blob"},
+            {"pair_state", "single"},
+            {"result", "success"},
+            {"reason", "over_budget"},
+            {"value", 7},
+        },
+    });
+    cache_stats["cache_protected_root_decisions_by_shape"] = json::array({
+        {
+            {"decision", "admit"},
+            {"pressure_source", "budget"},
+            {"result", "rejected"},
+            {"reason", "oversized"},
+            {"value", 2},
+        },
+    });
+    cache_stats["cache_fallback_restores_by_shape"] = json::array({
+        {
+            {"strategy", "evict"},
+            {"payload_kind", "exact_blob"},
+            {"result", "success"},
+            {"reason", "no_match"},
+            {"value", 1},
+        },
+    });
+    cache_stats["cache_structured_diagnostics_by_shape"] = json::array({
+        {
+            {"event", "descriptor_rejection"},
+            {"result", "failure"},
+            {"reason", "owner_mismatch"},
+            {"payload_kind", "exact_blob"},
+            {"value", 1},
+        },
+    });
+
+    const std::string prometheus = server_cache_stage10_prometheus_rows_for_tests(cache_stats);
+    TEST_ASSERT(prometheus.find(
+        "cache_exact_blob_restores_total{mode=\"hybrid\",payload_kind=\"exact_blob\",profile=\"plain_transformer\",pair_state=\"single\",residency=\"cold\",result=\"success\",reason=\"promoted\"} 5") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_payload_transitions_total{mode=\"hybrid\",operation=\"promotion\",payload_kind=\"checkpoint\",pair_state=\"paired\",result=\"failure\",reason=\"read_error\"} 1") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_payload_evictions_by_shape_total{mode=\"hybrid\",payload_kind=\"exact_blob\",pair_state=\"single\",result=\"success\",reason=\"over_budget\"} 7") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_protected_root_decisions_by_shape_total{mode=\"hybrid\",decision=\"admit\",pressure_source=\"budget\",result=\"rejected\",reason=\"oversized\"} 2") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_fallback_restores_by_shape_total{mode=\"hybrid\",strategy=\"evict\",payload_kind=\"exact_blob\",result=\"success\",reason=\"no_match\"} 1") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_structured_diagnostics_total{mode=\"hybrid\",event=\"descriptor_rejection\",result=\"failure\",reason=\"owner_mismatch\",payload_kind=\"exact_blob\"} 1") != std::string::npos);
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("Step 10: Metrics\n");
@@ -338,6 +467,8 @@ int main() {
     test_promotion_failure_reason_counters();
     test_promotion_latency_histogram();
     test_cold_payload_count_gauge();
+    test_stage10_prometheus_export_dimensions();
+    test_stage10_prometheus_export_extended_rows();
 
     printf("\n==================================================\n");
     printf("Step 10: All tests PASSED\n");

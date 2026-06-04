@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 Status: Active reusable integration runner
 
 ## Scope
@@ -19,6 +19,8 @@ The Stage 7 plan adds the branch graph foundation. Public HTTP can cover model-b
 The Stage 8 plan adds metadata-only retention and re-materialization. Public HTTP can cover public surface, model-backed regression, and metrics output. Metadata-only topology, re-materialization validation, mismatch-parent selection, equivalent deduplication, cold cleanup ownership, and metadata admission rejection rely on focused Stage 8, focused controller, stats-capable, or fault-injection evidence unless a later script creates those preconditions directly.
 
 The Stage 9 plan adds checkpoint payloads and workload profiles. Public HTTP can cover task-flow boundary propagation, model-backed checkpoint-dependent restore when a suitable SWA, recurrent, hybrid, or MTP fixture exists, and public `/metrics` shape. Workload profile namespace isolation, descriptor admission rollback, exact-first and checkpoint-first ranking, target/draft checkpoint pair validation, cold checkpoint promotion, budget eviction, cleanup ownership, and leak checks rely on focused controller, metrics, branch graph, or Stage 8 evidence unless a later script creates those preconditions directly.
+
+The Stage 10 plan adds observability metric shapes and escaping, bounded diagnostics, cold-store hardening, startup validation, pressure and abuse checks, deterministic stress, coverage evidence, benchmark evidence, operator documentation checks, security evidence, and Stage 4-9 regression. Public HTTP can cover startup validation and live `/metrics` shape when the server can create the rows. Cold-store path hardening, queue pressure, repeated integrity failures, branch pressure, deterministic stress, and exporter escaping rely on focused C++ tests, Python startup or metric checks, coverage reports, benchmark runners, and documented fixture evidence.
 
 ## Scripts
 
@@ -93,6 +95,8 @@ Stage 8 S80-S99 scenarios are part of the plan. The main runner does not impleme
 
 Stage 9 Q90-Q112 scenarios are part of the plan. The main runner does not implement a dedicated Stage 9 matrix. Use it for public HTTP boundary and `/metrics` evidence when possible, then cite `test-cache-controller`, `test-step10-metrics`, `test-step12-branch-graph`, `test-step13-stage8`, and `tools/server/tests/unit/test_cache_modes.py` for focused checkpoint, metrics, graph, regression, and metric-shape evidence. Do not mark Q103 `PASS` unless the run used a checkpoint-dependent model fixture.
 
+Stage 10 T100-T121 scenarios are part of the plan. The main runner does not implement a dedicated Stage 10 matrix. Use it for public startup, HTTP, log, and `/metrics` evidence, then cite `test-step10-metrics`, `test-stage10-cold-store-hardening`, `test-cache-controller`, demotion, promotion, fault-injection, branch graph, Stage 8, Python startup or metric tests, coverage reports, and benchmark outputs for rows that public HTTP cannot create directly. Do not mark coverage or benchmark rows `PASS` without the required tool output.
+
 ### `run_stage4_h30_h37.ps1`
 
 Focused Stage 4 H30-H37 evidence rerun. It starts a fresh server for executable public HTTP rows, records explicit `PASS`, `FAIL`, `SKIP`, or `BLOCKED` outcomes, and writes the next available report under `._design_docs/.test_reports/`. Rows that lack a public precondition use accepted focused controller evidence when available, otherwise they report `BLOCKED` without starting a server.
@@ -114,6 +118,95 @@ H33 uses focused controller evidence when `test-cache-controller.exe` includes `
 H35 and H36 require trusted protected entries. Public chat requests with degraded rendered-text metadata are not enough. Use a stats-capable harness or focused C++ controller stats, or report `BLOCKED`.
 
 H37 uses focused controller evidence when `test-cache-controller.exe` includes `hybrid protected admission rejection stats`. HTTP/parser rejection before admission is `BLOCKED`, not protected admission evidence.
+
+### `run_coverage.ps1`
+
+OpenCppCoverage union coverage runner for the hybrid-mode denominator (T114 and T115).
+
+Runs all 8 focused cache tests individually under OpenCppCoverage with binary
+`.cov` export, then optionally runs `llama-server` with a short HTTP probe under
+the same tool to cover the server integration paths in `server-cache-hybrid.cpp`.
+Merges all `.cov` files with `--input_coverage` to produce a single union Cobertura
+XML, then reports combined line rate against the 80% threshold.
+
+Denominator: `server-cache-hybrid.cpp/h`, `server-cache-store-cold.cpp/h`,
+`server-cache-controller.cpp/h`, `server-cache-graph.cpp/h`,
+`server-cache-io-worker.cpp`, `server-cache-policy-lru.cpp`,
+`server-cache-legacy.h`, and the 8 focused test `.cpp` files.
+`server-context.cpp` and `server-context.h` are excluded (general dispatcher,
+not hybrid-cache paths).
+
+LLVM source-based coverage is blocked on this host: `lld-link` rejects
+`-fprofile-instr-generate` as a linker flag. OpenCppCoverage is the fallback.
+Branch coverage is unavailable (OpenCppCoverage reports `branch-rate=0`).
+
+Parameters:
+
+- `-BuildDir`: release bin parent, default `.\build`
+- `-SourceRoot`: repo root, default auto-detected from script location
+- `-OutDir`: output directory for `.cov` files, XML, HTML, and report
+- `-ModelPath`: GGUF model for the HTTP probe (or `LLAMA_CACHE_TEST_MODEL`)
+- `-OcPath`: path to `OpenCppCoverage.exe`, default `D:\app\OpenCppCoverage\OpenCppCoverage.exe`
+- `-Port`: HTTP probe server port, default 8144
+- `-SkipServerProbe`: omit the `llama-server` HTTP probe phase
+
+Output files in `$OutDir`:
+
+- `cov-binary/NN-<test>.cov` — per-test binary coverage data
+- `cov-binary/server-http-probe.cov` — server integration coverage data
+- `coverage-merged.xml` — merged Cobertura XML (union coverage)
+- `html/` — HTML coverage report
+- `coverage-report.md` — per-file line rates and 80% gate result
+
+Run after the clean build:
+
+```powershell
+cmake --build build --config Release --target llama-server test-cache-controller test-step10-metrics test-stage10-cold-store-hardening test-step6-demotion-protocol test-step7-promotion-protocol test-step11-test-hooks-fault-injection test-step12-branch-graph test-step13-stage8 -j 4
+& "._design_docs\cache-handling-test-scripts\run_coverage.ps1" -OutDir "._design_docs\.test_reports\<session-report>-artifacts"
+```
+
+The script exits 1 if the combined line rate is below 80%.
+
+### `run_benchmark_k6.ps1`
+
+Stage 10 k6 cache correctness benchmark runner for T116 and T117.
+
+Uses `tools/server/tests/bench-cache-correctness.js` (standard k6, no SSE
+extension required) to drive repeated `/completion` requests against a hybrid
+cache server and validates that `timings.cache_n > 0` for hit iterations.
+
+The script starts `llama-server`, sends one warmup request to seed the cache
+entry, captures `/metrics` before and after, runs k6, stops the server, and
+writes an evidence-summary file with T116 evidence classification.
+
+Parameters:
+
+- `-BuildDir`: release bin parent, default `.\build`
+- `-ModelPath`: GGUF model (or `LLAMA_CACHE_TEST_MODEL`)
+- `-K6Path`: path to `k6.exe`, default `D:\app\k6\k6.exe`
+- `-Port`: server port, default 8142
+- `-OutDir`: output directory for evidence files
+- `-Iterations`: total probe iterations for k6, default 12
+
+Evidence classes produced:
+
+| Evidence type | Source class |
+| --- | --- |
+| `timings.cache_n` per response | direct stats |
+| `llamacpp_cache_hits_total` delta | public Prometheus |
+| `llamacpp_cache_misses_total` delta | public Prometheus |
+| `cache_hit_rate` k6 Rate threshold | harness-only |
+| `cache_miss_prompt_ms` vs `cache_hit_prompt_ms` | direct stats |
+
+The k6 threshold requires at least 60% of probe iterations to report
+`timings.cache_n > 0`. The script exits 1 (T117 FAIL) if this gate is not met.
+
+Run after the clean build:
+
+```powershell
+cmake --build build --config Release --target llama-server -j 4
+& "._design_docs\cache-handling-test-scripts\run_benchmark_k6.ps1" -OutDir "._design_docs\.test_reports\<session-report>-artifacts"
+```
 
 ### `stress_tests.ps1`
 
@@ -168,6 +261,8 @@ pytest tools/server/tests/unit/test_cache_modes.py
 `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` is a Windows workaround for Python startup and metric-shape checks. Do not use it as evidence for model-backed save, restore, hit, miss, eviction, or re-materialization behavior.
 
 For Stage 9 planning or execution sessions, use the focused `ctest` and Python commands in Part 11. Do not use `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` for rows that claim model-backed checkpoint save, restore, hit, miss, promotion, demotion, eviction, or boundary propagation.
+
+For Stage 10 planning or execution sessions, use the focused `ctest`, Python, coverage, and benchmark commands in Part 12. Do not use `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` for rows that claim model-backed cache save, restore, hit, miss, promotion, demotion, eviction, boundary propagation, checkpoint behavior, coverage, or benchmark acceptance.
 
 ## Usage
 
@@ -242,7 +337,6 @@ Run stress tests:
 ## Evidence expectations
 
 Every execution report must include:
-
 - clean build evidence and binary timestamp
 - git commit or dirty working-tree status
 - server command line
@@ -253,7 +347,6 @@ Every execution report must include:
 - final `PASS`, `FAIL`, `SKIP`, and `BLOCKED` counts
 
 For Stage 4 cases, also capture:
-
 - measured entry size
 - chosen `--cache-ram` budget and why it should trigger pressure
 - operation order used to prove LRU recency
@@ -263,7 +356,6 @@ For Stage 4 cases, also capture:
 - legacy mode compatibility evidence when applicable
 
 For Stage 5 cases, also capture:
-
 - descriptor validation and fallback metrics before and after the operation
 - pair-state and runtime shape used by the test
 - target and draft payload byte accounting when a draft model or focused harness is used
@@ -273,7 +365,6 @@ For Stage 5 cases, also capture:
 - empty-preimage rollback or unsupported clear preflight evidence when those rows are in scope
 
 For Stage 7 cases, also capture:
-
 - evidence source for each row: public HTTP, focused graph test, focused controller test, Python metric-shape test, or stats-capable harness
 - branch namespace IDs or fixture names used for same-namespace and cross-namespace assertions
 - slot-ref acquire/release sequence and whether active refs blocked eviction candidates
@@ -286,14 +377,13 @@ For Stage 8 cases, also capture evidence source, selected metadata-only node, re
 
 For Stage 9 cases, also capture evidence source, workload profile, namespace or fixture identity, selected payload kind, descriptor validation result, pair state, boundary source or degraded fallback reason, cold residency transition, metrics labels, public `/metrics` scrape when available, and explicit fixture search result for checkpoint-dependent model-backed rows.
 
+For Stage 10 cases, also capture evidence source, metric label names and values, escaping proof, bounded diagnostic fields, cold-store root setup without leaking local paths in public summaries, startup validation reason, pressure inputs, deterministic seams, OWASP classification, coverage tool output, benchmark evidence source, operator documentation files checked, and Stage 4-9 regression evidence.
 ## Maintenance
 
 When cache behavior changes:
-
 1. Update the relevant test matrix rows in the plan.
 2. Update the scripts only for behavior the harness can verify directly.
 3. Keep report naming generic and per-session.
 4. Keep clean-build checks strict.
 5. Remove obsolete scenarios instead of hiding them behind exclusions.
-
-Avoid timing-only assertions. Prefer metrics, response fields, and log evidence. Use `--log-verbosity 5` for tests that inspect diagnostics.
+6. Avoid timing-only assertions. Prefer metrics, response fields, and log evidence. Use `--log-verbosity 5` for tests that inspect diagnostics.

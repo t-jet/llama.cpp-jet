@@ -1,0 +1,94 @@
+=== cl ===
+Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36246 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+usage: cl [ option... ] filename... [ /link linkoption... ]
+=== clang ===
+clang version 20.1.8
+Target: x86_64-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\x64\bin
+=== clang-cl ===
+clang version 20.1.8
+Target: x86_64-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\x64\bin
+=== llvm-profdata ===
+LLVM (http://llvm.org/):
+  LLVM version 20.1.8
+  Optimized build.
+=== llvm-cov ===
+LLVM (http://llvm.org/):
+  LLVM version 20.1.8
+  Optimized build.
+=== cmake ===
+cmake version 4.3.2
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+=== ninja ===
+1.13.0.git.kitware.jobserver-pipe-1
+=== k6 ===
+k6.exe v2.0.0-rc1 (commit/fb943a6a80, go1.26.2, windows/amd64)
+=== python ===
+Python 3.11.9
+=== matplotlib ===
+3.10.9
+=== OpenCppCoverage ===
+unrecognised option '--version'
+OpenCppCoverage Version: 0.9.9.0
+
+Usage: [options] -- program_to_run optional_arguments:
+
+Command line only:
+  -v [ --verbose ]                  Verbose mode.
+  -q [ --quiet ]                    Quiet mode.
+  -h [ --help ]                     Show help message.
+  --config_file arg                 Filename of a configuration file.
+
+Command line and configuration file:
+  --modules arg (=*)                The pattern that module's paths should 
+                                    match. Can have multiple occurrences.
+  --excluded_modules arg            The pattern that module's paths should NOT 
+                                    match. Can have multiple occurrences.
+  --sources arg (=*)                The pattern that source's paths should 
+                                    match. Can have multiple occurrences.
+  --excluded_sources arg            The pattern that source's paths should NOT 
+                                    match. Can have multiple occurrences.
+  --input_coverage arg              A output path of export_type=binary. This 
+                                    coverage data will be merged with the 
+                                    current one. Can have multiple occurrences.
+  --working_dir arg                 The program working directory.
+  --cover_children                  Enable code coverage for children 
+                                    processes.
+  --no_aggregate_by_file            Do not aggregate coverage for same file 
+                                    path.
+  --stop_on_assert                  Do not continue after DebugBreak() or 
+                                    assert().
+  --unified_diff arg                Format: <unifiedDiffPath>?<rootFolder>
+                                    <unifiedDiffPath> path of the unified diff 
+                                    file. Git users can use git diff output.
+                                    <rootFolder> (optional) root folder for 
+                                    paths in the diff file.
+                                    See documentation for limitations.
+  --continue_after_cpp_exception    Try to continue after throwing a C++ 
+                                    exception.
+  --optimized_build                 Enable heuristics to support optimized 
+                                    build. See documentation for restrictions.
+  --excluded_line_regex arg         Exclude all lines match the regular 
+                                    expression. Regular expression must match 
+                                    the whole line.
+  --substitute_pdb_source_path arg  Substitute the starting path defined in the
+                                    pdb by a local path.
+                                    Format: <pdbStartPath>?<localPath>. Can 
+                                    have multiple occurrences.
+  --export_type arg (=html)         Format: <exportType>[:<parameter>].
+                                    <exportType> can be:
+                                       html: output folder (optional)
+                                       cobertura: output file (optional)
+                                       binary: output file (optional)
+                                    Example: html:MyFolder\MySubFolder
+                                    This flag can have multiple occurrences.
+
+=== git-head ===
+d4ac73a3be31a5e13959ef500ee9529c7c900920
+

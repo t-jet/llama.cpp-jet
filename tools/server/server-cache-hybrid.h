@@ -570,6 +570,12 @@ private:
     size_t n_checkpoint_restore_failures = 0;
     std::map<std::string, size_t> n_checkpoint_hits_by_shape;
     std::map<std::string, size_t> n_checkpoint_restores_by_shape;
+    std::map<std::string, size_t> n_stage10_exact_restores_by_shape;
+    std::map<std::string, size_t> n_stage10_payload_transitions_by_shape;
+    std::map<std::string, size_t> n_stage10_payload_evictions_by_shape;
+    std::map<std::string, size_t> n_stage10_protected_root_decisions_by_shape;
+    std::map<std::string, size_t> n_stage10_fallback_restores_by_shape;
+    std::map<std::string, size_t> n_stage10_diagnostics_by_shape;
     size_t n_workload_profile_plain = 0;
     size_t n_workload_profile_checkpoint_dependent = 0;
     size_t n_workload_profile_unsupported = 0;
@@ -704,6 +710,12 @@ private:
     void record_workload_profile(cache_workload_profile profile);
     void record_checkpoint_hit(const payload_descriptor & descriptor);
     void record_checkpoint_restore(const payload_descriptor & descriptor, bool success);
+    void record_exact_restore(const payload_descriptor & descriptor, const char * result, const char * reason);
+    void record_payload_transition(const char * operation, const payload_descriptor & descriptor, const char * result, const char * reason);
+    void record_payload_eviction(const payload_descriptor & descriptor, const char * result, const char * reason);
+    void record_protected_root_decision(const char * decision, const char * pressure_source, const char * result, const char * reason);
+    void record_fallback_restore(const char * strategy, payload_kind kind, cache_workload_profile profile, const char * result, const char * reason);
+    void record_stage10_diagnostic(const char * event, const char * result, const char * reason, const payload_descriptor * descriptor = nullptr);
 
     // Check if entry should be protected from eviction
     bool should_protect(const hybrid_cache_entry & entry) const;

@@ -1,0 +1,82 @@
+warning: no usable GPU found, --gpu-layers option will be ignored
+warning: one possible reason is that llama.cpp was compiled without GPU support
+warning: consult docs/build.md for compilation instructions
+0.00.006.029 I log_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.006.032 I device_info:
+0.00.006.036 I   - CPU     : AMD Ryzen 9 7900X 12-Core Processor             (63124 MiB, 30614 MiB free)
+0.00.006.062 I system_info: n_threads = 12 (n_threads_batch = 12) / 24 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | AVX512 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+0.00.006.098 I srv          init: using 23 threads for HTTP server
+0.00.006.172 I srv         start: binding port with default address family
+0.00.014.257 I srv  llama_server: loading model
+0.00.014.271 I srv    load_model: loading model 'D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf'
+0.00.014.325 I common_init_result: fitting params to device memory ...
+0.00.014.325 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.00.014.326 I common_init_result: getting device memory data for MTP context overhead ...
+0.00.421.865 I common_init_result: MTP context host overhead = 527 MiB (added to fit margin)
+0.00.856.758 I common_params_fit_impl: projected to use 2172 MiB of host memory vs. 63124 MiB of total host memory
+0.02.759.048 W llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+0.02.827.930 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+0.03.153.668 I srv    load_model: creating MTP draft context against the target model 'D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf'
+0.03.153.726 W llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+0.03.182.280 I srv    load_model: initializing slots, n_slots = 1
+0.03.306.046 I common_context_can_seq_rm: the context supports bounded partial sequence removal
+0.03.314.591 I common_speculative_impl_draft_mtp: adding speculative implementation 'draft-mtp'
+0.03.314.597 I common_speculative_impl_draft_mtp: - n_max=3, n_min=0, p_min=0.00, n_embd=2560, backend_sampling=1
+0.03.314.599 I common_speculative_impl_draft_mtp: - gpu_layers=-1, cache_k=f16, cache_v=f16, ctx_tgt=yes, ctx_dft=yes, devices=[default]
+0.03.314.723 I srv    load_model: speculative decoding context initialized
+0.03.314.723 I slot   load_model: id  0 | task -1 | new slot, n_ctx = 8192
+0.03.314.792 I srv    load_model: prompt cache is enabled, size limit: 512 MiB
+0.03.314.793 I srv    load_model: use `--cache-ram 0` to disable the prompt cache
+0.03.314.801 I srv    load_model: cache mode: hybrid (LRU, non-destructive hits)
+0.03.314.801 I srv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391
+0.03.314.824 W srv          init: --cache-idle-slots requires --kv-unified, disabling
+0.03.334.163 I init: chat template, example_format: '<|im_start|>system
+You are a helpful assistant<|im_end|>
+<|im_start|>user
+Hello<|im_end|>
+<|im_start|>assistant
+Hi there<|im_end|>
+<|im_start|>user
+How are you?<|im_end|>
+<|im_start|>assistant
+<think>
+'
+0.03.347.210 I srv          init: init: chat template, thinking = 1
+0.03.347.225 I srv  llama_server: model loaded
+0.03.347.227 I srv  llama_server: server is listening on http://127.0.0.1:8185
+0.03.347.240 I srv  update_slots: all slots are idle
+0.03.491.219 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.03.491.225 I srv  get_availabl:  - hybrid cache: attempting non-destructive restore
+0.03.491.268 I srv  try_restore_:  - hybrid cache: try_restore - no exact match found
+0.03.491.278 I srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 512.000 MiB payload, 8192 tokens)
+0.03.491.279 I srv  get_availabl: prompt cache update took 0.05 ms
+0.03.491.294 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.04.256.479 I slot create_check: id  0 | task 0 | created context checkpoint 1 of 32 (pos_min = 83, pos_max = 83, n_tokens = 84, size = 50.580 MiB)
+0.07.955.068 I slot print_timing: id  0 | task 0 | prompt eval time =     896.07 ms /    88 tokens (   10.18 ms per token,    98.21 tokens per second)
+0.07.955.076 I slot print_timing: id  0 | task 0 |        eval time =    3567.66 ms /    64 tokens (   55.74 ms per token,    17.94 tokens per second)
+0.07.955.077 I slot print_timing: id  0 | task 0 |       total time =    4463.74 ms /   152 tokens
+0.07.955.077 I slot print_timing: id  0 | task 0 |    graphs reused =         22
+0.07.955.079 I slot print_timing: id  0 | task 0 | draft acceptance = 0.63077 (   41 accepted /    65 generated)
+0.07.955.101 I statistics        draft-mtp: #calls(b,g,a) =    1     22     22, #gen drafts =     22, #acc drafts =    22, #gen tokens =     65, #acc tokens =    41, dur(b,g,a) = 0.001, 762.203, 0.038 ms
+0.07.955.199 I srv     save_slot:  - hybrid cache: saving slot 0 with 151 tokens, state size = 55.565 MiB (tgt: 54.972, dft: 0.593)
+0.08.157.333 W srv     save_slot:  - hybrid cache: checkpoint admission skipped (missing checkpoint boundary metadata)
+0.08.157.339 I srv     save_slot:  - hybrid cache: successfully saved slot 0 (namespace: 3994361825257750437, entries: 1)
+0.08.157.347 I srv        update:  - hybrid cache state: 1 entries, 55.565 MiB payload, 106.146 MiB total, 151 tokens (limits: 512.000 MiB payload, 8192 tokens)
+0.08.157.348 I slot      release: id  0 | task 0 | stop processing: n_tokens = 151, truncated = 0
+0.08.157.361 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = 7300581
+0.08.157.361 I srv  get_availabl:  - hybrid cache: attempting non-destructive restore
+0.08.157.392 I srv  try_restore_:  - hybrid cache: try_restore - no exact match found
+0.08.157.392 I srv  get_availabl:  - hybrid cache: no match found, clearing slot
+0.08.157.393 I slot prompt_clear: id  0 | task -1 | clearing prompt with 151 tokens
+0.08.157.429 I srv        update:  - hybrid cache state: 1 entries, 55.565 MiB payload, 106.146 MiB total, 151 tokens (limits: 512.000 MiB payload, 8192 tokens)
+0.08.157.430 I srv  get_availabl: prompt cache update took 0.07 ms
+0.08.157.616 I slot launch_slot_: id  0 | task 25 | processing task, is_child = 0
+0.08.157.624 W slot update_slots: id  0 | task 25 | erased invalidated context checkpoint (pos_min = 83, pos_max = 83, n_tokens = 84, n_swa = 0, pos_next = 0, size = 50.580 MiB)
+0.09.113.853 I slot create_check: id  0 | task 25 | created context checkpoint 1 of 32 (pos_min = 107, pos_max = 107, n_tokens = 108, size = 50.675 MiB)
+0.15.089.636 I slot print_timing: id  0 | task 25 | prompt eval time =    1086.76 ms /   112 tokens (    9.70 ms per token,   103.06 tokens per second)
+0.15.089.642 I slot print_timing: id  0 | task 25 |        eval time =    5828.25 ms /    96 tokens (   60.71 ms per token,    16.47 tokens per second)
+0.15.089.643 I slot print_timing: id  0 | task 25 |       total time =    6915.01 ms /   208 tokens
+0.15.089.644 I slot print_timing: id  0 | task 25 |    graphs reused =         57
+0.15.089.645 I slot print_timing: id  0 | task 25 | draft acceptance = 0.56190 (   59 accepted /   105 generated)
+0.15.089.661 I statistics        draft-mtp: #calls(b,g,a) =    2     57     57, #gen drafts =     57, #acc drafts =    57, #gen tokens =    170, #acc tokens =   100, dur(b,g,a) = 0.002, 1960.284, 0.087 ms
+0.15.089.744 I srv     save_slot:  - hybrid cache: saving slot 0 with 207 tokens, state size = 57.536 MiB (tgt: 56.723, dft: 0.813)

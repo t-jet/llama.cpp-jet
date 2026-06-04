@@ -5,6 +5,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -17,35 +18,42 @@ bool server_cache_store_cold::configure(const std::string & root_path, uint8_t f
         return false;
     }
 
-    // Normalize the path
     std::error_code ec;
-    fs::path normalized = fs::weakly_canonical(fs::path(root_path), ec);
+    fs::path normalized = fs::weakly_canonical(fs::absolute(fs::path(root_path), ec), ec);
     if (ec) {
-        SRV_ERR(" - cold store: configure failed: cannot normalize path '%s': %s\n",
-                root_path.c_str(), ec.message().c_str());
+        SRV_ERR(" - cold store: configure failed: cannot normalize root path: %s\n",
+                ec.message().c_str());
         return false;
     }
 
-    // Check that the path exists and is a directory
     if (!fs::exists(normalized)) {
-        SRV_ERR(" - cold store: configure failed: path does not exist: '%s'\n",
-                normalized.string().c_str());
+        SRV_ERR("%s", " - cold store: configure failed: root path does not exist\n");
         return false;
     }
 
     if (!fs::is_directory(normalized)) {
-        SRV_ERR(" - cold store: configure failed: path is not a directory: '%s'\n",
-                normalized.string().c_str());
+        SRV_ERR("%s", " - cold store: configure failed: root path is not a directory\n");
         return false;
     }
 
-    // Check that the directory is writable by creating and removing a test file
+    if (!normalized.is_absolute() || normalized == normalized.root_path()) {
+        SRV_ERR("%s", " - cold store: configure failed: root path is not an allowed cache directory\n");
+        return false;
+    }
+
+    const std::string normalized_string = normalized.string();
+    if (normalized_string.find('\n') != std::string::npos ||
+        normalized_string.find('\r') != std::string::npos ||
+        normalized_string.find('\0') != std::string::npos) {
+        SRV_ERR("%s", " - cold store: configure failed: root path contains an unsafe control character\n");
+        return false;
+    }
+
     fs::path test_file = normalized / ".cold_store_write_test";
     {
         std::ofstream ofs(test_file.string());
         if (!ofs.is_open()) {
-            SRV_ERR(" - cold store: configure failed: directory is not writable: '%s'\n",
-                    normalized.string().c_str());
+            SRV_ERR("%s", " - cold store: configure failed: root directory is not writable\n");
             return false;
         }
         ofs << "test";
@@ -60,20 +68,18 @@ bool server_cache_store_cold::configure(const std::string & root_path, uint8_t f
     try {
         auto perms = fs::status(normalized).permissions();
         if ((perms & fs::perms::others_write) != fs::perms::none) {
-            SRV_WRN(" - cold store: root directory is world-writable: '%s' (consider restricting permissions)\n",
-                     normalized.string().c_str());
+            SRV_WRN("%s", " - cold store: root directory is world-writable; consider restricting permissions\n");
         }
     } catch (...) {
-        // Ignore permission check failures
     }
 #endif
 
-    root_path_ = normalized.string();
+    root_path_ = normalized_string;
     format_version_ = format_version;
     configured_ = true;
 
-    SRV_INF(" - cold store: configured with root path '%s', format version %d\n",
-            root_path_.c_str(), static_cast<int>(format_version_));
+    SRV_INF(" - cold store: configured root '%s', format version %d\n",
+            diagnostic_root().c_str(), static_cast<int>(format_version_));
 
     return true;
 }
@@ -107,21 +113,18 @@ cold_ref server_cache_store_cold::write(uint64_t payload_id,
     // Compute header checksum over all fields except header_checksum itself
     header.header_checksum = compute_header_checksum(header);
 
-    // Derive file paths
     std::string staging = staging_path(payload_id);
     std::string final = final_path(payload_id);
 
-    // Validate paths for traversal
     if (!validate_path(staging) || !validate_path(final)) {
-        SRV_ERR(" - cold store: write failed: path traversal detected for payload_id %" PRIu64 "\n", payload_id);
+        SRV_ERR(" - cold store: write failed: payload path escaped root (payload_id=%" PRIu64 ")\n", payload_id);
         return 0;
     }
 
-    // Write staging file
     std::ofstream ofs(staging, std::ios::binary | std::ios::trunc);
     if (!ofs.is_open()) {
-        SRV_ERR(" - cold store: write failed: cannot create staging file '%s' for payload_id %" PRIu64 "\n",
-                staging.c_str(), payload_id);
+        SRV_ERR(" - cold store: write failed: cannot create staging file (payload_id=%" PRIu64 ")\n",
+                payload_id);
         return 0;
     }
 
@@ -166,7 +169,7 @@ cold_ref server_cache_store_cold::write(uint64_t payload_id,
     std::error_code ec;
     fs::rename(staging, final, ec);
     if (ec) {
-        SRV_ERR(" - cold store: write failed: cannot rename staging file to final path for payload_id %" PRIu64 ": %s\n",
+        SRV_ERR(" - cold store: write failed: cannot rename staging file (payload_id=%" PRIu64 "): %s\n",
                 payload_id, ec.message().c_str());
         fs::remove(staging, ec);
         return 0;
@@ -201,15 +204,13 @@ bool server_cache_store_cold::read(cold_ref ref,
 
     std::string path = ref_to_path(ref);
     if (!validate_path(path)) {
-        SRV_ERR(" - cold store: read failed: path traversal detected for ref %" PRIu64 "\n", ref);
+        SRV_ERR(" - cold store: read failed: payload path escaped root (ref=%" PRIu64 ")\n", ref);
         return false;
     }
 
-    // Open the file
     std::ifstream ifs(path, std::ios::binary | std::ios::ate);
     if (!ifs.is_open()) {
-        SRV_ERR(" - cold store: read failed: cannot open file '%s' for ref %" PRIu64 "\n",
-                path.c_str(), ref);
+        SRV_ERR(" - cold store: read failed: cannot open cold file (ref=%" PRIu64 ")\n", ref);
         return false;
     }
 
@@ -379,7 +380,7 @@ bool server_cache_store_cold::remove(cold_ref ref) {
 
     std::string path = ref_to_path(ref);
     if (!validate_path(path)) {
-        SRV_ERR(" - cold store: remove failed: path traversal detected for ref %" PRIu64 "\n", ref);
+        SRV_ERR(" - cold store: remove failed: payload path escaped root (ref=%" PRIu64 ")\n", ref);
         return false;
     }
 
@@ -391,8 +392,8 @@ bool server_cache_store_cold::remove(cold_ref ref) {
 
     bool removed = fs::remove(path, ec);
     if (ec || !removed) {
-        SRV_WRN(" - cold store: remove failed: cannot delete file '%s' for ref %" PRIu64 ": %s\n",
-                path.c_str(), ref, ec.message().c_str());
+        SRV_WRN(" - cold store: remove failed: cannot delete cold file (ref=%" PRIu64 "): %s\n",
+                ref, ec.message().c_str());
         return false;
     }
 
@@ -407,7 +408,12 @@ size_t server_cache_store_cold::delete_ids(const std::unordered_set<uint64_t> & 
 
     size_t deleted = 0;
     for (uint64_t id : ids) {
-        if (remove(id)) {
+        // Per the header contract, ids that do not exist are silently skipped and
+        // must not be counted. remove() is idempotent and returns true for
+        // non-existent files, so check fs::exists() first to honor the contract.
+        std::string path = ref_to_path(id);
+        std::error_code ec;
+        if (fs::exists(path, ec) && remove(id)) {
             deleted++;
         }
     }
@@ -415,12 +421,9 @@ size_t server_cache_store_cold::delete_ids(const std::unordered_set<uint64_t> & 
 }
 
 std::string server_cache_store_cold::final_path(uint64_t payload_id) const {
-    // Hex-encode the payload_id for the filename
     std::stringstream ss;
-    ss << root_path_ << "/";
-    ss << std::hex << payload_id;
-    ss << ".cold";
-    return ss.str();
+    ss << std::hex << payload_id << ".cold";
+    return (fs::path(root_path_) / ss.str()).string();
 }
 
 std::string server_cache_store_cold::staging_path(uint64_t payload_id) const {
@@ -432,11 +435,69 @@ std::string server_cache_store_cold::ref_to_path(cold_ref ref) const {
 }
 
 bool server_cache_store_cold::validate_path(const std::string & path) const {
-    // Reject path traversal sequences
-    if (path.find("..") != std::string::npos) {
+    if (!configured_ || path.empty()) {
         return false;
     }
-    return true;
+    if (path.find('\n') != std::string::npos ||
+        path.find('\r') != std::string::npos ||
+        path.find('\0') != std::string::npos) {
+        return false;
+    }
+
+    std::error_code ec;
+    fs::path absolute_path = fs::absolute(fs::path(path), ec);
+    if (ec) {
+        return false;
+    }
+    return path_is_under_root(absolute_path);
+}
+
+bool server_cache_store_cold::path_is_under_root(const fs::path & path) const {
+    std::error_code ec;
+    const fs::path root = fs::weakly_canonical(fs::path(root_path_), ec);
+    if (ec) {
+        return false;
+    }
+
+    fs::path normalized = fs::weakly_canonical(path, ec);
+    if (ec) {
+        normalized = fs::absolute(path, ec);
+        if (ec) {
+            return false;
+        }
+        normalized = normalized.lexically_normal();
+    }
+
+#ifdef _WIN32
+    std::string root_string = root.lexically_normal().string();
+    std::string path_string = normalized.lexically_normal().string();
+    std::transform(root_string.begin(), root_string.end(), root_string.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(path_string.begin(), path_string.end(), path_string.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#else
+    const std::string root_string = root.lexically_normal().string();
+    const std::string path_string = normalized.lexically_normal().string();
+#endif
+
+    if (path_string == root_string) {
+        return true;
+    }
+    const std::string separator(1, fs::path::preferred_separator);
+    std::string root_prefix = root_string;
+    if (!root_prefix.empty() && root_prefix.back() != fs::path::preferred_separator) {
+        root_prefix += separator;
+    }
+    return path_string.rfind(root_prefix, 0) == 0;
+}
+
+std::string server_cache_store_cold::diagnostic_root() const {
+    if (root_path_.empty()) {
+        return "unconfigured";
+    }
+    const fs::path root(root_path_);
+    const std::string leaf = root.filename().string();
+    return leaf.empty() ? "configured" : leaf;
 }
 
 uint64_t server_cache_store_cold::fnv1a_checksum(const uint8_t * data, size_t len) {

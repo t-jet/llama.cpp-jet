@@ -1790,6 +1790,10 @@ Note that the following endpoints are exempt from being considered as incoming t
 
 ## More examples
 
+Hybrid cache operator notes, including `--cache-mode hybrid`, cold-store setup,
+metrics, diagnostics, benchmark evidence, and security limits, are in
+[hybrid-cache.md](hybrid-cache.md).
+
 ### Interactive mode
 
 Check the sample in [chat.mjs](chat.mjs).

@@ -50,6 +50,16 @@ Action:
 
 - Do classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage; for model-backed rows, verify that the run created the required precondition metrics or logs before calling it a product bug, and update the stage implementation status with the exact next gate action.
 
+## Improvement: Cross-reference same-day QA follow-up sessions
+
+Condition:
+
+- When writing a Developer test-results review on a QA execution report and a follow-up QA automation/fix session is already in the same workspace on the same day
+
+Action:
+
+- Do scan the test_reports directory for the next-suffix same-day report before delivering the verdict, and reference the follow-up session in the per-row review where its reusable scripts already address the FAIL/BLOCKED rows, so the Manager gate decision sees both the original blocker and the in-flight fix; don't duplicate the follow-up's work, and don't escalate the original report's blockers as Developer fix sessions when the follow-up QA session already owns the harness or script gap.
+
 ## Improvement: Replace stale test-report references
 
 Condition:
@@ -79,6 +89,16 @@ Condition:
 Action:
 
 - Do check `netsh interface ipv4 show excludedportrange protocol=tcp` or use a known unreserved port range before treating bind failures as product behavior.
+
+## Improvement: --metrics flag required for cache_checkpoint_* verification probes
+
+Condition:
+
+- When probing llama-server public /metrics for cache_checkpoint_* (or any cache controller) rows on a stage-10 closure contract, and the prior probe scripts or test plan steps omit --metrics from the server start command
+
+Action:
+
+- Do include --metrics in the Start-Process ArgumentList before launching the server; the /metrics endpoint returns 501 not_supported_error without it, and an empty or 0-row body looks like a product bug rather than a missing flag. Verify the flag is present by checking for the 501 error in the first probe run and re-launching with --metrics added before escalating to focused-substitute evidence.
 
 ## Improvement: Hybrid restore timing triage
 
@@ -118,7 +138,7 @@ Condition:
 
 Action:
 
-- Do inspect the resulting diff for unnecessary line-ending churn and, if the patch changed unrelated lines only because of newline normalization, correct that before handoff.
+- Do inspect the resulting diff and newline counts for unnecessary line-ending churn; if a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff.
 
 ## Improvement: Update indexes before mutable keys
 
@@ -138,7 +158,7 @@ Condition:
 
 Action:
 
-- Do build those targets sequentially or use one combined build command; don't launch parallel tool calls for separate MSBuild targets that can race on `ZERO_CHECK` state or shared object outputs.
+- Do build those targets sequentially or use one combined build command; don't launch parallel tool calls for separate MSBuild targets that can race on `ZERO_CHECK`, `server-context.obj`, or shared object outputs, because the failure can appear as compiler errors mixed with `Permission denied` on generated object files.
 
 ## Improvement: Scope whitespace checks in dirty worktrees
 
@@ -149,3 +169,33 @@ Condition:
 Action:
 
 - Do rerun `git diff --check -- <touched paths>` for the current task files and report both the scoped result and the unrelated global failure; don't fix unrelated whitespace unless the user asked for cleanup.
+
+## Improvement: Preserve blob line structure on Windows
+
+Condition:
+
+- When restoring or comparing a tracked file from a Git blob on Windows to repair a local edit or line-ending mistake
+
+Action:
+
+- Don't pipe `git show HEAD:path` through `Set-Content`, because PowerShell can collapse or rewrite line structure; use a binary-safe restore path or a direct Git/cmd redirect, then verify line counts and diff scope before continuing.
+
+## Improvement: Keep planning-only tasks evidence-scoped
+
+Condition:
+
+- When the user explicitly asks for implementation planning or docs only and says not to implement code
+
+Action:
+
+- Do verify the planning deliverables with document checks such as line counts, ASCII/plain-text scans, trailing-whitespace scans, and focused diffs; don't run build, test, benchmark, coverage, security, or QA execution as evidence unless the user opens that activity.
+
+## Improvement: Keep document index state aligned
+
+Condition:
+
+- When changing a durable planning document's gate state, review state, or handoff state in a documentation set that is linked from `._design_docs/document-index.md`
+
+Action:
+
+- Do check the matching document-index entry and update stale status or handoff wording in the same session; don't leave the index pointing to an already-corrected blocker or outdated next owner.

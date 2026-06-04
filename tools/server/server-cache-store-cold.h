@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -167,6 +168,8 @@ private:
 
     // Validate that a path does not contain traversal sequences
     bool validate_path(const std::string & path) const;
+    bool path_is_under_root(const std::filesystem::path & path) const;
+    std::string diagnostic_root() const;
 
     // Compute FNV-1a checksum (same algorithm as hybrid controller)
     static uint64_t fnv1a_checksum(const uint8_t * data, size_t len);

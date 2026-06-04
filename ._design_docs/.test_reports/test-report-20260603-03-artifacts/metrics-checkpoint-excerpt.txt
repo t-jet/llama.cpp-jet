@@ -1,0 +1,4 @@
+cache_checkpoint_restores_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none",result="none"} 0
+cache_checkpoint_hits_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none"} 0
+cache_checkpoint_admissions_total{mode="hybrid"} 0
+cache_checkpoint_admission_failures_total{mode="hybrid"} 0

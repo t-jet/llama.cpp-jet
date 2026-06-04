@@ -1,5 +1,13 @@
 # Architect improvement memory
 
+## Improvement: Coverage denominator rate vs XML root rate
+
+Condition:
+- When reviewing a T114 (or similar coverage-threshold) verdict where the QA report cites a Cobertura XML root `line-rate` attribute as the combined rate for a filtered denominator
+
+Action:
+- Do verify that the cited rate is from the script's filtered-denominator output (e.g., the `coverage-report.md` combined result row), not the XML root attributes; the XML root rate covers all files the tool tracked and is almost always lower than the filtered-denominator rate; estimate the true denominator rate from the per-file table before deciding whether a bug-fix loop is warranted; don't open or validate a bug-fix loop based solely on a rate computed with the wrong denominator
+
 ## Improvement: Test-plan review evidence-source consistency
 
 Condition:
@@ -22,7 +30,15 @@ Condition:
 - When an architecture, design, implementation-plan, implementation evidence, or re-review deliverable changes a gate state or closes an earlier finding, or when current entry docs still carry stale limitation, owner, or handoff wording
 
 Action:
-- Do check the live entry documents, active fix reports, `document-index.md` summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files first, distinguish historical quoted findings from current contradictions, then keep durable gate-status locations in the same state, such as reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, or blocked; don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, or not-started wording after a gate has advanced or while an open finding remains
+- Do check the live entry documents, active fix reports, correction-evidence status lines, `document-index.md` summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching, distinguish historical quoted findings from current contradictions, then keep durable gate-status locations in the same state, such as reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked; don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after a gate has advanced or while an open finding remains
+
+## Improvement: Misconfigured-probe diagnosis vs product bug
+
+Condition:
+- When writing architectural fix instructions for a BLOCKED fixture-dependent row (e.g., public /metrics row that showed zero) where the fixture is capable but the probe was misconfigured
+
+Action:
+- Do trace the probe start command against the design-required flags (cache-mode, spec-type, cache-ram, etc.) and the server stdout/stderr to confirm whether the failure is a misconfiguration or a product bug; specify the corrected start command with exact flag names from the parser source (e.g., common_speculative_type_to_str values); include a focused-substitute evidence path with the specific test function names and assertion points that cover the public-row check via get_stats() or focused exporter tests, so the Developer can either fix the probe or fall back to substitute evidence; don't leave the row in a generic BLOCKED state without the corrected start command or the substitute evidence citation
 
 ## Improvement: Changed paths for untracked review docs
 
@@ -30,7 +46,7 @@ Condition:
 - When adding or updating review part files in a document tree that is untracked or only partly tracked by git
 
 Action:
-- Do track the paths edited during the task, patch new review files, entry docs, and index rows as separate steps when the tree is dirty or untracked, verify their contents directly, separate task-local edits from pre-existing dirty paths, and report that task-local path list; don't rely on `git diff` or `git status` alone to prove what changed
+- Do track the paths edited during the task, patch new review files, entry docs, and index rows as separate steps when the tree is dirty or untracked, verify their contents directly, separate task-local edits from pre-existing dirty paths, and report that task-local path list; don't rely on `git diff` or `git status` alone to prove what changed; in particular, before declaring that a referenced doc was "not edited" or "not touched", run `git status -- <path>` and read the file's current contents to confirm whether any pre-existing uncommitted changes are in the tree, and report them as pre-existing rather than as own work
 
 ## Improvement: Code-review findings tied to approved docs
 
@@ -62,7 +78,7 @@ Condition:
 - When authoring a stage design for a subset of architecture requirements and the intake lists broad requirement ranges with later-stage subrequirements
 
 Action:
-- Do trace each relevant requirement or subrange as covered, constrained, or explicitly deferred in the persistent design; don't leave deferred subrequirements implied only by the scope section
+- Do expand each named contiguous requirement range into an explicit checklist before finishing, then trace every relevant requirement or subrange as covered, constrained, or explicitly deferred in the persistent design; don't skip standalone requirements inside a range or leave deferred subrequirements implied only by the scope section
 
 ## Improvement: Atomic-operation design reviews
 
@@ -100,6 +116,14 @@ Action:
 
 - Do trace each step's code changes to check that every member variable, function, or type referenced in the step's changes exists at the point that step's dependencies are satisfied; flag any case where a referenced symbol is only introduced in a later step as a blocking missing-dependency finding; don't assume numerical step order implies the correct dependency graph
 
+## Improvement: Coverage-method decisions in plan reviews
+
+Condition:
+- When reviewing an implementation plan whose approved design requires the coverage tool, metric type, command family, denominator, or exclusions to be defined before code work starts
+
+Action:
+- Do verify that the plan names the coverage tool and whether it provides branch or line coverage on the intended platform, not only the denominator or a later "select before implementation" placeholder; flag missing coverage-method selection as a blocking plan gap when the design made it a pre-code decision
+
 ## Improvement: Verify current state before applying review fixes
 
 Condition:
@@ -115,6 +139,14 @@ Condition:
 
 Action:
 - Do verify that each correction is implementable from the documented data model and does not pull deferred-stage behavior into the current stage without its required safety contract; don't limit the re-review to confirming that the old finding text disappeared
+
+## Improvement: Narrow re-reviews still update navigation state
+
+Condition:
+- When a task asks for a focused re-review of one prior finding and also says to update `document-index.md` only if materially needed
+
+Action:
+- Do keep the review finding scope narrow, but still update entry-doc contents, current gate text, stage-gate text, and any index row that would otherwise describe the old review state; don't leave stale REWORK, awaiting-review, or correction-drafted wording in durable navigation docs after a PASS re-review
 
 ## Improvement: One-gate stage design authoring
 
@@ -139,3 +171,35 @@ Condition:
 
 Action:
 - Do decide the implementation gate from the approved code contract and available substitute evidence, then carry missing runtime evidence as an explicit QA risk or next-owner item when it is not required to prove code correctness; don't keep a REWORK verdict solely because QA still needs fixture-backed confirmation
+
+## Improvement: Public exporter shape in observability reviews
+
+Condition:
+- When reviewing implementation evidence that claims metrics are complete through direct stats, JSON `get_stats()` rows, or focused controller tests, and the approved design requires public Prometheus or operator-visible metrics
+
+Action:
+- Do trace each claimed metric dimension through the public exporter and focused exporter tests; flag a blocker when the controller records required bounded labels but the public Prometheus row drops or renames them; don't accept direct stats as proof of public observability unless the approved evidence plan classifies that value as internal-only
+
+## Improvement: Closure sweep keeps durable docs aligned without re-running the report
+
+Condition:
+- When the Manager has closed a stage with documented reclassifications, BLOCKED items, or follow-up tasks, and the task is to apply that closure to durable design and implementation docs (entry doc, document index) rather than rewrite the test report
+
+Action:
+- Do update the entry-doc top-level Status line, current-gate paragraph, and stage-gate section to describe the closed-with-limitations state, link the executed test report, fixes handoff, and developer review from the entry doc, list follow-up tasks as setup/evidence requirements rather than accepted skips, and update document-index.md rows to reflect the executed test report and the closure decision; don't modify the test report body, evidence sections, or the test plan to record the specific outcome, don't add a closure section to a one-time manager gate handoff doc, and when the Manager explicitly authorizes the closure, do change the top-level Verdict line in the final test report from FAIL to PASS to match the closed state; don't drift into rewriting evidence narratives or removing prior failure-section headings that are accurate historical records
+
+## Improvement: Closure sweep preserves historical failure headings
+
+Condition:
+- When a closure sweep updates a stage implementation log that contains prior bug-fix loop or failed-attempt section headings dated earlier than the closure date
+
+Action:
+- Do keep those prior failure headings as-is when their body still accurately documents the earlier state, update only the most recent bug-fix loop heading that the closure actually closes, and add a new dated closure section after the loop that met the contracts; don't rewrite or remove historical failure headings to make the document look like the stage closed cleanly the first time, and don't rephrase prior closure-attempt headings to claim success when the user rejected them
+
+## Improvement: Verify test-report counts before applying closure text
+
+Condition:
+- When applying a closure sweep to durable design or implementation docs based on a test report, or when reviewing a Manager closure decision that reclassifies FAIL or BLOCKED rows before the bug-fix loop is complete
+
+Action:
+- Do check the test report's final PASS, FAIL, BLOCKED, and SKIP counts and the test plan's closure contracts (for example, coverage thresholds such as the 80% hybrid-path coverage rule, or rules against recording missing coverage or benchmark evidence as accepted skips) before applying closure-claim text to durable docs; if any row is FAIL or the plan forbids reclassifying the missing evidence as accepted, refuse to apply closure-claim text, flag the closure as premature, and link the test report evidence without claiming the stage is closed; do keep the test report discoverable, link it from the entry doc and document index, and record the real final counts; don't apply closure-claim text to durable docs just because the test report exists or because the test counts are real measurements, and don't rely on a reclassification that converts FAIL into BLOCKED-with-evidence to make a closure contract disappear

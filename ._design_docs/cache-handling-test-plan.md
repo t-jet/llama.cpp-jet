@@ -1,8 +1,8 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-06-01
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 9
+Last updated: 2026-06-02
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 10
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -52,7 +52,7 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, Stage 8, and Stage 9, read:
+Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, Stage 8, Stage 9, and Stage 10, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -88,6 +88,14 @@ Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 
 - [cache-handling-phase9-design/part-05-testability-traceability-exclusions-and-risks.md](./cache-handling-phase9-design/part-05-testability-traceability-exclusions-and-risks.md)
 - [cache-handling-phase9-implementation.md](./cache-handling-phase9-implementation.md)
 - [cache-handling-phase9-implementation/part-10-architect-implementation-re-review-20260601.md](./cache-handling-phase9-implementation/part-10-architect-implementation-re-review-20260601.md)
+- [cache-handling-phase10-design.md](./cache-handling-phase10-design.md)
+- [cache-handling-phase10-design/part-02-observability-security-and-hardening.md](./cache-handling-phase10-design/part-02-observability-security-and-hardening.md)
+- [cache-handling-phase10-design/part-03-validation-traceability-and-readiness.md](./cache-handling-phase10-design/part-03-validation-traceability-and-readiness.md)
+- [cache-handling-phase10-implementation.md](./cache-handling-phase10-implementation.md)
+- [cache-handling-phase10-implementation/part-06-implementation-evidence-20260602.md](./cache-handling-phase10-implementation/part-06-implementation-evidence-20260602.md)
+- [cache-handling-phase10-implementation/part-07-implementation-evidence-20260602-final.md](./cache-handling-phase10-implementation/part-07-implementation-evidence-20260602-final.md)
+- [cache-handling-phase10-implementation/part-09-s10-impl-01-correction-evidence.md](./cache-handling-phase10-implementation/part-09-s10-impl-01-correction-evidence.md)
+- [cache-handling-phase10-implementation/part-10-architect-implementation-re-review-gate.md](./cache-handling-phase10-implementation/part-10-architect-implementation-re-review-gate.md)
 
 ## Test coverage summary
 
@@ -102,6 +110,7 @@ The integration plan covers:
 - Stage 7 branch graph foundation, branch node lifecycle, namespace validation, slot references, checksum-assisted lookup, branch metadata RAM accounting and soft-limit diagnostics, global hot-payload LRU selection across namespaces, Stage 7 metrics, and Stage 1-6 regression with the forest-backed controller.
 - Stage 8 metadata-only retention, safe re-materialization planning, mismatch-parent handling, equivalent-branch deduplication, branch-metadata admission rejection, cold cleanup ownership, Stage 8 Prometheus metrics labels, and Stage 4-7 regression with metadata-only behavior enabled.
 - Stage 9 workload profile detection, checkpoint descriptor admission, checkpoint-first restore for checkpoint-dependent profiles, exact-first restore for plain transformers, target/draft checkpoint pair validation, checkpoint hot/cold residency, metrics labels, public boundary propagation, public `/metrics` evidence where possible, model-backed fixture rules, and Stage 4-8 regression after checkpoint integration.
+- Stage 10 observability metric shapes and escaping, bounded structured diagnostics, cold-store root and path hardening, startup validation, pressure and abuse handling, deterministic stress, 80% hybrid-path coverage evidence, benchmark evidence, operator documentation checks, security evidence, no marker-surface note, and Stage 4-9 regression after hardening.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -153,6 +162,12 @@ Implemented behavior that must be covered:
 - Workload profile is part of the Stage 9 cache namespace. Plain transformer workloads prefer exact blobs. Checkpoint-dependent workloads require checkpoint-bearing restore paths, reject exact-only candidates as canonical continuity, and use cold checkpoint promotion as an async miss before later reuse.
 - Checkpoint descriptors are validated with payload kind, pair state, version, size, checksum, owner, store reference, residency, namespace, and boundary metadata. Checkpoint target/draft payloads restore, demote, promote, evict, and account as one pair.
 - Stage 9 Prometheus metrics expose checkpoint hit and restore rows with `profile`, `payload_residency`, `pair_state`, and `result` labels without prompt text, marker strings, file paths, or serialized payload content.
+- Stage 10 Prometheus metrics expose bounded rows for exact restores, payload transitions, payload evictions, protected-root decisions, fallback restores, and structured diagnostics. Exact restores include `payload_kind`, `profile`, `pair_state`, `residency`, `result`, and `reason`. Payload transitions include `operation`, `payload_kind`, `pair_state`, `result`, and `reason`.
+- Prometheus label values escape backslash, quote, newline, and carriage return. Metric labels and diagnostics must not expose prompt text, marker text, paths, checksums, payload bytes, model paths, or serialized state.
+- Cold-store configuration uses canonical root containment, safe derived paths, sanitized diagnostics, and validation before file operations. Startup validation rejects impossible hybrid budgets and unsafe cold-store combinations.
+- Stage 10 pressure and abuse coverage includes tiny hot budgets, protected-root pressure, branch metadata pressure, large branch forests, queue pressure, shutdown with pending work, and repeated integrity failures.
+- No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
+- Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -171,6 +186,25 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 9: Stage 7 branch graph foundation](./cache-handling-test-plan/part-09-stage7-branch-graph-foundation.md)
 - [Part 10: Stage 8 metadata-only re-materialization](./cache-handling-test-plan/part-10-stage8-metadata-only-rematerialization.md)
 - [Part 11: Stage 9 checkpoint integration and workload profiles](./cache-handling-test-plan/part-11-stage9-checkpoint-integration.md)
+- [Part 12: Stage 10 observability, security, and hardening](./cache-handling-test-plan/part-12-stage10-observability-security-hardening.md)
+- [Part 13: T114 split: combined rate and product-only rate](./cache-handling-test-plan/part-13-t114-product-only-coverage.md)
+
+## T114 split (Stage 11 onward)
+
+From Stage 11 onward, the hybrid path coverage contract is split into
+two rows. T114 keeps the combined-rate rule of 80% on the 19-file
+hybrid-mode denominator. T114a adds a product-only rule of 70% on the
+11 product files named in the Architect review Finding B. Both rows
+are closure contracts, so a stage fails to close if either reports
+FAIL. The combined rate and the product-only rate are tracked
+separately, and test files in the denominator cannot mask production
+code gaps. The split rules, the product-only denominator list, the
+floor threshold, and the required `run_coverage.ps1` change are
+recorded in
+[Part 13: T114 split](./cache-handling-test-plan/part-13-t114-product-only-coverage.md).
+The Stage 10 closure record at
+[test-report-20260603-05.md](.test_reports/test-report-20260603-05.md)
+cites the T114 row only and is not affected by the split.
 
 ## Review reports
 
@@ -183,6 +217,8 @@ This document is split into smaller part files. Read the parts in order when you
 - [Stage 8 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-8-manager-test-plan-gate-20260601.md)
 - [Stage 9 test-plan review: 2026-06-01](./cache-handling-test-plan/stage-9-test-plan-review-20260601.md)
 - [Stage 9 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-9-manager-test-plan-gate-20260601.md)
+- [Stage 10 test-plan review: 2026-06-02](./cache-handling-test-plan/stage-10-test-plan-review-20260602.md)
+- [Stage 10 manager test-plan gate: 2026-06-02](./cache-handling-test-plan/stage-10-manager-test-plan-gate-20260602.md)
 
 ## Test scripts
 

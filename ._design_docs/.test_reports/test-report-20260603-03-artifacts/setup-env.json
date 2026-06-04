@@ -1,0 +1,88 @@
+{
+  "session_id": "test-report-20260603-03",
+  "date": "2026-06-03",
+  "tester": "QA agent",
+  "vsdevcmd_invocation": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\Tools\\vsdevcmd.bat\" -arch=x64 -host_arch=x64",
+  "llvm_path_prepend": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin",
+  "tools": {
+    "cl": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36246\\bin\\HostX64\\x64\\cl.exe",
+      "version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36246 for x64"
+    },
+    "cmake": {
+      "path": "C:\\Program Files\\CMake\\bin\\cmake.exe",
+      "version": "cmake version 4.3.2"
+    },
+    "ninja": {
+      "path": "(auto, from cmake 4.3.2)",
+      "version": "1.13.0.git.kitware.jobserver-pipe-1"
+    },
+    "clang": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang.exe",
+      "version": "clang version 20.1.8"
+    },
+    "clang-cl": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang-cl.exe",
+      "version": "clang version 20.1.8"
+    },
+    "llvm-profdata": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\llvm-profdata.exe",
+      "version": "LLVM version 20.1.8"
+    },
+    "llvm-cov": {
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\llvm-cov.exe",
+      "version": "LLVM version 20.1.8"
+    },
+    "k6": {
+      "path": "D:\\app\\k6\\k6.exe",
+      "version": "k6.exe v2.0.0-rc1 (commit/fb943a6a80, go1.26.2, windows/amd64)"
+    },
+    "python": {
+      "path": "D:\\app\\Python\\python.exe",
+      "version": "Python 3.11.9"
+    },
+    "matplotlib": {
+      "path": "(python -m matplotlib)",
+      "version": "3.10.9"
+    },
+    "pytest": {
+      "path": "(python -m pytest)",
+      "version": "8.3.5"
+    },
+    "OpenCppCoverage": {
+      "path": "D:\\app\\OpenCppCoverage\\OpenCppCoverage.exe",
+      "version": "OpenCppCoverage Version: 0.9.9.0"
+    }
+  },
+  "fixture": {
+    "model_path": "D:\\source\\llama.cpp-jet\\._test_models\\Qwen3-0.6B-GGUF\\Qwen3-0.6B-Q8_0.gguf",
+    "model_size_bytes": 639446688,
+    "type": "plain transformer (Qwen3-0.6B Q8_0)",
+    "note": "No checkpoint-dependent fixture available; T121 public checkpoint /metrics is BLOCKED."
+  },
+  "git": {
+    "commit": "d4ac73a3be31a5e13959ef500ee9529c7c900920",
+    "dirty": true,
+    "dirty_files": [
+      "M ._design_docs/cache-handling-test-plan.md",
+      "M ._design_docs/cache-handling-test-scripts/README.md",
+      "M ._design_docs/document-index.md",
+      "M .agents/skills/self-improvement/assets/architect.md",
+      "M .agents/skills/self-improvement/assets/developer.md",
+      "M .agents/skills/self-improvement/assets/manager.md",
+      "M .agents/skills/self-improvement/assets/qa.md",
+      "M tests/CMakeLists.txt",
+      "M tests/test-step10-metrics.cpp",
+      "M tools/server/README-dev.md",
+      "M tools/server/README.md",
+      "M tools/server/bench/README.md",
+      "M tools/server/server-cache-hybrid.cpp",
+      "M tools/server/server-cache-hybrid.h",
+      "M tools/server/server-cache-store-cold.cpp",
+      "M tools/server/server-cache-store-cold.h",
+      "M tools/server/server-context.cpp",
+      "M tools/server/server-context.h",
+      "M tools/server/tests/README.md"
+    ]
+  }
+}

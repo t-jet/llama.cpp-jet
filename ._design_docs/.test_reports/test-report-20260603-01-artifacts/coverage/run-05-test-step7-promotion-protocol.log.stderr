@@ -1,0 +1,57 @@
+srv  promote_payl:  - hybrid cache: promote_payload: payload_id 1 is not cold (residency=0)
+srv  promote_payl:  - hybrid cache: promote_payload: payload_id 1 is already promoting
+srv  promote_payl:  - hybrid cache: promote_payload: cold store not configured
+srv  promote_payl:  - hybrid cache: promote_payload: payload_id 1 is already promoting
+srv     configure:  - cold store: configured root 'step7_promotion_promoting_state', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 1
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_queue_full', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 2 (ref 2)
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 1
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 2
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_promotion_success', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 1
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_promotion_failure', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          read:  - cold store: read failed: cannot open cold file (ref=1)
+srv  process_prom:  - cold store I/O worker: promotion read failed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion failed for payload_id 1, marking evicted (failure_reason=2)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_draft_failure', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          read:  - cold store: validation failed: file too small for declared payload sizes (file 144, expected 160) for ref 1
+srv  process_prom:  - cold store I/O worker: promotion read failed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion failed for payload_id 1, marking evicted (failure_reason=2)
+srv          stop:  - cold store I/O worker: stopped
+srv  promote_payl:  - hybrid cache: promote_payload: descriptor not found for payload_id 999
+srv     configure:  - cold store: configured root 'step7_promotion_hot_bytes', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 1
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_multi_promotion', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 2 (ref 2)
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 1
+srv  handle_promo:  - hybrid cache: promotion completed for payload_id 2
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_cold_retained', format version 1
+srv         start:  - cold store I/O worker: started
+srv  handle_demot:  - hybrid cache: demotion completed for payload_id 1 (ref 1)
+srv          read:  - cold store: validation failed: target_checksum mismatch (expected 7709881547065884355, computed 11361782464735195036) for ref 1
+srv  process_prom:  - cold store I/O worker: promotion read failed for payload_id 1 (ref 1)
+srv  handle_promo:  - hybrid cache: promotion failed for payload_id 1, marking evicted (failure_reason=2)
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'step7_promotion_promoting_check', format version 1
+srv  promote_payl:  - hybrid cache: promote_payload: payload_id 1 is already promoting

@@ -306,6 +306,18 @@ target_include_directories(test-step10-metrics PRIVATE ${CMAKE_SOURCE_DIR}/tools
 target_compile_definitions(test-step10-metrics PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-step10-metrics)
 
+llama_build(test-stage10-cold-store-hardening.cpp)
+target_link_libraries(test-stage10-cold-store-hardening PRIVATE server-context)
+target_include_directories(test-stage10-cold-store-hardening PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+target_compile_definitions(test-stage10-cold-store-hardening PRIVATE LLAMA_SERVER_CACHE_TESTS)
+llama_test(test-stage10-cold-store-hardening)
+
+# test-stage10-policy-lru covers the Stage 10 LRU eviction policy module
+llama_build(test-stage10-policy-lru.cpp)
+target_link_libraries(test-stage10-policy-lru PRIVATE server-context)
+target_include_directories(test-stage10-policy-lru PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
+llama_test(test-stage10-policy-lru)
+
 # test-step11-test-hooks-fault-injection requires server-context library
 llama_build(test-step11-test-hooks-fault-injection.cpp get-model.cpp)
 target_link_libraries(test-step11-test-hooks-fault-injection PRIVATE server-context)

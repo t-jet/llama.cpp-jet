@@ -52,6 +52,92 @@ static const char * payload_pair_state_name(payload_pair_state pair_state) {
     return "unknown";
 }
 
+static const char * payload_kind_name(payload_kind kind) {
+    switch (kind) {
+        case payload_kind::exact_blob:
+            return "exact_blob";
+        case payload_kind::checkpoint:
+            return "checkpoint";
+    }
+    return "unknown";
+}
+
+static const char * io_failure_reason_name(io_failure_reason reason) {
+    switch (reason) {
+        case io_failure_reason::none:
+            return "none";
+        case io_failure_reason::queue_full:
+            return "queue_full";
+        case io_failure_reason::write_error:
+            return "write_error";
+        case io_failure_reason::read_error:
+            return "read_error";
+        case io_failure_reason::validation_magic_mismatch:
+            return "validation_magic_mismatch";
+        case io_failure_reason::validation_format_version_mismatch:
+            return "validation_format_version_mismatch";
+        case io_failure_reason::validation_header_checksum_mismatch:
+            return "validation_header_checksum_mismatch";
+        case io_failure_reason::validation_checksum_algorithm_mismatch:
+            return "validation_checksum_algorithm_mismatch";
+        case io_failure_reason::validation_payload_id_mismatch:
+            return "validation_payload_id_mismatch";
+        case io_failure_reason::validation_pair_state_mismatch:
+            return "validation_pair_state_mismatch";
+        case io_failure_reason::validation_target_size_mismatch:
+            return "validation_target_size_mismatch";
+        case io_failure_reason::validation_draft_size_mismatch:
+            return "validation_draft_size_mismatch";
+        case io_failure_reason::validation_target_checksum_mismatch:
+            return "validation_target_checksum_mismatch";
+        case io_failure_reason::validation_draft_checksum_mismatch:
+            return "validation_draft_checksum_mismatch";
+        case io_failure_reason::validation_file_not_found:
+            return "validation_file_not_found";
+        case io_failure_reason::validation_file_truncated:
+            return "validation_file_truncated";
+        case io_failure_reason::cancelled:
+            return "cancelled";
+    }
+    return "unknown";
+}
+
+static const char * bounded_reason_from_text(const std::string & reason) {
+    if (reason.find("draft") != std::string::npos || reason.find("pair") != std::string::npos ||
+        reason.find("runtime") != std::string::npos) {
+        return "pair_state";
+    }
+    if (reason.find("owner") != std::string::npos) {
+        return "owner";
+    }
+    if (reason.find("version") != std::string::npos) {
+        return "version";
+    }
+    if (reason.find("kind") != std::string::npos) {
+        return "kind";
+    }
+    if (reason.find("size") != std::string::npos) {
+        return "size";
+    }
+    if (reason.find("checksum") != std::string::npos || reason.find("boundary") != std::string::npos) {
+        return "checksum";
+    }
+    if (reason.find("residency") != std::string::npos || reason.find("hot") != std::string::npos ||
+        reason.find("cold") != std::string::npos) {
+        return "residency";
+    }
+    if (reason.find("metadata") != std::string::npos || reason.find("namespace") != std::string::npos) {
+        return "metadata";
+    }
+    if (reason.find("budget") != std::string::npos) {
+        return "budget";
+    }
+    if (reason.find("restore") != std::string::npos || reason.find("state") != std::string::npos) {
+        return "restore";
+    }
+    return "other";
+}
+
 static std::string checkpoint_metric_shape_key(const payload_descriptor & descriptor, const char * result = nullptr) {
     std::stringstream ss;
     ss << "profile=" << descriptor.workload_profile
@@ -59,6 +145,59 @@ static std::string checkpoint_metric_shape_key(const payload_descriptor & descri
        << "|pair_state=" << payload_pair_state_name(descriptor.pair_state);
     if (result) {
         ss << "|result=" << result;
+    }
+    return ss.str();
+}
+
+static std::string stage10_payload_shape_key(
+        const char * result,
+        const char * reason,
+        const payload_descriptor & descriptor,
+        const char * operation = nullptr) {
+    std::stringstream ss;
+    if (operation) {
+        ss << "operation=" << operation << "|";
+    }
+    ss << "payload_kind=" << payload_kind_name(descriptor.kind)
+       << "|pair_state=" << payload_pair_state_name(descriptor.pair_state)
+       << "|residency=" << payload_residency_name(descriptor.residency)
+       << "|profile=" << descriptor.workload_profile
+       << "|result=" << result
+       << "|reason=" << reason;
+    return ss.str();
+}
+
+static std::string stage10_fallback_shape_key(
+        const char * strategy,
+        payload_kind kind,
+        cache_workload_profile profile,
+        const char * result,
+        const char * reason) {
+    std::stringstream ss;
+    ss << "strategy=" << strategy
+       << "|payload_kind=" << payload_kind_name(kind)
+       << "|profile=" << cache_workload_profile_name(profile)
+       << "|result=" << result
+       << "|reason=" << reason;
+    return ss.str();
+}
+
+static std::string stage10_diagnostic_shape_key(
+        const char * event,
+        const char * result,
+        const char * reason,
+        const payload_descriptor * descriptor) {
+    std::stringstream ss;
+    ss << "event=" << event
+       << "|result=" << result
+       << "|reason=" << reason;
+    if (descriptor) {
+        ss << "|payload_kind=" << payload_kind_name(descriptor->kind)
+           << "|pair_state=" << payload_pair_state_name(descriptor->pair_state)
+           << "|residency=" << payload_residency_name(descriptor->residency)
+           << "|profile=" << descriptor->workload_profile;
+    } else {
+        ss << "|payload_kind=none|pair_state=none|residency=none|profile=none";
     }
     return ss.str();
 }
@@ -76,7 +215,7 @@ static uint64_t cache_token_span_checksum(const server_tokens & tokens, size_t t
     return hash;
 }
 
-static json checkpoint_shape_map_to_json(const std::map<std::string, size_t> & values) {
+static json metric_shape_map_to_json(const std::map<std::string, size_t> & values) {
     json result = json::array();
     for (const auto & item : values) {
         json row = json::object();
@@ -107,14 +246,22 @@ hybrid_cache_controller::hybrid_cache_controller(
     , ctx_tgt(ctx_tgt)
     , ctx_dft(ctx_dft)
 {
+    if (limit_size_mib < -1) {
+        SRV_ERR("%s", " - hybrid cache: invalid hot payload budget (reason=negative_size_limit)\n");
+        throw std::runtime_error("invalid hybrid cache hot payload budget");
+    }
+    if (limit_tokens == 1) {
+        SRV_ERR("%s", " - hybrid cache: invalid token budget (reason=too_small)\n");
+        throw std::runtime_error("invalid hybrid cache token budget");
+    }
     this->limit_size_unlimited = limit_size_mib < 0;
     this->limit_size = this->limit_size_unlimited ? 0 : 1024ull * 1024ull * limit_size_mib;
 
     // Configure cold store if path is provided
     if (!cold_path.empty()) {
         if (!cold_store.configure(cold_path, COLD_STORE_FORMAT_VERSION_1)) {
-            SRV_ERR(" - hybrid cache: cold store configuration failed for path '%s'\n", cold_path.c_str());
-            throw std::runtime_error("cold store configuration failed: " + cold_path);
+            SRV_ERR("%s", " - hybrid cache: cold store configuration failed\n");
+            throw std::runtime_error("cold store configuration failed");
         }
 
         // Wire the cold store to the I/O worker
@@ -126,7 +273,7 @@ hybrid_cache_controller::hybrid_cache_controller(
             throw std::runtime_error("cold store I/O worker thread start failed");
         }
 
-        SRV_INF(" - hybrid cache: cold store configured at '%s'\n", cold_path.c_str());
+        SRV_INF("%s", " - hybrid cache: cold store configured\n");
     }
 }
 
@@ -141,6 +288,7 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: demote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        record_stage10_diagnostic("demotion", "failure", "descriptor_not_found");
         return false;
     }
 
@@ -150,17 +298,23 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
     if (descriptor.residency != payload_residency_state::hot) {
         SRV_WRN(" - hybrid cache: demote_payload: payload_id %" PRIu64 " is not hot (residency=%d)\n",
                 payload_id, static_cast<int>(descriptor.residency));
+        record_payload_transition("demotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("demotion", "failure", "residency", &descriptor);
         return false;
     }
 
     if (!cold_store.is_configured()) {
         SRV_WRN(" - hybrid cache: demote_payload: cold store not configured\n%s", "");
+        record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
+        record_stage10_diagnostic("demotion", "failure", "cold_store_unconfigured", &descriptor);
         return false;
     }
 
     // Check for in-progress demotion
     if (descriptor.residency == payload_residency_state::demoting) {
         SRV_WRN(" - hybrid cache: demote_payload: payload_id %" PRIu64 " is already demoting\n", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "in_progress");
+        record_stage10_diagnostic("demotion", "failure", "in_progress", &descriptor);
         return false;
     }
 
@@ -168,6 +322,8 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
     auto record_it = hot_payloads.find(descriptor.store_ref.id);
     if (record_it == hot_payloads.end()) {
         SRV_ERR(" - hybrid cache: demote_payload: hot record not found for payload_id %" PRIu64 "\n", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "missing_payload");
+        record_stage10_diagnostic("descriptor_rejection", "failure", "missing_payload", &descriptor);
         return false;
     }
 
@@ -178,6 +334,8 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         if (record.draft.empty() || descriptor.draft_size_bytes == 0) {
             SRV_ERR(" - hybrid cache: demote_payload: target_and_draft descriptor missing draft for payload_id %" PRIu64 "\n",
                     payload_id);
+            record_payload_transition("demotion", descriptor, "failure", "pair_state");
+            record_stage10_diagnostic("descriptor_rejection", "failure", "pair_state", &descriptor);
             return false;
         }
     }
@@ -206,10 +364,13 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         // Queue full: revert to hot immediately (NB-2)
         descriptor.residency = payload_residency_state::hot;
         n_demotion_queue_full++;
+        record_payload_transition("demotion", descriptor, "failure", "queue_full");
+        record_stage10_diagnostic("queue_pressure", "failure", "demotion_queue_full", &descriptor);
         SRV_WRN(" - hybrid cache: demote_payload: queue full, reverting payload_id %" PRIu64 " to hot\n", payload_id);
         return false;
     }
 
+    record_payload_transition("demotion", descriptor, "queued", "none");
     SRV_DBG(" - hybrid cache: demote_payload: enqueued payload_id %" PRIu64 " for demotion\n", payload_id);
     return true;
 }
@@ -218,6 +379,7 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: promote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        record_stage10_diagnostic("promotion", "failure", "descriptor_not_found");
         return false;
     }
 
@@ -228,17 +390,23 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
     // promoting is a transient state that should produce a specific diagnostic)
     if (descriptor.residency == payload_residency_state::promoting) {
         SRV_WRN(" - hybrid cache: promote_payload: payload_id %" PRIu64 " is already promoting\n", payload_id);
+        record_payload_transition("promotion", descriptor, "failure", "in_progress");
+        record_stage10_diagnostic("promotion", "failure", "in_progress", &descriptor);
         return false;
     }
 
     if (descriptor.residency != payload_residency_state::cold) {
         SRV_WRN(" - hybrid cache: promote_payload: payload_id %" PRIu64 " is not cold (residency=%d)\n",
                 payload_id, static_cast<int>(descriptor.residency));
+        record_payload_transition("promotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("promotion", "failure", "residency", &descriptor);
         return false;
     }
 
     if (!cold_store.is_configured()) {
         SRV_WRN(" - hybrid cache: promote_payload: cold store not configured\n%s", "");
+        record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
+        record_stage10_diagnostic("promotion", "failure", "cold_store_unconfigured", &descriptor);
         return false;
     }
 
@@ -263,6 +431,8 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
         // Queue full: revert to cold immediately (NB-2)
         descriptor.residency = payload_residency_state::cold;
         n_promotion_queue_full++;
+        record_payload_transition("promotion", descriptor, "failure", "queue_full");
+        record_stage10_diagnostic("queue_pressure", "failure", "promotion_queue_full", &descriptor);
         SRV_WRN(" - hybrid cache: promote_payload: queue full, reverting payload_id %" PRIu64 " to cold\n", payload_id);
         return false;
     }
@@ -270,6 +440,7 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
     // Step 10: Record enqueue timestamp for latency tracking
     promotion_enqueue_time = std::chrono::steady_clock::now();
 
+    record_payload_transition("promotion", descriptor, "queued", "none");
     SRV_DBG(" - hybrid cache: promote_payload: enqueued payload_id %" PRIu64 " for promotion\n", payload_id);
     return true;
 }
@@ -294,6 +465,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: demotion completion: descriptor not found for payload_id %" PRIu64 "\n",
                 result.payload_id);
+        record_stage10_diagnostic("demotion_completion", "failure", "descriptor_not_found");
         return;
     }
 
@@ -303,6 +475,8 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
     if (descriptor.residency != payload_residency_state::demoting) {
         SRV_WRN(" - hybrid cache: demotion completion: payload_id %" PRIu64 " is not in demoting state (residency=%d)\n",
                 result.payload_id, static_cast<int>(descriptor.residency));
+        record_payload_transition("demotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("demotion_completion", "failure", "residency", &descriptor);
         return;
     }
 
@@ -316,6 +490,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
         n_cold_payload_count++;
         hot_payloads.erase(descriptor.payload_id);
         n_demotion_successes++;
+        record_payload_transition("demotion", descriptor, "success", "none");
         for (auto & entry : entries) {
             if (entry.payload_id == descriptor.payload_id || entry.checkpoint_payload_id == descriptor.payload_id) {
                 sync_branch_node_from_entry(entry);
@@ -338,6 +513,8 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
             // Hot bytes still exist: revert to hot (NB-5 pinning)
             descriptor.residency = payload_residency_state::hot;
             n_demotion_failures++;
+            record_payload_transition("demotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
+            record_stage10_diagnostic("demotion_completion", "failure", io_failure_reason_name(result.failure_reason), &descriptor);
             SRV_ERR(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", reverting to hot (failure_reason=%d)\n",
                     result.payload_id, static_cast<int>(result.failure_reason));
         } else {
@@ -351,6 +528,9 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
                 }
             }
             n_demotion_failures++;
+            record_payload_transition("demotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
+            record_payload_eviction(descriptor, "success", "demotion_failure");
+            record_stage10_diagnostic("demotion_completion", "failure", io_failure_reason_name(result.failure_reason), &descriptor);
             SRV_ERR(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", hot bytes gone, marking evicted (failure_reason=%d)\n",
                     result.payload_id, static_cast<int>(result.failure_reason));
         }
@@ -362,6 +542,7 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: promotion completion: descriptor not found for payload_id %" PRIu64 "\n",
                 result.payload_id);
+        record_stage10_diagnostic("promotion_completion", "failure", "descriptor_not_found");
         return;
     }
 
@@ -371,6 +552,8 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
     if (descriptor.residency != payload_residency_state::promoting) {
         SRV_WRN(" - hybrid cache: promotion completion: payload_id %" PRIu64 " is not in promoting state (residency=%d)\n",
                 result.payload_id, static_cast<int>(descriptor.residency));
+        record_payload_transition("promotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("promotion_completion", "failure", "residency", &descriptor);
         return;
     }
 
@@ -422,6 +605,7 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
             }
         }
         n_promotion_successes++;
+        record_payload_transition("promotion", descriptor, "success", "none");
 
         // Step 10: Update cold payload count (promotion removes from cold)
         if (n_cold_payload_count > 0) {
@@ -444,6 +628,9 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
             }
         }
         n_promotion_failures++;
+        record_payload_transition("promotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
+        record_payload_eviction(descriptor, "success", io_failure_reason_name(result.failure_reason));
+        record_stage10_diagnostic("promotion_completion", "failure", io_failure_reason_name(result.failure_reason), &descriptor);
 
         // Step 10: Track promotion failure reasons
         if (result.failure_reason == io_failure_reason::validation_target_checksum_mismatch ||
@@ -724,8 +911,14 @@ json hybrid_cache_controller::get_stats() const {
         {"cache_checkpoint_hits_total", n_checkpoint_hits},
         {"cache_checkpoint_restores_total", n_checkpoint_restore_successes},
         {"cache_checkpoint_restore_failures_total", n_checkpoint_restore_failures},
-        {"cache_checkpoint_hits_by_shape", checkpoint_shape_map_to_json(n_checkpoint_hits_by_shape)},
-        {"cache_checkpoint_restores_by_shape", checkpoint_shape_map_to_json(n_checkpoint_restores_by_shape)},
+        {"cache_checkpoint_hits_by_shape", metric_shape_map_to_json(n_checkpoint_hits_by_shape)},
+        {"cache_checkpoint_restores_by_shape", metric_shape_map_to_json(n_checkpoint_restores_by_shape)},
+        {"cache_exact_blob_restores_by_shape", metric_shape_map_to_json(n_stage10_exact_restores_by_shape)},
+        {"cache_payload_transitions_by_shape", metric_shape_map_to_json(n_stage10_payload_transitions_by_shape)},
+        {"cache_payload_evictions_by_shape", metric_shape_map_to_json(n_stage10_payload_evictions_by_shape)},
+        {"cache_protected_root_decisions_by_shape", metric_shape_map_to_json(n_stage10_protected_root_decisions_by_shape)},
+        {"cache_fallback_restores_by_shape", metric_shape_map_to_json(n_stage10_fallback_restores_by_shape)},
+        {"cache_structured_diagnostics_by_shape", metric_shape_map_to_json(n_stage10_diagnostics_by_shape)},
         {"cache_workload_profile_plain_transformer_total", n_workload_profile_plain},
         {"cache_workload_profile_checkpoint_dependent_total", n_workload_profile_checkpoint_dependent},
         {"cache_workload_profile_unsupported_total", n_workload_profile_unsupported},
@@ -831,6 +1024,8 @@ bool hybrid_cache_controller::debug_try_admit_entry_for_tests(
         if (protected_root) {
             n_protected_root_decisions++;
             n_protected_root_admission_rejections++;
+            record_protected_root_decision("admission_reject", "hot_budget", "failure", "budget");
+            record_stage10_diagnostic("protected_root_pressure", "failure", "budget");
         }
         return false;
     }
@@ -997,6 +1192,55 @@ void hybrid_cache_controller::record_checkpoint_restore(const payload_descriptor
         n_checkpoint_restore_failures++;
     }
     n_checkpoint_restores_by_shape[checkpoint_metric_shape_key(descriptor, success ? "success" : "failure")]++;
+}
+
+void hybrid_cache_controller::record_exact_restore(const payload_descriptor & descriptor, const char * result, const char * reason) {
+    n_stage10_exact_restores_by_shape[stage10_payload_shape_key(result, reason, descriptor)]++;
+}
+
+void hybrid_cache_controller::record_payload_transition(
+        const char * operation,
+        const payload_descriptor & descriptor,
+        const char * result,
+        const char * reason) {
+    n_stage10_payload_transitions_by_shape[stage10_payload_shape_key(result, reason, descriptor, operation)]++;
+}
+
+void hybrid_cache_controller::record_payload_eviction(
+        const payload_descriptor & descriptor,
+        const char * result,
+        const char * reason) {
+    n_stage10_payload_evictions_by_shape[stage10_payload_shape_key(result, reason, descriptor)]++;
+}
+
+void hybrid_cache_controller::record_protected_root_decision(
+        const char * decision,
+        const char * pressure_source,
+        const char * result,
+        const char * reason) {
+    std::stringstream ss;
+    ss << "decision=" << decision
+       << "|pressure_source=" << pressure_source
+       << "|result=" << result
+       << "|reason=" << reason;
+    n_stage10_protected_root_decisions_by_shape[ss.str()]++;
+}
+
+void hybrid_cache_controller::record_fallback_restore(
+        const char * strategy,
+        payload_kind kind,
+        cache_workload_profile profile,
+        const char * result,
+        const char * reason) {
+    n_stage10_fallback_restores_by_shape[stage10_fallback_shape_key(strategy, kind, profile, result, reason)]++;
+}
+
+void hybrid_cache_controller::record_stage10_diagnostic(
+        const char * event,
+        const char * result,
+        const char * reason,
+        const payload_descriptor * descriptor) {
+    n_stage10_diagnostics_by_shape[stage10_diagnostic_shape_key(event, result, reason, descriptor)]++;
 }
 
 uint64_t hybrid_cache_controller::entry_payload_id_for_kind(const hybrid_cache_entry & entry, payload_kind kind) const {
@@ -1890,12 +2134,15 @@ void hybrid_cache_controller::evict_until_within_budget() {
 
     if (plan.protected_entries_skipped) {
         n_protected_root_decisions++;
+        record_protected_root_decision("skip_protected", "hot_budget", "success", "unprotected_available");
         SRV_DBG(" - hybrid cache: protected roots skipped while unprotected entries satisfy pressure (protected bytes: %zu, unprotected bytes: %zu, budget bytes: %zu)\n",
                 calculate_protected_payload_bytes(), calculate_unprotected_payload_bytes(), limit_size);
     }
 
     if (plan.protected_budget_pressure) {
         n_protected_root_decisions++;
+        record_protected_root_decision("pressure", "hot_budget", "warning", "protected_over_budget");
+        record_stage10_diagnostic("protected_root_pressure", "warning", "protected_over_budget");
         SRV_WRN(" - hybrid cache: protected-root budget pressure detected (protected bytes: %zu, resident bytes: %zu, protected entries: %zu, budget bytes: %zu)\n",
                 calculate_protected_payload_bytes(), resident_bytes, calculate_protected_entry_count(), limit_size);
     }
@@ -2307,6 +2554,7 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
                     payload_id);
         }
 
+        record_payload_eviction(descriptor_it->second, "success", "hot_budget");
         descriptor_it->second.residency = payload_residency_state::evicted;
         descriptor_it->second.resident_payload_bytes = 0;
     }
@@ -2744,6 +2992,8 @@ bool hybrid_cache_controller::validate_payload_for_restore(
     const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
     const hot_payload_record * record = resolve_hot_payload(payload_id, reason);
     if (!record) {
+        record_fallback_restore("exact_or_checkpoint", kind, detect_workload_profile(), "fallback", bounded_reason_from_text(*reason));
+        record_stage10_diagnostic("descriptor_rejection", "failure", bounded_reason_from_text(*reason));
         record_payload_validation_failure(*reason);
         return false;
     }
@@ -2751,21 +3001,32 @@ bool hybrid_cache_controller::validate_payload_for_restore(
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         *reason = "missing descriptor";
+        record_fallback_restore("exact_or_checkpoint", kind, detect_workload_profile(), "fallback", "descriptor_missing");
+        record_stage10_diagnostic("descriptor_rejection", "failure", "descriptor_missing");
         record_payload_validation_failure(*reason);
         return false;
     }
     if (descriptor_it->second.kind != kind) {
         *reason = "payload kind mismatch";
+        record_fallback_restore("exact_or_checkpoint", kind, detect_workload_profile(), "fallback", "kind");
+        record_stage10_diagnostic("descriptor_rejection", "failure", "kind", &descriptor_it->second);
         record_payload_validation_failure(*reason);
         return false;
     }
 
     if (!validate_descriptor_against_record(entry, descriptor_it->second, *record, runtime_has_draft, true, reason)) {
+        record_fallback_restore("exact_or_checkpoint", kind, detect_workload_profile(), "fallback", bounded_reason_from_text(*reason));
+        record_stage10_diagnostic("descriptor_rejection", "failure", bounded_reason_from_text(*reason), &descriptor_it->second);
+        if (kind == payload_kind::exact_blob) {
+            record_exact_restore(descriptor_it->second, "failure", bounded_reason_from_text(*reason));
+        }
         record_payload_validation_failure(*reason);
         return false;
     }
     if (kind == payload_kind::checkpoint &&
         !validate_checkpoint_descriptor_metadata(entry, descriptor_it->second, &entry.metadata, reason)) {
+        record_fallback_restore("checkpoint", kind, detect_workload_profile(), "fallback", bounded_reason_from_text(*reason));
+        record_stage10_diagnostic("descriptor_rejection", "failure", bounded_reason_from_text(*reason), &descriptor_it->second);
         record_payload_validation_failure(*reason);
         return false;
     }
@@ -2773,6 +3034,8 @@ bool hybrid_cache_controller::validate_payload_for_restore(
     descriptor_it->second.last_validated_sequence = next_use_sequence();
     if (kind == payload_kind::checkpoint) {
         record_checkpoint_hit(descriptor_it->second);
+    } else {
+        record_exact_restore(descriptor_it->second, "success", "none");
     }
     if (record_out) {
         *record_out = record;

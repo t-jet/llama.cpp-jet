@@ -42,6 +42,128 @@ constexpr int HTTP_POLLING_SECONDS = 1;
 constexpr size_t SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES = 256ull * 1024 * 1024;
 constexpr int32_t SPECULATIVE_PROMPT_SAFE_BATCH_SIZE = 128;
 
+using prometheus_labels = std::vector<std::pair<const char *, std::string>>;
+
+static std::string server_prometheus_label_value(const std::string & value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char ch : value) {
+        switch (ch) {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            default:
+                escaped += ch;
+                break;
+        }
+    }
+    return escaped;
+}
+
+static void server_write_cache_metric_with_labels(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const char * type,
+        const char * name,
+        const char * help,
+        const prometheus_labels & labels,
+        size_t value) {
+    prometheus << "# HELP " << name << " " << help << "\n"
+               << "# TYPE " << name << " " << type << "\n"
+               << name << "{mode=\"" << mode << "\"";
+    for (const auto & label : labels) {
+        prometheus << "," << label.first << "=\""
+                   << server_prometheus_label_value(label.second) << "\"";
+    }
+    prometheus << "} " << value << "\n";
+}
+
+static void server_write_stage10_rows(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const char * name,
+        const char * help,
+        const json & rows,
+        const prometheus_labels & defaults) {
+    if (rows.empty()) {
+        server_write_cache_metric_with_labels(prometheus, mode, "counter", name, help, defaults, 0);
+        return;
+    }
+
+    for (const auto & row : rows) {
+        prometheus_labels labels;
+        labels.reserve(defaults.size());
+        for (const auto & label : defaults) {
+            labels.emplace_back(label.first, json_value(row, label.first, label.second));
+        }
+        server_write_cache_metric_with_labels(
+            prometheus, mode, "counter", name, help, labels, json_value(row, "value", 0));
+    }
+}
+
+static void server_write_stage10_cache_rows(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const json & cache_stats) {
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_exact_blob_restores_total",
+        "Exact blob restore attempts by bounded result shape.",
+        cache_stats.contains("cache_exact_blob_restores_by_shape") ?
+            cache_stats["cache_exact_blob_restores_by_shape"] : json::array(),
+        {
+            {"payload_kind", "none"},
+            {"profile", "none"},
+            {"pair_state", "none"},
+            {"residency", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_payload_transitions_total",
+        "Payload promotion and demotion decisions by bounded result shape.",
+        cache_stats.contains("cache_payload_transitions_by_shape") ?
+            cache_stats["cache_payload_transitions_by_shape"] : json::array(),
+        {
+            {"operation", "none"},
+            {"payload_kind", "none"},
+            {"pair_state", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_payload_evictions_by_shape_total",
+        "Payload eviction decisions by bounded result shape.",
+        cache_stats.contains("cache_payload_evictions_by_shape") ?
+            cache_stats["cache_payload_evictions_by_shape"] : json::array(),
+        {
+            {"payload_kind", "none"},
+            {"pair_state", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+}
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_stats) {
+    std::stringstream prometheus;
+    const std::string mode = server_prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
+    server_write_stage10_cache_rows(prometheus, mode, cache_stats);
+    return prometheus.str();
+}
+#endif
+
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
 enum slot_state {
     SLOT_STATE_IDLE,
@@ -4414,21 +4536,22 @@ void server_routes::init_routes() {
 
         try {
             const json cache_stats = this->ctx_server.get_cache_stats();
-            const std::string mode = json_value(cache_stats, "type", std::string("none"));
+            const auto prometheus_label_value = server_prometheus_label_value;
+            const std::string mode = prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
             const auto write_cache_metric = [&prometheus, &mode](const char * type, const char * name, const char * help, auto value) {
                 prometheus << "# HELP " << name << " " << help << "\n"
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_label = [&prometheus, &mode](
+            const auto write_cache_metric_with_label = [&prometheus, &mode, &prometheus_label_value](
                     const char * type, const char * name, const char * help,
                     const char * label_name, const std::string & label_value, auto value) {
                 prometheus << "# HELP " << name << " " << help << "\n"
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"," << label_name << "=\""
-                            << label_value << "\"} " << value << "\n";
+                            << prometheus_label_value(label_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_two_labels = [&prometheus, &mode](
+            const auto write_cache_metric_with_two_labels = [&prometheus, &mode, &prometheus_label_value](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
@@ -4436,10 +4559,10 @@ void server_routes::init_routes() {
                 prometheus << "# HELP " << name << " " << help << "\n"
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
-                            << label_a_value << "\"," << label_b_name << "=\""
-                            << label_b_value << "\"} " << value << "\n";
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_three_labels = [&prometheus, &mode](
+            const auto write_cache_metric_with_three_labels = [&prometheus, &mode, &prometheus_label_value](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
@@ -4448,11 +4571,11 @@ void server_routes::init_routes() {
                 prometheus << "# HELP " << name << " " << help << "\n"
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
-                            << label_a_value << "\"," << label_b_name << "=\""
-                            << label_b_value << "\"," << label_c_name << "=\""
-                            << label_c_value << "\"} " << value << "\n";
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
+                            << prometheus_label_value(label_c_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_four_labels = [&prometheus, &mode](
+            const auto write_cache_metric_with_four_labels = [&prometheus, &mode, &prometheus_label_value](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
@@ -4462,10 +4585,10 @@ void server_routes::init_routes() {
                 prometheus << "# HELP " << name << " " << help << "\n"
                             << "# TYPE " << name << " " << type << "\n"
                             << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
-                            << label_a_value << "\"," << label_b_name << "=\""
-                            << label_b_value << "\"," << label_c_name << "=\""
-                            << label_c_value << "\"," << label_d_name << "=\""
-                            << label_d_value << "\"} " << value << "\n";
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
+                            << prometheus_label_value(label_c_value) << "\"," << label_d_name << "=\""
+                            << prometheus_label_value(label_d_value) << "\"} " << value << "\n";
             };
 
             write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
@@ -4577,6 +4700,64 @@ void server_routes::init_routes() {
             // Step 10: Demotion failure reason counters
             write_cache_metric("counter", "llamacpp_cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
             write_cache_metric("counter", "llamacpp_cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
+            server_write_stage10_cache_rows(prometheus, mode, cache_stats);
+            const json protected_rows = cache_stats.contains("cache_protected_root_decisions_by_shape") ?
+                cache_stats["cache_protected_root_decisions_by_shape"] : json::array();
+            if (protected_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_protected_root_decisions_by_shape_total",
+                    "Protected-root decisions by bounded pressure shape.",
+                    "decision", "none", "pressure_source", "none", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : protected_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_protected_root_decisions_by_shape_total",
+                        "Protected-root decisions by bounded pressure shape.",
+                        "decision", json_value(row, "decision", std::string("unknown")),
+                        "pressure_source", json_value(row, "pressure_source", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json fallback_rows = cache_stats.contains("cache_fallback_restores_by_shape") ?
+                cache_stats["cache_fallback_restores_by_shape"] : json::array();
+            if (fallback_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_fallback_restores_by_shape_total",
+                    "Fallback restore decisions by bounded strategy shape.",
+                    "strategy", "none", "payload_kind", "none", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : fallback_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_fallback_restores_by_shape_total",
+                        "Fallback restore decisions by bounded strategy shape.",
+                        "strategy", json_value(row, "strategy", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json diagnostic_rows = cache_stats.contains("cache_structured_diagnostics_by_shape") ?
+                cache_stats["cache_structured_diagnostics_by_shape"] : json::array();
+            if (diagnostic_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_structured_diagnostics_total",
+                    "Structured hybrid-cache diagnostics by bounded event shape.",
+                    "event", "none", "result", "none", "reason", "none", "payload_kind", "none", 0);
+            } else {
+                for (const auto & row : diagnostic_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_structured_diagnostics_total",
+                        "Structured hybrid-cache diagnostics by bounded event shape.",
+                        "event", json_value(row, "event", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("none")),
+                        json_value(row, "value", 0));
+                }
+            }
             write_cache_metric_with_two_labels("counter", "cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
             write_cache_metric_with_two_labels("counter", "cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
             write_cache_metric_with_label("counter", "cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));

@@ -1,0 +1,18 @@
+{
+  "vsdevcmd": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\Tools\\vsdevcmd.bat",
+  "llvmBin": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin",
+  "clExe": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+  "cmake": "C:\\Program Files\\CMake\\bin\\cmake.exe",
+  "clang": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang.exe",
+  "clangcl": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang-cl.exe",
+  "llvmProfdata": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\llvm-profdata.exe",
+  "llvmCov": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\Llvm\\x64\\bin\\llvm-cov.exe",
+  "k6": "D:\\app\\k6\\k6.exe",
+  "python": "D:\\app\\Python\\python.exe",
+  "pythonVersion": "3.11.9",
+  "matplotVer": "3.10.9",
+  "k6Version": "k6.exe v2.0.0-rc1 (commit/fb943a6a80, go1.26.2, windows/amd64)",
+  "clangVersion": "clang version 20.1.8",
+  "llvmCovVer": "LLVM (http://llvm.org/):",
+  "llvmProfVer": "LLVM (http://llvm.org/):"
+}

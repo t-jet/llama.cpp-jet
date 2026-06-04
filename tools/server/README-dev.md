@@ -188,6 +188,7 @@ That requires `JSON.stringify` when formatted to message content:
 - Reranking endpoint: https://github.com/ggml-org/llama.cpp/pull/9510
 - Multimodal model support (`libmtmd`): https://github.com/ggml-org/llama.cpp/pull/12898
 - Unified KV cache handling: https://github.com/ggml-org/llama.cpp/pull/16736
+- Hybrid cache operator notes: [hybrid-cache.md](hybrid-cache.md)
 - Separation of HTTP logic into dedicated files: https://github.com/ggml-org/llama.cpp/pull/17216
 - Large-scale code base split into smaller files: https://github.com/ggml-org/llama.cpp/pull/17362
 - Introduction of router mode: https://github.com/ggml-org/llama.cpp/pull/17470

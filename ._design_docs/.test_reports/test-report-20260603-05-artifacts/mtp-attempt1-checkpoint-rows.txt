@@ -1,0 +1,12 @@
+# HELP cache_checkpoint_restores_total Checkpoint restore attempts.
+# TYPE cache_checkpoint_restores_total counter
+cache_checkpoint_restores_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none",result="none"} 0
+# HELP cache_checkpoint_hits_total Accepted checkpoint cache hits.
+# TYPE cache_checkpoint_hits_total counter
+cache_checkpoint_hits_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none"} 0
+# HELP cache_checkpoint_admissions_total Checkpoint payload admissions by mode.
+# TYPE cache_checkpoint_admissions_total counter
+cache_checkpoint_admissions_total{mode="hybrid"} 0
+# HELP cache_checkpoint_admission_failures_total Checkpoint payload admission failures by mode.
+# TYPE cache_checkpoint_admission_failures_total counter
+cache_checkpoint_admission_failures_total{mode="hybrid"} 2

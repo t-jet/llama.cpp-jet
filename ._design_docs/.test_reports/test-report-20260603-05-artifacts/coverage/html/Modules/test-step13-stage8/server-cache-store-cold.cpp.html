@@ -1,0 +1,562 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+        <meta charset="utf-8"/>
+	    <title>server-cache-store-cold.cpp</title>
+	    <link href="../../third-party/google-code-prettify/prettify-CppCoverage.css" type="text/css" rel="stylesheet" />
+	    <script type="text/javascript" src="../../third-party/google-code-prettify/prettify.js"></script>
+	</head>
+    <body onload="prettyPrint()">
+        <h4></h4>
+        <pre class="prettyprint lang-cpp linenums">
+#include "server-cache-store-cold.h"
+#include "server-common.h"
+
+#include &lt;algorithm&gt;
+#include &lt;cinttypes&gt;
+#include &lt;cstdio&gt;
+#include &lt;cstring&gt;
+#include &lt;cctype&gt;
+#include &lt;filesystem&gt;
+#include &lt;fstream&gt;
+#include &lt;sstream&gt;
+
+namespace fs = std::filesystem;
+
+<span style = "background-color:#dfd">bool server_cache_store_cold::configure(const std::string &amp; root_path, uint8_t format_version) {
+    if (root_path.empty()) {
+        SRV_ERR(" - cold store: configure failed: root path is empty\n%s", "");
+        return false;</span>
+    }
+
+<span style = "background-color:#dfd">    std::error_code ec;
+    fs::path normalized = fs::weakly_canonical(fs::absolute(fs::path(root_path), ec), ec);
+    if (ec) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: configure failed: cannot normalize root path: %s\n",</span>
+                ec.message().c_str());
+        return false;
+    }
+
+<span style = "background-color:#dfd">    if (!fs::exists(normalized)) {
+        SRV_ERR("%s", " - cold store: configure failed: root path does not exist\n");</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    if (!fs::is_directory(normalized)) {
+        SRV_ERR("%s", " - cold store: configure failed: root path is not a directory\n");</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    if (!normalized.is_absolute() || normalized == normalized.root_path()) {
+        SRV_ERR("%s", " - cold store: configure failed: root path is not an allowed cache directory\n");</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    const std::string normalized_string = normalized.string();</span>
+    if (normalized_string.find('\n') != std::string::npos ||
+<span style = "background-color:#dfd">        normalized_string.find('\r') != std::string::npos ||</span>
+        normalized_string.find('\0') != std::string::npos) {
+<span style = "background-color:#fdd">        SRV_ERR("%s", " - cold store: configure failed: root path contains an unsafe control character\n");</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    fs::path test_file = normalized / ".cold_store_write_test";</span>
+    {
+<span style = "background-color:#dfd">        std::ofstream ofs(test_file.string());
+        if (!ofs.is_open()) {</span>
+<span style = "background-color:#fdd">            SRV_ERR("%s", " - cold store: configure failed: root directory is not writable\n");
+            return false;</span>
+        }
+<span style = "background-color:#dfd">        ofs &lt;&lt; "test";
+        ofs.close();
+    }
+    fs::remove(test_file, ec);</span>
+
+    // Check for world-writable (security warning only, not a blocker)
+    // On POSIX, check if the directory has world-write permission
+    // On Windows, this check is less meaningful; skip it
+#ifndef _WIN32
+    try {
+        auto perms = fs::status(normalized).permissions();
+        if ((perms &amp; fs::perms::others_write) != fs::perms::none) {
+            SRV_WRN("%s", " - cold store: root directory is world-writable; consider restricting permissions\n");
+        }
+    } catch (...) {
+    }
+#endif
+
+<span style = "background-color:#dfd">    root_path_ = normalized_string;
+    format_version_ = format_version;
+    configured_ = true;</span>
+
+<span style = "background-color:#dfd">    SRV_INF(" - cold store: configured root '%s', format version %d\n",</span>
+            diagnostic_root().c_str(), static_cast&lt;int&gt;(format_version_));
+
+<span style = "background-color:#dfd">    return true;
+}</span>
+
+cold_ref server_cache_store_cold::write(uint64_t payload_id,
+                                          const std::vector&lt;uint8_t&gt; &amp; target_bytes,
+                                          const std::vector&lt;uint8_t&gt; &amp; draft_bytes,
+<span style = "background-color:#dfd">                                          const cold_descriptor_snapshot &amp; descriptor_snapshot) {
+    if (!configured_) {</span>
+        return 0;
+    }
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+<span style = "background-color:#dfd">    if (debug_write_failure_) {
+        return 0;</span>
+    }
+#endif
+
+    // Build the cold store header
+    cold_store_header header{};
+<span style = "background-color:#dfd">    header.magic = COLD_STORE_MAGIC;
+    header.format_version = format_version_;
+    header.checksum_algorithm = COLD_STORE_CHECKSUM_ALGORITHM_FNV1A;
+    header.payload_id = payload_id;
+    header.pair_state = static_cast&lt;uint8_t&gt;(descriptor_snapshot.pair_state);
+    header.target_size_bytes = target_bytes.size();
+    header.draft_size_bytes = draft_bytes.size();
+    header.target_checksum = fnv1a_checksum(target_bytes);
+    header.draft_checksum = draft_bytes.empty() ? 0 : fnv1a_checksum(draft_bytes);</span>
+
+    // Compute header checksum over all fields except header_checksum itself
+<span style = "background-color:#dfd">    header.header_checksum = compute_header_checksum(header);</span>
+
+<span style = "background-color:#dfd">    std::string staging = staging_path(payload_id);
+    std::string final = final_path(payload_id);</span>
+
+<span style = "background-color:#dfd">    if (!validate_path(staging) || !validate_path(final)) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: write failed: payload path escaped root (payload_id=%" PRIu64 ")\n", payload_id);</span>
+        return 0;
+    }
+
+<span style = "background-color:#dfd">    std::ofstream ofs(staging, std::ios::binary | std::ios::trunc);
+    if (!ofs.is_open()) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: write failed: cannot create staging file (payload_id=%" PRIu64 ")\n",</span>
+                payload_id);
+        return 0;
+    }
+
+    // Serialize and write header
+<span style = "background-color:#dfd">    auto header_bytes = serialize_header(header);
+    ofs.write(reinterpret_cast&lt;const char *&gt;(header_bytes.data()), header_bytes.size());
+    if (!ofs.good()) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: write failed: cannot write header for payload_id %" PRIu64 "\n", payload_id);</span>
+        ofs.close();
+        std::error_code ec;
+        fs::remove(staging, ec);
+        return 0;
+    }
+
+    // Write target bytes
+<span style = "background-color:#dfd">    if (!target_bytes.empty()) {
+        ofs.write(reinterpret_cast&lt;const char *&gt;(target_bytes.data()), target_bytes.size());
+        if (!ofs.good()) {</span>
+<span style = "background-color:#fdd">            SRV_ERR(" - cold store: write failed: cannot write target bytes for payload_id %" PRIu64 "\n", payload_id);</span>
+            ofs.close();
+            std::error_code ec;
+            fs::remove(staging, ec);
+            return 0;
+        }
+    }
+
+    // Write draft bytes
+<span style = "background-color:#dfd">    if (!draft_bytes.empty()) {
+        ofs.write(reinterpret_cast&lt;const char *&gt;(draft_bytes.data()), draft_bytes.size());
+        if (!ofs.good()) {</span>
+<span style = "background-color:#fdd">            SRV_ERR(" - cold store: write failed: cannot write draft bytes for payload_id %" PRIu64 "\n", payload_id);</span>
+            ofs.close();
+            std::error_code ec;
+            fs::remove(staging, ec);
+            return 0;
+        }
+    }
+
+<span style = "background-color:#dfd">    ofs.close();</span>
+
+    // Atomic rename from staging to final path
+    std::error_code ec;
+<span style = "background-color:#dfd">    fs::rename(staging, final, ec);
+    if (ec) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: write failed: cannot rename staging file (payload_id=%" PRIu64 "): %s\n",</span>
+                payload_id, ec.message().c_str());
+<span style = "background-color:#fdd">        fs::remove(staging, ec);</span>
+        return 0;
+    }
+
+    // Assign cold_ref (use payload_id as the ref for simplicity)
+<span style = "background-color:#dfd">    cold_ref ref = next_ref_++;</span>
+    // For now, we use payload_id as the ref key since the file path is derived from it
+    // The internal registry maps ref -&gt; file path, but since path = f(payload_id),
+    // we can use payload_id directly
+    ref = payload_id;
+
+<span style = "background-color:#dfd">    SRV_DBG(" - cold store: wrote cold file for payload_id %" PRIu64 " (ref %" PRIu64 ", %zu + %zu bytes)\n",</span>
+            payload_id, ref, target_bytes.size(), draft_bytes.size());
+
+<span style = "background-color:#dfd">    return ref;
+}</span>
+
+bool server_cache_store_cold::read(cold_ref ref,
+                                     std::vector&lt;uint8_t&gt; &amp; target_bytes,
+                                     std::vector&lt;uint8_t&gt; &amp; draft_bytes,
+<span style = "background-color:#dfd">                                     cold_descriptor_snapshot &amp; descriptor_out) {
+    if (!configured_) {</span>
+        return false;
+    }
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+<span style = "background-color:#dfd">    if (debug_read_failure_) {
+        return false;</span>
+    }
+#endif
+
+<span style = "background-color:#dfd">    std::string path = ref_to_path(ref);
+    if (!validate_path(path)) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: read failed: payload path escaped root (ref=%" PRIu64 ")\n", ref);</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) {
+        SRV_ERR(" - cold store: read failed: cannot open cold file (ref=%" PRIu64 ")\n", ref);</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    std::streamsize file_size = ifs.tellg();
+    if (file_size &lt; static_cast&lt;std::streamsize&gt;(sizeof(cold_store_header))) {
+        SRV_ERR(" - cold store: read failed: file too small (%lld bytes) for ref %" PRIu64 "\n",</span>
+                static_cast&lt;long long&gt;(file_size), ref);
+        return false;
+    }
+
+<span style = "background-color:#dfd">    ifs.seekg(0, std::ios::beg);</span>
+
+    // Read the entire file into a buffer
+<span style = "background-color:#dfd">    std::vector&lt;uint8_t&gt; file_data(file_size);
+    if (!ifs.read(reinterpret_cast&lt;char *&gt;(file_data.data()), file_size)) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: read failed: cannot read file data for ref %" PRIu64 "\n", ref);</span>
+        return false;
+    }
+<span style = "background-color:#dfd">    ifs.close();</span>
+
+    // Validation step 1: Confirm the file begins with the expected magic bytes
+    cold_store_header header{};
+<span style = "background-color:#dfd">    if (!deserialize_header(file_data.data(), file_data.size(), header)) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: read failed: cannot deserialize header for ref %" PRIu64 "\n", ref);</span>
+        return false;
+    }
+
+    // Validation step 1: magic
+<span style = "background-color:#dfd">    if (header.magic != COLD_STORE_MAGIC) {
+        SRV_ERR(" - cold store: validation failed: magic mismatch (expected 0x%08X, got 0x%08X) for ref %" PRIu64 "\n",</span>
+                COLD_STORE_MAGIC, header.magic, ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_magic_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 2: format_version
+<span style = "background-color:#dfd">    if (header.format_version != format_version_) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: validation failed: format_version mismatch (expected %d, got %d) for ref %" PRIu64 "\n",</span>
+                static_cast&lt;int&gt;(format_version_), static_cast&lt;int&gt;(header.format_version), ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_format_version_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 3: header_checksum
+<span style = "background-color:#dfd">    uint64_t expected_header_checksum = compute_header_checksum(header);
+    if (header.header_checksum != expected_header_checksum) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: validation failed: header_checksum mismatch (expected %" PRIu64 ", got %" PRIu64 ") for ref %" PRIu64 "\n",</span>
+                expected_header_checksum, header.header_checksum, ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_header_checksum_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 4: checksum_algorithm
+<span style = "background-color:#dfd">    if (header.checksum_algorithm != COLD_STORE_CHECKSUM_ALGORITHM_FNV1A) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: validation failed: unknown checksum_algorithm %d for ref %" PRIu64 "\n",</span>
+                static_cast&lt;int&gt;(header.checksum_algorithm), ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_checksum_algorithm_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 5: payload_id
+<span style = "background-color:#dfd">    if (header.payload_id != ref) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: validation failed: payload_id mismatch (expected %" PRIu64 ", got %" PRIu64 ") for ref %" PRIu64 "\n",</span>
+                ref, header.payload_id, ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_payload_id_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 6: pair_state
+    // pair_state values: 0 = target_only, 1 = target_and_draft
+<span style = "background-color:#dfd">    if (header.pair_state != 0 &amp;&amp; header.pair_state != 1) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: validation failed: invalid pair_state %d for ref %" PRIu64 "\n",</span>
+                static_cast&lt;int&gt;(header.pair_state), ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_pair_state_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 7: target_size_bytes
+<span style = "background-color:#dfd">    size_t expected_payload_size = sizeof(cold_store_header) + header.target_size_bytes + header.draft_size_bytes;
+    if (static_cast&lt;size_t&gt;(file_size) &lt; expected_payload_size) {
+        SRV_ERR(" - cold store: validation failed: file too small for declared payload sizes (file %lld, expected %zu) for ref %" PRIu64 "\n",</span>
+                static_cast&lt;long long&gt;(file_size), expected_payload_size, ref);
+        return false;
+    }
+
+    // Validation step 8: draft_size_bytes (already checked in expected_payload_size above)
+
+    // Read target bytes
+<span style = "background-color:#dfd">    const uint8_t * payload_start = file_data.data() + sizeof(cold_store_header);
+    target_bytes.assign(payload_start, payload_start + header.target_size_bytes);</span>
+
+    // Read draft bytes
+    const uint8_t * draft_start = payload_start + header.target_size_bytes;
+<span style = "background-color:#dfd">    draft_bytes.assign(draft_start, draft_start + header.draft_size_bytes);</span>
+
+    // Validation step 9: target_checksum
+<span style = "background-color:#dfd">    uint64_t computed_target_checksum = fnv1a_checksum(target_bytes);
+    if (computed_target_checksum != header.target_checksum) {
+        SRV_ERR(" - cold store: validation failed: target_checksum mismatch (expected %" PRIu64 ", computed %" PRIu64 ") for ref %" PRIu64 "\n",</span>
+                header.target_checksum, computed_target_checksum, ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_validation_failure_ == io_failure_reason::validation_target_checksum_mismatch) {
+            return false;
+        }
+#endif
+        return false;
+    }
+
+    // Validation step 10: draft_checksum (for target_and_draft)
+<span style = "background-color:#dfd">    if (header.pair_state == 1) { // target_and_draft
+        uint64_t computed_draft_checksum = fnv1a_checksum(draft_bytes);
+        if (computed_draft_checksum != header.draft_checksum) {</span>
+<span style = "background-color:#fdd">            SRV_ERR(" - cold store: validation failed: draft_checksum mismatch (expected %" PRIu64 ", computed %" PRIu64 ") for ref %" PRIu64 "\n",</span>
+                    header.draft_checksum, computed_draft_checksum, ref);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+            if (debug_validation_failure_ == io_failure_reason::validation_draft_checksum_mismatch) {
+                return false;
+            }
+#endif
+            return false;
+        }
+    }
+
+    // Populate descriptor_out from the header
+<span style = "background-color:#dfd">    descriptor_out.payload_id = header.payload_id;
+    descriptor_out.pair_state = header.pair_state;
+    descriptor_out.format_version = header.format_version;
+    descriptor_out.target_size_bytes = header.target_size_bytes;
+    descriptor_out.draft_size_bytes = header.draft_size_bytes;
+    descriptor_out.target_checksum = header.target_checksum;
+    descriptor_out.draft_checksum = header.draft_checksum;</span>
+
+<span style = "background-color:#dfd">    SRV_DBG(" - cold store: read cold file for ref %" PRIu64 " (payload_id %" PRIu64 ", %zu + %zu bytes)\n",</span>
+            ref, header.payload_id, target_bytes.size(), draft_bytes.size());
+
+<span style = "background-color:#dfd">    return true;
+}</span>
+
+<span style = "background-color:#dfd">bool server_cache_store_cold::remove(cold_ref ref) {
+    if (!configured_) {
+        return false;</span>
+    }
+
+<span style = "background-color:#dfd">    std::string path = ref_to_path(ref);
+    if (!validate_path(path)) {</span>
+<span style = "background-color:#fdd">        SRV_ERR(" - cold store: remove failed: payload path escaped root (ref=%" PRIu64 ")\n", ref);</span>
+        return false;
+    }
+
+    std::error_code ec;
+<span style = "background-color:#dfd">    if (!fs::exists(path, ec)) {</span>
+        // File does not exist - that's fine, it's already removed
+        return true;
+    }
+
+<span style = "background-color:#dfd">    bool removed = fs::remove(path, ec);
+    if (ec || !removed) {</span>
+<span style = "background-color:#fdd">        SRV_WRN(" - cold store: remove failed: cannot delete cold file (ref=%" PRIu64 "): %s\n",</span>
+                ref, ec.message().c_str());
+        return false;
+    }
+
+<span style = "background-color:#dfd">    SRV_DBG(" - cold store: removed cold file for ref %" PRIu64 "\n", ref);
+    return true;
+}</span>
+
+<span style = "background-color:#dfd">size_t server_cache_store_cold::delete_ids(const std::unordered_set&lt;uint64_t&gt; &amp; ids) {
+    if (!configured_ || ids.empty()) {
+        return 0;</span>
+    }
+
+<span style = "background-color:#dfd">    size_t deleted = 0;
+    for (uint64_t id : ids) {</span>
+        // Per the header contract, ids that do not exist are silently skipped and
+        // must not be counted. remove() is idempotent and returns true for
+        // non-existent files, so check fs::exists() first to honor the contract.
+<span style = "background-color:#dfd">        std::string path = ref_to_path(id);</span>
+        std::error_code ec;
+<span style = "background-color:#dfd">        if (fs::exists(path, ec) &amp;&amp; remove(id)) {
+            deleted++;</span>
+        }
+<span style = "background-color:#dfd">    }
+    return deleted;
+}</span>
+
+<span style = "background-color:#dfd">std::string server_cache_store_cold::final_path(uint64_t payload_id) const {
+    std::stringstream ss;
+    ss &lt;&lt; std::hex &lt;&lt; payload_id &lt;&lt; ".cold";
+    return (fs::path(root_path_) / ss.str()).string();
+}</span>
+
+<span style = "background-color:#dfd">std::string server_cache_store_cold::staging_path(uint64_t payload_id) const {
+    return final_path(payload_id) + ".tmp";
+}</span>
+
+<span style = "background-color:#dfd">std::string server_cache_store_cold::ref_to_path(cold_ref ref) const {
+    return final_path(ref);
+}</span>
+
+<span style = "background-color:#dfd">bool server_cache_store_cold::validate_path(const std::string &amp; path) const {
+    if (!configured_ || path.empty()) {</span>
+<span style = "background-color:#fdd">        return false;</span>
+    }
+    if (path.find('\n') != std::string::npos ||
+<span style = "background-color:#dfd">        path.find('\r') != std::string::npos ||</span>
+        path.find('\0') != std::string::npos) {
+        return false;
+    }
+
+<span style = "background-color:#dfd">    std::error_code ec;
+    fs::path absolute_path = fs::absolute(fs::path(path), ec);
+    if (ec) {</span>
+        return false;
+    }
+<span style = "background-color:#dfd">    return path_is_under_root(absolute_path);
+}</span>
+
+<span style = "background-color:#dfd">bool server_cache_store_cold::path_is_under_root(const fs::path &amp; path) const {
+    std::error_code ec;
+    const fs::path root = fs::weakly_canonical(fs::path(root_path_), ec);
+    if (ec) {</span>
+        return false;
+    }
+
+<span style = "background-color:#dfd">    fs::path normalized = fs::weakly_canonical(path, ec);
+    if (ec) {</span>
+<span style = "background-color:#fdd">        normalized = fs::absolute(path, ec);
+        if (ec) {</span>
+            return false;
+        }
+<span style = "background-color:#fdd">        normalized = normalized.lexically_normal();</span>
+    }
+
+#ifdef _WIN32
+<span style = "background-color:#dfd">    std::string root_string = root.lexically_normal().string();
+    std::string path_string = normalized.lexically_normal().string();
+    std::transform(root_string.begin(), root_string.end(), root_string.begin(),</span>
+<span style = "background-color:#fdd">        [](unsigned char c) { return static_cast&lt;char&gt;(std::tolower(c)); });</span>
+<span style = "background-color:#dfd">    std::transform(path_string.begin(), path_string.end(), path_string.begin(),</span>
+<span style = "background-color:#fdd">        [](unsigned char c) { return static_cast&lt;char&gt;(std::tolower(c)); });</span>
+#else
+    const std::string root_string = root.lexically_normal().string();
+    const std::string path_string = normalized.lexically_normal().string();
+#endif
+
+<span style = "background-color:#dfd">    if (path_string == root_string) {</span>
+        return true;
+    }
+<span style = "background-color:#dfd">    const std::string separator(1, fs::path::preferred_separator);
+    std::string root_prefix = root_string;
+    if (!root_prefix.empty() &amp;&amp; root_prefix.back() != fs::path::preferred_separator) {
+        root_prefix += separator;</span>
+    }
+<span style = "background-color:#dfd">    return path_string.rfind(root_prefix, 0) == 0;
+}</span>
+
+<span style = "background-color:#dfd">std::string server_cache_store_cold::diagnostic_root() const {
+    if (root_path_.empty()) {</span>
+<span style = "background-color:#fdd">        return "unconfigured";</span>
+    }
+<span style = "background-color:#dfd">    const fs::path root(root_path_);
+    const std::string leaf = root.filename().string();
+    return leaf.empty() ? "configured" : leaf;
+}</span>
+
+<span style = "background-color:#dfd">uint64_t server_cache_store_cold::fnv1a_checksum(const uint8_t * data, size_t len) {
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = 0; i &lt; len; ++i) {
+        hash ^= data[i];
+        hash *= 1099511628211ull;</span>
+    }
+    return hash;
+<span style = "background-color:#dfd">}</span>
+
+<span style = "background-color:#dfd">uint64_t server_cache_store_cold::fnv1a_checksum(const std::vector&lt;uint8_t&gt; &amp; bytes) {
+    return fnv1a_checksum(bytes.data(), bytes.size());</span>
+}
+
+<span style = "background-color:#dfd">std::vector&lt;uint8_t&gt; server_cache_store_cold::serialize_header(const cold_store_header &amp; header) {
+    std::vector&lt;uint8_t&gt; buf(sizeof(header));
+    std::memcpy(buf.data(), &amp;header, sizeof(header));</span>
+    return buf;
+<span style = "background-color:#dfd">}</span>
+
+<span style = "background-color:#dfd">bool server_cache_store_cold::deserialize_header(const uint8_t * data, size_t len, cold_store_header &amp; header) {
+    if (len &lt; sizeof(header)) {</span>
+        return false;
+    }
+<span style = "background-color:#dfd">    std::memcpy(&amp;header, data, sizeof(header));</span>
+    return true;
+<span style = "background-color:#dfd">}</span>
+
+<span style = "background-color:#dfd">uint64_t server_cache_store_cold::compute_header_checksum(const cold_store_header &amp; header) {</span>
+    // Compute checksum over all header bytes except the header_checksum field itself.
+    // The header_checksum field is at offset 56 (bytes 56-63).
+    // We checksum bytes 0-55 (everything before header_checksum).
+    const uint8_t * raw = reinterpret_cast&lt;const uint8_t *&gt;(&amp;header);
+<span style = "background-color:#dfd">    return fnv1a_checksum(raw, offsetof(cold_store_header, header_checksum));</span>
+}</pre>
+        <hr />
+        <table width="100%">
+            <thead>
+                <tr>
+                    <th align="center">
+                        <small>Generated by</small>
+                        <a href="https://github.com/OpenCppCoverage/OpenCppCoverage/releases">
+                            <strong>OpenCppCoverage (Version: 0.9.9.0)</strong>
+                        </a>
+                    </th>
+                </tr>
+            </thead>
+        </table>
+    </body>
+</html>
