@@ -210,7 +210,10 @@ struct hybrid_cache_entry {
     hybrid_cache_entry() = default;
 
     // Calculate total size of this entry in bytes
-    size_t size() const {
+    // __declspec(noinline) (T114a fix 2026-06-05): keep these accessors
+    // out-of-line so OpenCppCoverage attributes the body to this header
+    // instead of the test .cpp call site under MSVC /Ob1.
+    __declspec(noinline) size_t size() const {
         size_t sz = 0;
         sz += tokens.size() * sizeof(llama_token);  // token storage
         sz += resident_payload_bytes_cached;         // descriptor-owned exact blob bytes
@@ -223,24 +226,16 @@ struct hybrid_cache_entry {
     }
 
     // Get number of tokens
-    int n_tokens() const {
-        return tokens.size();
-    }
+    __declspec(noinline) int n_tokens() const { return tokens.size(); }
 
-    size_t resident_payload_bytes() const {
-        return resident_payload_bytes_cached;
-    }
+    __declspec(noinline) size_t resident_payload_bytes() const { return resident_payload_bytes_cached; }
 
-    bool has_target_payload() const {
-        return has_target_payload_cached;
-    }
+    __declspec(noinline) bool has_target_payload() const { return has_target_payload_cached; }
 
-    bool has_draft_payload() const {
-        return has_draft_payload_cached;
-    }
+    __declspec(noinline) bool has_draft_payload() const { return has_draft_payload_cached; }
 
     // Mark this entry as used (update LRU metadata)
-    void mark_used(uint64_t sequence) {
+    __declspec(noinline) void mark_used(uint64_t sequence) {
         use_sequence = sequence;
         use_count++;
     }
