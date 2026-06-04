@@ -158,6 +158,86 @@ because T114a is FAIL. The rerun routes the T114a failure to
 [test-report-20260604-04-rerun-fixes.md](test-report-20260604-04-rerun-fixes.md)
 for a separate Developer fixes session.
 
+## T114a lift attempt via 3 focused test functions
+
+The T114a fixes session added 3 new focused test functions to
+`tests/test-cache-controller.cpp` that exercise the uncovered
+`.h` inline method bodies called out in the
+[rerun-fixes](../.test_reports/test-report-20260604-04-rerun-fixes.md)
+handoff:
+
+| New test function | Targeted header surface |
+| --- | --- |
+| `T114a_test_hybrid_entry_inline_via_fn_ptr` | `server-cache-hybrid.h` lines 213-246 (`hybrid_cache_entry` inline methods: `size`, `n_tokens`, `mark_used`, `has_target_payload`, `has_draft_payload`, `resident_payload_bytes`) |
+| `T114a_test_hybrid_cold_store_hooks_via_fn_ptr` | `server-cache-hybrid.h` lines 355-365 (test hooks: `debug_set_cold_store_for_tests`, `debug_start_io_worker_for_tests`, `debug_stop_io_worker_for_tests`) |
+| `T114a_test_hybrid_remaining_test_hooks_via_fn_ptr` | `server-cache-hybrid.h` lines 366-389 (test hooks: queue capacity, validation failure, read failure, residency query, promotion failure inject/clear, cold-store/io-worker accessors) |
+
+The 2 prior uncommitted T114a tests (`T114a_test_hybrid_entry_inline_methods`
+and `T114a_test_legacy_controller_direct_lifecycle`) are kept in the
+file. The total test count is now 83 (5 Stage 11 2026-06-04 T114a tests).
+
+The build and the new tests all pass:
+
+```text
+test-cache-controller: T114a hybrid entry inline via fn ptr...
+  PASSED
+test-cache-controller: T114a hybrid cold store hooks via fn ptr...
+  PASSED
+test-cache-controller: T114a hybrid remaining test hooks via fn ptr...
+  PASSED
+```
+
+The full build log is at
+`build-cov-test-cache-controller-final.log`. The coverage script
+(`run_coverage.ps1`) was rerun after the rebuild. The coverage
+report (`coverage-report.md`) still shows the same product-only
+state:
+
+- `Product-only line rate: 0.6974`
+- `Product-only covered: 2077 / 2978`
+- `70% threshold: FAIL`
+
+The per-file table is unchanged. `server-cache-hybrid.h` is still
+83 / 140. `server-cache-legacy.h` is still 0 / 1.
+`server-cache-controller.h` is still 2 / 5.
+
+**Root cause for the 0-line lift:** OpenCppCoverage on this MSVC
+host tracks the .h line as the executed source line only when the
+inline method body is emitted as a real function call. With the
+default `/Ob2` inlining, the .h inline method bodies in
+`server-cache-legacy.h`, `server-cache-controller.h`, and
+`server-cache-hybrid.h` are inlined into the test call site. The
+compiler emits the body in the test .cpp, and the .h source line
+is lost. The same issue affects the .cpp lambda bodies in
+`server-cache-policy-lru.cpp` (lines 18, 19, 21, 24, 27, 28, 31,
+32) - the prior T114 tests already call `plan_evictions` with
+3 candidates, but the lambda body lines are not credited because
+the lambda is inlined into `plan_evictions`.
+
+The 3 new T114a tests do not change the per-file table because the
+.h lines they call are not credited under the current build and
+coverage configuration. The product-only rate stays at 0.6974.
+The closure status remains FAIL.
+
+**Suggested next steps** (requires build, header, or coverage
+configuration changes outside the Developer scope):
+
+- Disable `/Ob2` inlining for the test binary so the .h inline
+  method bodies are emitted as real function calls and the .h
+  source line is preserved in the debug info.
+- Mark the affected .h inline methods with `__declspec(noinline)`
+  so the compiler does not inline them into the call site.
+- Replace the OpenCppCoverage harness with a coverage tool that
+  tracks inlined .h bodies (for example, MSVC `/source-charset`
+  profile-guided optimization with the `/Ob1` flag).
+- Accept the gap and document it as a known tooling limitation
+  in the closure record.
+
+**T114a verdict: FAIL** (0.6974 < 0.70, 2077 / 2978 lines).
+The 3 new test functions are added to the test binary and
+document the lift attempt, but the product-only rate is unchanged
+under the current OpenCppCoverage and MSVC build configuration.
+
 - **This gate:** Stage 11 Developer rerun (full rebuild +
   coverage rerun) PARTIAL (T114 PASS, T114a FAIL).
 - **Next gate:** Stage 11 Manager closure decision on the
