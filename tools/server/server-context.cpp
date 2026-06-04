@@ -216,21 +216,6 @@ static uint32_t server_n_outputs_max(const common_params & params) {
     return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
 }
 
-static uint32_t server_n_outputs_max(const common_params & params) {
-    const uint32_t n_batch  = params.n_batch;
-
-    if (params.embedding ||
-            (params.pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED && params.pooling_type != LLAMA_POOLING_TYPE_NONE)) {
-        return n_batch;
-    }
-
-    const uint32_t n_outputs_per_seq = 1 + common_speculative_n_max(&params.speculative);
-
-    const uint64_t n_outputs = (uint64_t) params.n_parallel * n_outputs_per_seq;
-
-    return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
-}
-
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
 enum slot_state {
     SLOT_STATE_IDLE,
@@ -3647,8 +3632,6 @@ private:
                     // the number of tokens added to the batch for the current slot
                     const auto n_tokens_cur = batch.n_tokens - n_tokens_prev;
                     batch_request_embd = batch_request_embd || (n_tokens_cur > 0 && slot.task->need_embd());
-
-                    const bool near_prompt_end = slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch;
 
                     const bool near_prompt_end = slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch;
 
