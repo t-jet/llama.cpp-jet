@@ -1,7 +1,0 @@
-srv  record_paylo:  - hybrid cache: descriptor validation failed (missing target payload)
-srv  record_branc:  - hybrid cache: branch metadata over soft limit (metadata bytes: 249, soft max bytes: 1)
-srv  record_branc:  - hybrid cache: branch metadata over soft limit (metadata bytes: 498, soft max bytes: 1)
-srv  enforce_bran:  - hybrid cache: branch metadata admission rejected (namespace: stage8-budget, metadata bytes before: 498, after: 498, soft max bytes: 1)
-srv  record_branc:  - hybrid cache: branch metadata over soft limit (metadata bytes: 249, soft max bytes: 1)
-srv  record_branc:  - hybrid cache: branch metadata over soft limit (metadata bytes: 498, soft max bytes: 1)
-srv  enforce_bran:  - hybrid cache: branch metadata admission rejected (namespace: stage8-budget, metadata bytes before: 498, after: 498, soft max bytes: 1)
