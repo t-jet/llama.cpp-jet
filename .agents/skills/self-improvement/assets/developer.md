@@ -259,3 +259,13 @@ Condition:
 Action:
 
 - Do not rely on direct calls, member function pointers, olatile member function pointers, or file-scope #pragma optimize("", off) to credit the .h source line; OpenCppCoverage on this MSVC host records the inlined call site's source line (the test .cpp), not the .h source line, so the per-file table stays unchanged. Don't promise a coverage lift from .h inline methods without first disabling /Ob2 for the test binary, marking the affected methods with __declspec(noinline), or switching the coverage harness. If the only coverable gap is in .h inline bodies or .cpp lambda bodies, document the lift attempt in the closure record and route the gap to a Manager decision on tooling rather than repeating test-only fixes.
+
+## Improvement: Verify prompt facts against repo state before acting
+
+Condition:
+
+- When a Manager or user prompt includes specific quantitative or locational facts about a repo (commit counts, file paths, expected content, named build directories) that are tied to a binding decision and that the prompt treats as given
+
+Action:
+
+- Do verify each cited fact with a direct git or file command (`git log --oneline <range>`, `git grep`, `git rev-list --parents`, `git diff <ref1> <ref2> -- <path>`, `Test-Path <build-dir>/build.ninja`) before acting on it; don't propagate the prompt's numbers, paths, or expected content into the implementation log, evidence section, or merge commit message if they disagree with the actual state. Record both the prompt's claim and the actual value in the implementation entry so the next reviewer can see the discrepancy. If the build directory named in the prompt is empty (no `build.ninja`, no `bin/`, no `.vcxproj`), look for the actual populated build directory and use that, noting the substitution in the verification evidence.

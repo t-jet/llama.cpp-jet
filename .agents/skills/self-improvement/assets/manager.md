@@ -129,3 +129,13 @@ Condition:
 Action:
 
 - Do not treat the error as a subagent failure; do re-delegate to a fresh subagent session with a tighter prompt that names an explicit return-message cap (for example "MAX 500 words" or "under 600 words") and lists the exact fields the return must include in that order; do shorten the source-document list to the essential 4-6 files and explicitly tell the agent to skip reading large source files unless absolutely required; do keep the work instructions specific (exact commands, exact paths, exact commit SHAs) so the subagent can execute without inventing structure; do not ask the subagent to summarize files it has not read.
+
+## Improvement: verify merge commit shape before accepting merge claims
+
+Condition:
+
+- When a stage claim, implementation log entry, developer handoff, or test-report closure rationale says a `git merge` was performed and the merged source branch is the only path through which source content could have entered the working tree
+
+Action:
+
+- Do verify the merge is a real two-parent commit before accepting the claim; run `git rev-list --parents -n 1 <sha>` and require the output to list the merge commit and both parent SHAs; a single-parent SHA is a regular commit, not a merge, regardless of the commit message; do also run `git show --stat --format='%H%nParents: %P' <sha>` to confirm the parents line lists two SHAs; do cross-check that the source branch's content is actually reachable from the merge by running `git log --oneline <branch>..<source-branch> | wc -l` and confirming it returns 0 (or the expected small delta), AND spot-check at least one file the source branch actually changed by using `git diff --name-only <merge-base>..<source-branch> -- <path>` to identify candidate files and reading the worktree file to confirm the source-branch content is present (e.g. a renamed function, a new struct field, a changed comment); do not trust a commit message that claims a merge range, a merge base SHA, or a conflict count without verifying each claim against the tree; do not trust a stage-closure doc or test report that says a merge was done without cross-checking the git history; do flag any divergence between the claim and the actual state to the user before proceeding, and re-open the merge gate if the claim is false.

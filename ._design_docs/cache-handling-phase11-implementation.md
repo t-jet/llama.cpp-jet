@@ -201,3 +201,8 @@ The T114 and T121 closure contracts are met. The T114a
 product-only row is FAIL by 0.0026 and is closed as a
 known MSVC `/Ob2` inlining tooling limitation with a
 follow-up plan.
+
+
+## Real merge correction (2026-06-04)
+
+The full correction record (real merge commit, conflicts, verification evidence, and what is NOT done) is in [part-15-real-merge-correction.md](cache-handling-phase11-implementation/part-15-real-merge-correction.md).

@@ -207,3 +207,15 @@ Condition:
 Action:
 
 - Do regenerate the buggy artifact in the same QA session and add a `## Correction` section at the top noting the original parsing bug and the regeneration context; cite the parent report and the fixes handoff so the lineage is clear in the artifacts bundle.
+
+## Improvement: verify working tree after `git rm -r` and handle mixed tracked/untracked artifact folders
+
+Condition:
+
+- When removing a set of artifact folders from the repo and some are git-tracked while others are untracked (e.g. generated in the current session and never committed)
+
+Action:
+
+- Do run `git ls-files` per folder first to classify tracked vs untracked; use `git rm -r` for tracked folders and `Remove-Item -Recurse -Force` for untracked ones, rather than assuming one tool covers both.
+- Do verify with `Get-ChildItem -Directory` and `git status --short` after `git rm -r --quiet` exits 0 that both the working tree is empty and the index shows the expected staged-deletion count (lines beginning with `D`); on Windows + PowerShell the index can be updated while files linger on disk, so trust `Get-ChildItem` and `git status`, not just the exit code.
+- Do keep all `.md` test reports in `._design_docs/.test_reports/` intact during cleanup; only remove the `-artifacts`, `-developer-artifacts`, and ad-hoc evidence folders (such as `coverage-run/`), and verify the `.md` count before and after to confirm no report was lost.
