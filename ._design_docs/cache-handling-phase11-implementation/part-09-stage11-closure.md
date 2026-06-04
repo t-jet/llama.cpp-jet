@@ -1,9 +1,35 @@
-# Stage 11 closure (2026-06-04)
+# Stage 11 closure (2026-06-04) — INVALIDATED 2026-06-05
 
 Source: [../cache-handling-phase11-implementation.md](../cache-handling-phase11-implementation.md)
 Date: 2026-06-04
+Invalidation date: 2026-06-05
 
-## Manager closure decision
+## INVALIDATION NOTICE (2026-06-05)
+
+This closure record is INVALIDATED. The 2026-06-04 closure was
+based on the fabricated single-parent commit `72cfbcd44` (D7)
+and a soft closure of T114a as a known MSVC `/Ob2` inlining
+tooling limitation (D9 rejected). The rework loop replaced the
+fabricated merge with the real two-parent merge `e0f3f868b`,
+fixed the build-defect duplicates in commit `602f3e3f0`, and
+lifted T114a from 0.6974 (FAIL) to 0.7035 (PASS) in commit
+`6e3aa045c`. The authoritative test report
+[../../.test_reports/test-report-20260604-06.md](../../.test_reports/test-report-20260604-06.md)
+records all closure contracts PASS. The Manager re-closes Stage
+11 in a separate gate. This file is preserved as a historical
+record of the invalid closure attempt and is not the closure
+record. The full rework loop records are in
+[./part-15-real-merge-correction.md](./part-15-real-merge-correction.md),
+[./part-16-build-defect-semantic-duplicates.md](./part-16-build-defect-semantic-duplicates.md),
+[./part-17-t114a-product-only-coverage.md](./part-17-t114a-product-only-coverage.md),
+and
+[./part-18-qa-reverification.md](./part-18-qa-reverification.md).
+
+The content below is the historical 2026-06-04 closure attempt
+and is kept verbatim for the audit trail. It does not represent
+the current state of Stage 11.
+
+## Manager closure decision (historical, INVALIDATED)
 
 **Status: STAGE 11 CLOSED with T114a tooling limitation.** The
 Manager accepted the T114a row as a known MSVC `/Ob2` inlining
@@ -15,7 +41,7 @@ The T114a FAIL row is not reclassified to PASS in the test
 report; the closure record documents the tooling limitation
 as the reason Stage 11 closes with the T114a row in FAIL.
 
-## Final test counts
+## Final test counts (historical, INVALIDATED)
 
 | ID | Verdict | Evidence |
 | --- | --- | --- |
@@ -26,7 +52,7 @@ as the reason Stage 11 closes with the T114a row in FAIL.
 
 PASS: 3, FAIL: 1 (T114a, recorded as tooling limitation), BLOCKED: 0, SKIP: 0.
 
-## T114a tooling limitation
+## T114a tooling limitation (historical, INVALIDATED)
 
 The T114a product-only coverage rate is 0.6974, which is
 0.0026 below the 70% floor. The 3 focused test functions added
@@ -47,7 +73,7 @@ limitation is recorded as an addendum in the test plan and as
 a follow-up item below; it is not a relaxation of the
 contract.
 
-## Follow-up plan
+## Follow-up plan (historical, INVALIDATED)
 
 Closing the T114a gap requires one of the following, all of
 which are outside the Stage 11 test-only scope. The follow-up
@@ -88,10 +114,11 @@ rebuild-and-rerun cycle. If option 1 still produces a
 sub-0.70 product-only rate, the session escalates to option
 2 (`__declspec(noinline)` on the affected inline methods).
 
-## Commit list
+## Commit list (historical, INVALIDATED)
 
 The Stage 11 merge history on branch
-`cache-optimization-stage11-merge`:
+`cache-optimization-stage11-merge` for the fabricated merge
+attempt:
 
 | # | SHA | Purpose |
 | --- | --- | --- |
@@ -103,7 +130,7 @@ The Stage 11 merge history on branch
 The upstream fork point SHA is
 `40d5358d3c730b81729ba81cd5c44ed596d02510`.
 
-## Manager D1 and D6 decisions
+## Manager D1 and D6 decisions (historical, INVALIDATED for D6 see rework loop)
 
 D1 (fork point SHA): approved by Manager 2026-06-04. The fork
 point `40d5358d3c730b81729ba81cd5c44ed596d02510` is verified
@@ -130,7 +157,7 @@ merge activity; the lift condition is `upstream_master` tip
 at least 25 commits behind actual upstream `master`, or the
 Manager opens a new Stage 11 cycle for any other reason.
 
-## Evidence pointers
+## Evidence pointers (historical, INVALIDATED)
 
 - Main test report: [../../.test_reports/test-report-20260604-04.md](../../.test_reports/test-report-20260604-04.md)
 - Bug-fix handoff: [../../.test_reports/test-report-20260604-04-fixes.md](../../.test_reports/test-report-20260604-04-fixes.md)
@@ -140,7 +167,7 @@ Manager opens a new Stage 11 cycle for any other reason.
 - T114a lift attempt evidence: `test-report-20260604-04-rerun.md` "T114a lift attempt via 3 focused test functions" section
 - Coverage evidence: `coverage-run/coverage-report.md` (`## Combined result` block PASS, `## Product-only result` block FAIL)
 
-## Closure rationale
+## Closure rationale (historical, INVALIDATED)
 
 The T114 combined 80% floor (0.8508) is met for the
 19-file hybrid-mode denominator. The T115 per-file

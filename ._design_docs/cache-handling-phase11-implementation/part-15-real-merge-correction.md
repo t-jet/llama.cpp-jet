@@ -112,3 +112,25 @@ tip `3b9ed9712` is 5. The prompt count was overstated.)
   `72cfbcd44` as the merge commit; this part records that
   the canonical merge is now `e0f3f868b` and leaves the
   closure record reconciliation to the next gate.
+
+## Follow-up pointers
+
+The real-merge correction chain produced three further
+durable records after this correction:
+
+- [part-16-build-defect-semantic-duplicates.md](./part-16-build-defect-semantic-duplicates.md):
+  build-defect fix for the two semantic duplicates
+  surfaced by the real merge in
+  `tools/server/server-context.cpp`
+  (`near_prompt_end` and `server_n_outputs_max`).
+  Fix commit `602f3e3f0`.
+- [part-17-t114a-product-only-coverage.md](./part-17-t114a-product-only-coverage.md):
+  T114a product-only coverage lift from 0.6974 (FAIL)
+  to 0.7035 (PASS) on the 70% floor via six
+  `__declspec(noinline)` annotations in
+  `tools/server/server-cache-hybrid.h`. Fix commit
+  `6e3aa045c`.
+- [part-18-qa-reverification.md](./part-18-qa-reverification.md):
+  QA re-verification record pointing to
+  [test-report-20260604-06.md](../../.test_reports/test-report-20260604-06.md)
+  for the PASS verdicts on all closure contracts.
