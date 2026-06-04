@@ -7,8 +7,6 @@
 
 #include <vector>
 
-#include <vector>
-
 enum common_params_fit_status {
     COMMON_PARAMS_FIT_STATUS_SUCCESS = 0, // found allocations that are projected to fit
     COMMON_PARAMS_FIT_STATUS_FAILURE = 1, // could not find allocations that are projected to fit

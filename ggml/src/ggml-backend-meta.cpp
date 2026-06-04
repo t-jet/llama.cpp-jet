@@ -1468,17 +1468,7 @@ static void ggml_backend_meta_buffer_clear(ggml_backend_buffer_t buffer, uint8_t
 
 static void ggml_backend_meta_buffer_reset(ggml_backend_buffer_t buffer) {
     GGML_ASSERT(ggml_backend_buffer_is_meta(buffer));
-
-    auto * buf_ctx = (ggml_backend_meta_buffer_context *) buffer->context;
-
-    // The local Stage 6/9 fix wanted to clear the per-reset caches here.
-    // The local struct has `split_state_cache` and `bufs` but does not have
-    // the `simple_tensors` or `buf_configs` fields that the prior local
-    // reset function referenced (those fields live on
-    // `ggml_backend_meta_simple_tensor_container`, not on the buffer
-    // context). Take the upstream reset path, which works with the local
-    // struct's actual fields. The split_state_cache is cleared elsewhere
-    // in the upstream's `ggml_backend_meta_graph_compute` path.
+    ggml_backend_meta_buffer_context * buf_ctx = (ggml_backend_meta_buffer_context *) buffer->context;
     for (size_t i = 0; i < buf_ctx->bufs.size(); i++) {
         ggml_backend_buffer_reset(ggml_backend_meta_buffer_simple_buffer(buffer, i));
     }

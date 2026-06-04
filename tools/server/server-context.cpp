@@ -216,6 +216,21 @@ static uint32_t server_n_outputs_max(const common_params & params) {
     return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
 }
 
+static uint32_t server_n_outputs_max(const common_params & params) {
+    const uint32_t n_batch  = params.n_batch;
+
+    if (params.embedding ||
+            (params.pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED && params.pooling_type != LLAMA_POOLING_TYPE_NONE)) {
+        return n_batch;
+    }
+
+    const uint32_t n_outputs_per_seq = 1 + common_speculative_n_max(&params.speculative);
+
+    const uint64_t n_outputs = (uint64_t) params.n_parallel * n_outputs_per_seq;
+
+    return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
+}
+
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
 enum slot_state {
     SLOT_STATE_IDLE,
@@ -3635,6 +3650,8 @@ private:
 
                     const bool near_prompt_end = slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch;
 
+                    const bool near_prompt_end = slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch;
+
                     // entire prompt has been processed
                     if (slot.prompt.n_tokens() == slot.task->n_tokens()) {
                         slot.state = SLOT_STATE_DONE_PROMPT;
@@ -5377,6 +5394,43 @@ void server_routes::init_routes() {
             files,
             TASK_RESPONSE_TYPE_OAI_CHAT,
             body.contains("messages") ? &body.at("messages") : nullptr);
+    };
+
+    this->post_control = [this](const server_http_req & req) {
+        auto res = create_response();
+        const json body = json::parse(req.body);
+
+        const std::string cmpl_id = json_value(body, "id", std::string());
+        const std::string action  = json_value(body, "action", std::string());
+        if (cmpl_id.empty()) {
+            res->error(format_error_response("missing completion id", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        if (action != "reasoning_end") {
+            res->error(format_error_response("unknown control action", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+
+        auto & rd = res->rd;
+        {
+            server_task task(SERVER_TASK_TYPE_CONTROL);
+            task.id              = rd.get_new_id();
+            task.params.control_cmpl_id = cmpl_id;
+            task.params.control_action  = action;
+            rd.post_task(std::move(task));
+        }
+
+        auto result = rd.next(req.should_stop);
+        if (!result) {
+            GGML_ASSERT(req.should_stop());
+            return res;
+        }
+        if (result->is_error()) {
+            res->error(result->to_json());
+            return res;
+        }
+        res->ok(result->to_json());
+        return res;
     };
 
     this->post_control = [this](const server_http_req & req) {
