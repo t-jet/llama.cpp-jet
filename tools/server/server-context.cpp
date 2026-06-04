@@ -154,6 +154,42 @@ static void server_write_stage10_cache_rows(
             {"result", "none"},
             {"reason", "none"},
         });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_protected_root_decisions_by_shape_total",
+        "Protected root admission decisions by bounded result shape.",
+        cache_stats.contains("cache_protected_root_decisions_by_shape") ?
+            cache_stats["cache_protected_root_decisions_by_shape"] : json::array(),
+        {
+            {"decision", "none"},
+            {"pressure_source", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_fallback_restores_by_shape_total",
+        "Fallback restore attempts by bounded result shape.",
+        cache_stats.contains("cache_fallback_restores_by_shape") ?
+            cache_stats["cache_fallback_restores_by_shape"] : json::array(),
+        {
+            {"strategy", "none"},
+            {"payload_kind", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_structured_diagnostics_total",
+        "Structured cache diagnostic events by bounded result shape.",
+        cache_stats.contains("cache_structured_diagnostics_by_shape") ?
+            cache_stats["cache_structured_diagnostics_by_shape"] : json::array(),
+        {
+            {"event", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+            {"payload_kind", "none"},
+        });
 }
 
 #ifdef LLAMA_SERVER_CACHE_TESTS
@@ -546,7 +582,7 @@ struct server_slot {
     bool need_embd() const {
         GGML_ASSERT(task);
         return task->need_embd() ||
-            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_pre_norm(spec)));
+            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_nextn(spec)));
     }
 
     bool need_embd_nextn() const {
