@@ -99,3 +99,33 @@ Condition:
 Action:
 
 - Do not re-delegate; instead, read each expected artifact directly (file_search, read_file, grep_search scoped to the gate's expected files, git status --short scoped to the gate, git diff --check on the same scope) and decide based on artifact quality, not on the completeness of the text response; treat a truncated text response with complete on-disk artifacts as a successful gate and proceed to the next handoff; do re-delegate only when the artifacts are missing, incomplete, or fail the verification step; this is the complement of the "subagent re-delegation with a sharper focus prompt after interruption" entry, which assumes artifacts are missing.
+
+## Improvement: verify script edits with whitespace-ignoring diff and raw byte count
+
+Condition:
+
+- When a Developer in a fresh subagent session edits a script file (PowerShell, shell, or any text file with line endings) on Windows and the full `git diff --stat` shows an unexpectedly large insertion or deletion count
+
+Action:
+
+- Do run `git diff -w --stat` and `git diff -w` to see the content-only changes; do read the worktree file as raw bytes and count CR (0x0D) and LF (0x0A) to confirm the file is LF-only (CR=0) or CRLF (CR>0 and matches HEAD) before declaring the work ready for review; do not rely on the full `git diff --stat` for content review, because the Windows edit tool's CRLF handling can rewrite line endings throughout the file and produce a noisy diff (for example, 439 insertions and 399 deletions for a 40-line content addition); do record the noise as a non-blocking observation in the Architect review report rather than rejecting the work, because the content is correct and the file state is correct.
+
+## Improvement: confirm external prerequisites before delegating a main implementation gate
+
+Condition:
+
+- When a stage design or plan commits to an external reference (upstream remote URL, third-party service endpoint, hosted environment, or shared infrastructure) and the local repo or worktree does not have that reference configured
+
+Action:
+
+- Do not delegate the main implementation gate; instead, surface the missing reference as a Manager decision point with the local-repo state and the design assumption side by side; do not let the Developer add the remote, pick a fallback branch, or redefine the reference strategy, because that decision belongs to the Manager and may have credential, rate-limit, security, or contract implications; do offer the user the specific resolution paths (add the configured remote, use an existing tracking branch, or pause and revise the design) and wait for the explicit choice before continuing.
+
+## Improvement: re-delegate with explicit word cap when a subagent response exceeds the model limit
+
+Condition:
+
+- When a fresh subagent delegation in runSubagent returns the client error "Response too long" (or an equivalent provider-side token or output length error) and the subagent did not produce a usable return message
+
+Action:
+
+- Do not treat the error as a subagent failure; do re-delegate to a fresh subagent session with a tighter prompt that names an explicit return-message cap (for example "MAX 500 words" or "under 600 words") and lists the exact fields the return must include in that order; do shorten the source-document list to the essential 4-6 files and explicitly tell the agent to skip reading large source files unless absolutely required; do keep the work instructions specific (exact commands, exact paths, exact commit SHAs) so the subagent can execute without inventing structure; do not ask the subagent to summarize files it has not read.

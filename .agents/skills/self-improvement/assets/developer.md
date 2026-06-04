@@ -18,7 +18,7 @@ Condition:
 
 Action:
 
-- Do verify the changed lines, status text, line counts, and trailing-whitespace state directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Do verify the changed lines, status text, line counts, and trailing-whitespace state directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, and `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
 
 ## Improvement: Windows server pytest path
 
@@ -118,7 +118,7 @@ Condition:
 
 Action:
 
-- Do split the entry into a short TOC/status file and part files before drafting the full content; don't leave an over-limit draft in the worktree while reviewing.
+- Do split the entry into a short TOC/status file and part files before drafting the full content; don't leave an over-limit draft in the worktree while reviewing. After any trim or consolidation, run `Measure-Object -Line` immediately to confirm the line count actually dropped, because paragraph consolidation can grow line count rather than reduce it.
 
 ## Improvement: Cache metric defaults across modes
 
@@ -134,11 +134,11 @@ Action:
 
 Condition:
 
-- When applying manual patches to files that may use CRLF or mixed line endings
+- When applying manual patches to files that may use CRLF or mixed line endings, or when the tracked file is LF in HEAD but the edit tool saves the worktree as CRLF on Windows
 
 Action:
 
-- Do inspect the resulting diff and newline counts for unnecessary line-ending churn; if a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff.
+- Do inspect the resulting diff and newline counts for unnecessary line-ending churn; if a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff. On Windows, `replace_string_in_file` can save the whole file as CRLF even when HEAD is LF, and `[System.IO.File]::WriteAllText` with `UTF8` adds a UTF-8 BOM by default; use `New-Object System.Text.UTF8Encoding($false)` and strip the BOM with `if ($content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }` before saving, then convert CRLF to LF with `-replace "\`r\`n", "\`n"` so the worktree matches HEAD's blob format; verify with `git diff --check` and a `git diff -w --stat` showing only the intended insertions.
 
 ## Improvement: Update indexes before mutable keys
 
@@ -159,6 +159,26 @@ Condition:
 Action:
 
 - Do build those targets sequentially or use one combined build command; don't launch parallel tool calls for separate MSBuild targets that can race on `ZERO_CHECK`, `server-context.obj`, or shared object outputs, because the failure can appear as compiler errors mixed with `Permission denied` on generated object files.
+
+## Improvement: OpenCppCoverage binary: export path resolves relative to --working_dir
+
+Condition:
+
+- When running `run_coverage.ps1` and Phase 1 reports `no .cov file produced (exit 0)` for all focused tests even though the test binaries exited 0 and `OpenCppCoverage.exe` ran
+
+Action:
+
+- Do search for the .cov files under `<BuildDir>/bin/<Config>/<OutDir>/cov-binary/` (i.e., the `--working_dir` plus the relative path) before declaring the run failed; OpenCppCoverage's `--export_type binary:<path>` resolves the path relative to `--working_dir` even when `<path>` starts with a Windows drive letter, and the script's `if (Test-Path $covFile)` check looks at the expected absolute path. If the .cov files are at the relative path, copy them to the expected absolute path and re-run the script; Phase 1's `if (Test-Path $covFile)` will find the copied files, add them to `$covFiles`, and Phase 3 will merge them. Don't assume the script's `no .cov file produced` warning means OpenCppCoverage failed; it means the check path is wrong, not that the instrumentation failed.
+
+## Improvement: Full rebuild needs reconfigure after CMakeFiles wipe
+
+Condition:
+
+- When wiping `build-cov/` build outputs (bin, tools, tests, CMakeFiles) and running `cmake --build build-cov --config Release` expecting a full rebuild
+
+Action:
+
+- Do run `cmake -S . -B build-cov` first to regenerate the per-subproject vcxproj files before invoking `cmake --build`; without the reconfigure, the post-wipe build only emits one or two link lines and exits quickly because the subproject vcxproj files are gone. Verify the reconfigure by counting `.vcxproj` files in `build-cov/` (expect ~140+ for a full llama.cpp build with tests) before declaring the rebuild complete. Don't delete `CMakeFiles/` without a plan to reconfigure, because MSBuild's `ALL_BUILD.vcxproj` references subproject vcxproj files that only exist after the next `cmake` run.
 
 ## Improvement: Scope whitespace checks in dirty worktrees
 
@@ -199,3 +219,43 @@ Condition:
 Action:
 
 - Do check the matching document-index entry and update stale status or handoff wording in the same session; don't leave the index pointing to an already-corrected blocker or outdated next owner.
+
+## Improvement: pwsh -Command backslash-dollar escaping
+
+Condition:
+
+- When running a one-liner PowerShell command from a PowerShell or pwsh terminal via `pwsh -NoProfile -Command "..."` and the command contains `\$var` or `\$null` PowerShell escape sequences
+
+Action:
+
+- Do write the command to a temporary `.ps1` file and invoke it with `pwsh -NoProfile -File <path>.ps1`; don't use `pwsh -NoProfile -Command` with `\$` escapes because the outer shell strips the backslash and PowerShell sees a bare `$var` or `$null` reference that fails to parse, producing a `ParserError: Unexpected token '\'` message. This applies to syntax checks, tokenize calls, and any one-liner that needs PowerShell variable scoping.
+
+## Improvement: Verify upstream tracking branch against actual upstream
+
+Condition:
+
+- When the pre-merge analysis or any merge step assumes a local tracking branch is current, especially when a Manager plan-change decision overrides the design's "single primary `upstream` remote with `master` ref" assumption to use a local `upstream_master` branch instead
+
+Action:
+
+- Do compare the local tracking branch tip to the actual upstream default branch tip via a `GET https://api.github.com/repos/<owner>/<repo>/compare/<local-tip>...master` call or the `commits?per_page=1` endpoint, record the SHA and date of both tips, the ahead/behind count, and the subject and date of each side; surface any non-zero gap as a new Manager decision in the pre-merge report's "Manager decisions requested" section (the design's D1-D5 may not cover it) and as a numbered risk; don't open the pre-merge triage on a range that quietly misses upstream commits, because the merge log will then have a known gap that the Architect review cannot recover from.
+
+## Improvement: Plain ASCII scan on humanizer-cleaned report tables
+
+Condition:
+
+- When writing long triage tables in a pre-merge report or a review report and the humanizer pass leaves the prose clean but the table cells still contain em dashes (U+2014) or other typographic punctuation
+
+Action:
+
+- Do run a `[regex]::Matches($content, '[^\x00-\x7F]')` scan on the file before handoff and replace em dashes with ` - ` (space-hyphen-space) or commas inside the table cells; em dashes are not flagged by `git diff --check` on untracked files, so the scan is the only defense; the scan also catches smart quotes, non-breaking spaces, and BOM bytes that the humanizer would otherwise miss.
+
+## Improvement: T114a .h inline coverage lift is not reachable on MSVC
+
+Condition:
+
+- When a T114a product-only coverage fix targets the .h inline method bodies in 	ools/server/server-cache-legacy.h, 	ools/server/server-cache-controller.h, or 	ools/server/server-cache-hybrid.h and the build uses MSVC with the default /Ob2 inlining
+
+Action:
+
+- Do not rely on direct calls, member function pointers, olatile member function pointers, or file-scope #pragma optimize("", off) to credit the .h source line; OpenCppCoverage on this MSVC host records the inlined call site's source line (the test .cpp), not the .h source line, so the per-file table stays unchanged. Don't promise a coverage lift from .h inline methods without first disabling /Ob2 for the test binary, marking the affected methods with __declspec(noinline), or switching the coverage harness. If the only coverable gap is in .h inline bodies or .cpp lambda bodies, document the lift attempt in the closure record and route the gap to a Manager decision on tooling rather than repeating test-only fixes.

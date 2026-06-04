@@ -1,0 +1,41 @@
+srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 100.000 MiB, 1000 tokens, 104857600 est)
+srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 100.000 MiB payload, 1000 tokens)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 100.000 MiB payload, 3 tokens)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 100.000 MiB payload, 3 tokens)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 100.000 MiB payload, 3 tokens)
+srv  evict_until_:  - hybrid cache: protected-root budget pressure detected (protected bytes: 1433600, resident bytes: 1433600, protected entries: 2, budget bytes: 1048576)
+srv  evict_entry_:  - hybrid cache: evicting protected root due to payload budget pressure (namespace: ns, tokens: 2, payload bytes: 716800, budget bytes: 1048576, use sequence: 1)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
+srv  record_branc:  - hybrid cache: branch metadata over soft limit (metadata bytes: 504, soft max bytes: 1)
+srv     configure:  - cold store: configured root 'stage9_checkpoint_cold_test', format version 1
+srv         start:  - cold store I/O worker: started
+srv          stop:  - cold store I/O worker: stopped
+srv         start:  - cold store I/O worker: started
+srv          stop:  - cold store I/O worker: stopped
+srv  record_paylo:  - hybrid cache: descriptor validation failed (missing target payload)
+srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 100.000 MiB, 1000 tokens, 104857600 est)
+srv     configure:  - cold store: configured root 'stage10_promo_failure_test', format version 1
+srv         start:  - cold store I/O worker: started
+srv          stop:  - cold store I/O worker: stopped
+srv     configure:  - cold store: configured root 'stage10_cold_failure_test', format version 1
+srv         start:  - cold store I/O worker: started
+srv          stop:  - cold store I/O worker: stopped
+srv        update:  - hybrid cache state: 3 entries, 0.000 MiB payload, 0.000 MiB total, 6 tokens (limits: 100.000 MiB payload, 4 tokens)
+srv        update:  - hybrid cache state: 2 entries, 0.000 MiB payload, 0.000 MiB total, 4 tokens (limits: 0.500 MiB payload, 1000 tokens)
+srv        update:  - hybrid cache state: 2 entries, 0.000 MiB payload, 0.000 MiB total, 4 tokens (limits: 0.000 MiB payload, 1000 tokens)
+srv        update:  - hybrid cache state: 2 entries, 1.758 MiB payload, 1.758 MiB total, 4 tokens (limits: 0.000 MiB payload, 1000 tokens)
+srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 100.000 MiB, 1000 tokens, 104857600 est)
+srv     configure:  - cold store: configured root 't114a_hooks_v2', format version 1
+srv         start:  - cold store I/O worker: started
+srv  hybrid_cache:  - hybrid cache: cold store configured
+srv     configure:  - cold store: configured root 't114a_hooks_v2', format version 1
+srv          stop:  - cold store I/O worker: stopped

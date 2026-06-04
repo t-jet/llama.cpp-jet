@@ -1,0 +1,358 @@
+﻿<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+    <head>
+        <meta charset="utf-8"/>
+        <title>test-step10-metrics.exe</title>
+        <link rel="stylesheet" type="text/css" href="../third-party/css/style.css"/>
+        <script src="../third-party/RGraph/libraries/RGraph.common.core.js" type="text/javascript"></script>
+        <script src="../third-party/RGraph/libraries/RGraph.common.dynamic.js" type="text/javascript"></script>
+        <script src="../third-party/RGraph/libraries/RGraph.common.tooltips.js" type="text/javascript"></script>
+        <script src="../third-party/RGraph/libraries/RGraph.pie.js" type="text/javascript"></script>
+        <script src="../third-party/JQuery/jquery-3.4.1.min.js"></script>
+    </head>
+    <body>
+    <script type="text/javascript">
+        $(document).ready(function ()
+        {
+            
+            new RGraph.Pie('pi_40f0099c-83ac-4ed4-91cb-82fe43fafe52', [2303, 901])
+                .set('labels', ['Cover 71%','Uncover 29%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 2303 lines (71%)', 'uncover 901 lines (29%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_e13251a7-ce68-4b0b-b00d-8ae3b6486ffc', [0, 1])
+                .set('labels', ['Cover 0%','Uncover 100%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 0 lines (0%)', 'uncover 1 lines (100%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_472201c0-b8cd-4fa7-81d4-ff17e1d0686e', [2, 3])
+                .set('labels', ['Cover 40%','Uncover 60%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 2 lines (40%)', 'uncover 3 lines (60%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_cd829b71-4d10-48f4-a8ea-a26e617894f3', [83, 57])
+                .set('labels', ['Cover 59%','Uncover 41%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 83 lines (59%)', 'uncover 57 lines (41%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_68da8525-fa82-41ff-8c37-8ef001db462d', [1144, 702])
+                .set('labels', ['Cover 61%','Uncover 39%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 1144 lines (61%)', 'uncover 702 lines (39%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_8e3c0200-2685-47de-acaf-e73447dc9074', [19, 8])
+                .set('labels', ['Cover 70%','Uncover 30%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 19 lines (70%)', 'uncover 8 lines (30%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_714a4f80-f4de-4396-b51f-4e0e821fd779', [20, 7])
+                .set('labels', ['Cover 74%','Uncover 26%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 20 lines (74%)', 'uncover 7 lines (26%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_91a4c35d-176a-41db-8722-4ef743a4b36e', [5, 1])
+                .set('labels', ['Cover 83%','Uncover 17%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 5 lines (83%)', 'uncover 1 lines (17%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_0bedb694-7a71-4649-a5af-1064b1f05a17', [130, 24])
+                .set('labels', ['Cover 84%','Uncover 16%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 130 lines (84%)', 'uncover 24 lines (16%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_927f362c-4c14-4d2d-9a8a-88e6c749856a', [192, 29])
+                .set('labels', ['Cover 86%','Uncover 14%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 192 lines (86%)', 'uncover 29 lines (14%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_11662443-feb1-4063-bdbd-d4a3d4c2fd2e', [463, 68])
+                .set('labels', ['Cover 87%','Uncover 13%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 463 lines (87%)', 'uncover 68 lines (13%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_597c6fdf-249d-4911-9e5a-6887fe0a5f77', [19, 1])
+                .set('labels', ['Cover 95%','Uncover 5%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 19 lines (95%)', 'uncover 1 lines (5%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+            new RGraph.Pie('pi_78729c67-d199-4c48-b34a-c2d161c2e19d', [226, 0])
+                .set('labels', ['Cover 100%','Uncover 0%'])
+                .set('colors', ['rgb(0,255,0)','rgb(255,0,0)'])
+                .set('linewidth', 1)
+                .set('shadow', true)
+                .set('tooltips', ['cover 226 lines (100%)', 'uncover 0 lines (0%)'])
+                .set('tooltips.event', 'onmousemove')
+                .set('labels.sticks', true)
+                .set('labels.sticks.length', 10)
+                .draw();
+            
+
+      })
+    </script>    
+        <h1>
+        test-step10-metrics.exe
+        </h1>
+        <h4>
+        
+        </h4>
+        <table id="rounded-corner">
+            <thead>
+                <tr>
+                    <th scope="col" class="rounded-left">Coverage</th>
+                    <th scope="col">Total lines</th>
+                    <th scope="col" class="rounded-right">Items</th>
+                </tr>
+            </thead> 
+            <tbody>
+                
+                <tr>
+                    <td>
+            <canvas id="pi_40f0099c-83ac-4ed4-91cb-82fe43fafe52" width="280" height="100">Cover 71%</canvas>
+                    </td>            
+                    <td>3204</td>
+                    <td>            
+                      
+                      D:\source\llama.cpp-jet\build-cov\bin\Release\test-step10-metrics.exe
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_e13251a7-ce68-4b0b-b00d-8ae3b6486ffc" width="280" height="100">Cover 0%</canvas>
+                    </td>            
+                    <td>1</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-legacy.h.html">D:\source\llama.cpp-jet\tools\server\server-cache-legacy.h</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_472201c0-b8cd-4fa7-81d4-ff17e1d0686e" width="280" height="100">Cover 40%</canvas>
+                    </td>            
+                    <td>5</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-controller.h.html">D:\source\llama.cpp-jet\tools\server\server-cache-controller.h</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_cd829b71-4d10-48f4-a8ea-a26e617894f3" width="280" height="100">Cover 59%</canvas>
+                    </td>            
+                    <td>140</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-hybrid.h.html">D:\source\llama.cpp-jet\tools\server\server-cache-hybrid.h</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_68da8525-fa82-41ff-8c37-8ef001db462d" width="280" height="100">Cover 61%</canvas>
+                    </td>            
+                    <td>1846</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-hybrid.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-hybrid.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_8e3c0200-2685-47de-acaf-e73447dc9074" width="280" height="100">Cover 70%</canvas>
+                    </td>            
+                    <td>27</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-policy-lru.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-policy-lru.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_714a4f80-f4de-4396-b51f-4e0e821fd779" width="280" height="100">Cover 74%</canvas>
+                    </td>            
+                    <td>27</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-store-cold.h.html">D:\source\llama.cpp-jet\tools\server\server-cache-store-cold.h</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_91a4c35d-176a-41db-8722-4ef743a4b36e" width="280" height="100">Cover 83%</canvas>
+                    </td>            
+                    <td>6</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-controller.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-controller.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_0bedb694-7a71-4649-a5af-1064b1f05a17" width="280" height="100">Cover 84%</canvas>
+                    </td>            
+                    <td>154</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-io-worker.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-io-worker.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_927f362c-4c14-4d2d-9a8a-88e6c749856a" width="280" height="100">Cover 86%</canvas>
+                    </td>            
+                    <td>221</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-store-cold.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-store-cold.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_11662443-feb1-4063-bdbd-d4a3d4c2fd2e" width="280" height="100">Cover 87%</canvas>
+                    </td>            
+                    <td>531</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-graph.cpp.html">D:\source\llama.cpp-jet\tools\server\server-cache-graph.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_597c6fdf-249d-4911-9e5a-6887fe0a5f77" width="280" height="100">Cover 95%</canvas>
+                    </td>            
+                    <td>20</td>
+                    <td>            
+                       <a href="test-step10-metrics/server-cache-graph.h.html">D:\source\llama.cpp-jet\tools\server\server-cache-graph.h</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+                <tr>
+                    <td>
+            <canvas id="pi_78729c67-d199-4c48-b34a-c2d161c2e19d" width="280" height="100">Cover 100%</canvas>
+                    </td>            
+                    <td>226</td>
+                    <td>            
+                       <a href="test-step10-metrics/test-step10-metrics.cpp.html">D:\source\llama.cpp-jet\tests\test-step10-metrics.cpp</a> 
+                      
+                      
+                    </td>
+                </tr>        
+                
+            </tbody>
+            <tfoot>
+                <tr>
+                <td colspan="2" class="rounded-foot-left"></td>
+                <td class="rounded-foot-right"></td>
+                </tr>
+            </tfoot>            
+        </table>
+        <hr/>
+        <table width="100%" >
+         <thead>
+            <tr>
+               <th align="center">
+                  <small>Generated by</small>
+                  <a href="https://github.com/OpenCppCoverage/OpenCppCoverage/releases">
+                     <strong>OpenCppCoverage (Version: 0.9.9.0)</strong>
+                  </a>
+               </th>
+            </tr>
+         </thead>
+        </table>
+    </body>
+</html>
