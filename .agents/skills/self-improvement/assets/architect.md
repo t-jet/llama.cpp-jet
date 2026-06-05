@@ -263,3 +263,19 @@ Action:
 - Do write the full closure record in a new `part-XX-stageN-closure.md` from the start and put a short pointer in the entry doc, write the test-plan tooling limitation addendum in a new `part-XX-tNNN-tooling-limitation.md` and put a short pointer in the parent test-plan part, trim any closure-status or T114a-lift-attempt narrative in the merge log to a short pointer that references the entry-doc closure part
 
 - Then convert every modified or new file to LF-only UTF-8 (no BOM) with `UTF8Encoding($false)` and verify with `[regex]::Matches($string, [char]13).Count -eq 0` and `[System.BitConverter]::ToString($bytes[0..2])` for the BOM check before running `git diff --check`; don't author the closure section inline in the entry doc, don't leave CRLF line endings on Windows-created markdown files, and don't rely on `[regex]::Matches($string, '`n')` for line-ending counts because the `` `n `` regex token is a literal backtick-n in PowerShell single quotes and returns zero matches
+
+## Improvement: Pre-commit `git diff --check --cached` on every doc sweep
+
+Condition:
+- When a doc sweep scope includes committing untracked test report files or other durable docs authored by other agents on Windows, and the worktree author is the same Windows host
+
+Action:
+- Do run `git diff --check --cached` on the staged set before commit, not just on the worktree diff; convert any staged file with CRLF to LF-only via `[System.IO.File]::ReadAllText` then `-replace "\`r\`n", "\`n"` and `WriteAllText` with `UTF8Encoding($false)`; re-run `git diff --check --cached` after conversion; don't trust that an untracked file authored by another agent on Windows is LF-only or whitespace-clean, because the existing architect memory covers files I create with `create_file` but not files authored by other agents that the doc sweep commits; don't add a trailing space in a markdown blockquote separator like `> ` — use `>` alone with no trailing space
+
+## Improvement: Document-index row column-count check
+
+Condition:
+- When replacing a row in `document-index.md` (or any markdown table) and the user supplies a row text that does not match the table's column count, or the prior row text already had a column-count mismatch
+
+Action:
+- Do count the columns in the new row text against the table header (split on unescaped `|` with surrounding whitespace stripped) before applying; if the new row has fewer columns than the header, add the missing `Useful for` (or equivalent) column with a one-line description rather than leaving the row short; record the column-count fix in the post-task improvement rather than as a blocking finding, because the pre-existing 2-column-vs-3-column mismatch is a markdown lint warning, not a content bug; don't reject the user-supplied text on column count alone, and don't add filler text to the description column to reach the header count

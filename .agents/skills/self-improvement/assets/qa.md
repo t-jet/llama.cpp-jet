@@ -198,6 +198,18 @@ Action:
 - Do put verbatim long commands in a fenced code block under a `### Long-form commands` subsection, and keep only short summaries in the table cells; markdown table parsers count unescaped `|` as column separators and emit MD056/MD060 lint errors, while MD012 catches the resulting blank-line clutter.
 - Do check the generated report with `get_errors` for the touched markdown files before handoff, and fix MD024 duplicate headings by making the heading text unique per section.
 
+## Improvement: clean-build before any test on a new merge tree
+
+Condition:
+
+- When a QA session must run the closure contracts on a freshly-produced real two-parent merge commit, especially when prior closures were based on a single-parent commit or a non-merged tree
+
+Action:
+
+- Do a full clean build (reconfigure, remove the coverage dir, rebuild every target the test plan needs) as the very first action, before any ctest, pytest, HTTP probe, coverage run, k6 run, or closure-contract measurement. Do not accept the prior Developer's incremental `cmake --build` pass as a clean build, and do not trust prior closure numbers that were measured on a different tree.
+- When the clean build fails on a semantic conflict that git's 3-way merge did not flag (such as a duplicate `const bool` declaration added by both parents in the same lexical scope), report the entire session as BLOCKED with the build defect as the reason for every row; do not classify any closure contract row as PASS or FAIL by reference to prior-run numbers, and do not reclassify a prior "tooling limitation" closure as the current verdict.
+- Pair the BLOCKED report with a Developer fixes file that quotes the exact error code and lines, identifies which parent commits added the duplicate content, and scopes a one-line fix; do not modify the durable docs, closure record, implementation log, or `document-index.md` in the QA session.
+
 ## Improvement: regenerate buggy parser output in the same session as the parent report
 
 Condition:
@@ -207,6 +219,28 @@ Condition:
 Action:
 
 - Do regenerate the buggy artifact in the same QA session and add a `## Correction` section at the top noting the original parsing bug and the regeneration context; cite the parent report and the fixes handoff so the lineage is clear in the artifacts bundle.
+
+## Improvement: run_coverage.ps1 may fail to produce .cov files via Start-Process
+
+Condition:
+
+- When running `run_coverage.ps1` (or any wrapper that calls `OpenCppCoverage.exe` via `Start-Process -ArgumentList $argArray`) and Phase 1 reports `no .cov file produced (exit 0)` for every focused test binary even though the test binary ran successfully (e.g. log shows the test stdout/closing banner)
+
+Action:
+
+- Do not classify T114/T114a as FAIL based on the empty `coverage-merged.xml`; reproduce the per-test `.cov` files with a direct invocation that passes the `--export_type binary:D:\path\file.cov` argument as a single string (build the argument array, then call `Start-Process -FilePath $OcPath -ArgumentList $argList -WorkingDirectory $binDir`), or run OpenCppCoverage with the merged `& $OcPath $argList` form. The bug is in how the script's `Start-Process -ArgumentList` array joins colon-prefixed export values; the manual form works. Cite both the script's empty XML and the manually-produced `coverage-report.md` in the report so the next session can see the script bug and the validated numbers.
+- Do pair the run with a separate follow-up handoff that scopes a one-line fix to the script (e.g. join the `--export_type` value into a single argument before passing to Start-Process), so the next session can either patch the script or run the manual form.
+
+## Improvement: dedupe OpenCppCoverage merged Cobertura XML by (file, line)
+
+Condition:
+
+- When parsing `OpenCppCoverage.exe --input_coverage A.cov --input_coverage B.cov ... --export_type cobertura:out.xml` output to compute union line coverage
+
+Action:
+
+- Do not assume the merged Cobertura XML contains a single `<class>` per source file; the merge step emits one `<class>` block per input `.cov` file for the same source path. Without deduplication, `combined_covered` and `combined_valid` will be roughly N times the true value (where N is the number of input `.cov` files), which yields a falsely-low union rate. The correct parser walks every `<class>` block, groups by basename, and for each (basename, line number) takes the max `hits` across duplicates. `combined_covered` then counts lines where the max hits > 0; `combined_valid` counts unique line numbers.
+- Do verify the per-file line rate in the parsed report against a known-good prior run (e.g. `coverage-run-20260605-02/coverage-report.md`) before accepting the numbers; if the rates diverge by more than 1%, the dedup step is wrong.
 
 ## Improvement: verify working tree after `git rm -r` and handle mixed tracked/untracked artifact folders
 

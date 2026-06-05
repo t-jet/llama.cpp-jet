@@ -254,11 +254,11 @@ Action:
 
 Condition:
 
-- When a T114a product-only coverage fix targets the .h inline method bodies in 	ools/server/server-cache-legacy.h, 	ools/server/server-cache-controller.h, or 	ools/server/server-cache-hybrid.h and the build uses MSVC with the default /Ob2 inlining
+- When a T114a product-only coverage fix targets the .h inline method bodies in 	ools/server/server-cache-legacy.h, 	ools/server/server-cache-controller.h, or 	ools/server/server-cache-hybrid.h and the build uses MSVC with /Ob1 (OnlyExplicitInline, the RelWithDebInfo default) or /Ob2 inlining
 
 Action:
 
-- Do not rely on direct calls, member function pointers, olatile member function pointers, or file-scope #pragma optimize("", off) to credit the .h source line; OpenCppCoverage on this MSVC host records the inlined call site's source line (the test .cpp), not the .h source line, so the per-file table stays unchanged. Don't promise a coverage lift from .h inline methods without first disabling /Ob2 for the test binary, marking the affected methods with __declspec(noinline), or switching the coverage harness. If the only coverable gap is in .h inline bodies or .cpp lambda bodies, document the lift attempt in the closure record and route the gap to a Manager decision on tooling rather than repeating test-only fixes.
+- Do not rely on direct calls, member function pointers, volatile member function pointers, or file-scope #pragma optimize("", off) to credit the .h source line. Verified 2026-06-05: adding `__declspec(noinline)` BEFORE the return type on the inline body accessors of `hybrid_cache_entry` (`size`, `n_tokens`, `resident_payload_bytes`, `has_target_payload`, `has_draft_payload`, `mark_used`) lifted T114a from 0.6974 (2077/2978) to 0.7035 (2090/2971) and `hybrid.h` per-file from 0.5929 (83/140) to 0.7273 (96/132). The body attribution moves from the test .cpp call site to the .h source line as expected under MSVC /Ob1. Don't split the function into a forward declaration plus a separate _impl() body; MSVC rejects the trailing `__declspec(noinline)` after the cv-qualifier with C2143; the correct placement is before the return type. Don't attempt to lift the denominator-inflating lines that are pure declarations, structural `};` braces, or un-called function bodies (`policy-lru::plan_evictions`); they need a test plan denominator change or new test cases, not a noinline annotation.
 
 ## Improvement: Verify prompt facts against repo state before acting
 
@@ -269,3 +269,23 @@ Condition:
 Action:
 
 - Do verify each cited fact with a direct git or file command (`git log --oneline <range>`, `git grep`, `git rev-list --parents`, `git diff <ref1> <ref2> -- <path>`, `Test-Path <build-dir>/build.ninja`) before acting on it; don't propagate the prompt's numbers, paths, or expected content into the implementation log, evidence section, or merge commit message if they disagree with the actual state. Record both the prompt's claim and the actual value in the implementation entry so the next reviewer can see the discrepancy. If the build directory named in the prompt is empty (no `build.ninja`, no `bin/`, no `.vcxproj`), look for the actual populated build directory and use that, noting the substitution in the verification evidence.
+
+## Improvement: Real-merge build halt may mask other latent duplicates
+
+Condition:
+
+- When fixing a real `git merge` build halt caused by a redefinition error (C2086, C2264, etc.) in a file that both merge parents modified, and the Manager binding decision authorized only one specific duplicate removal
+
+Action:
+
+- Do run the full incremental compile to the same target after the first duplicate removal, even if the manager's binding decision specified only the first error; the prior build halt at error N may have masked errors N+1, N+2 that the fix exposes. If the build then halts on a second pre-existing duplicate, STOP per the binding "build fails for any other reason" rule, document the second duplicate with `git blame` evidence, and escalate a new Manager decision rather than expanding the authorized scope unilaterally. Don't claim the first fix is "PASS" in the implementation log until the incremental compile to the binding target succeeds. Don't commit a single-fix tree that does not compile, because the next developer would inherit a non-compiling state.
+
+## Improvement: Scope-check regex duplicate candidates before fixing
+
+Condition:
+
+- When a regex scan of a merged worktree file returns N candidate duplicate declarations (function or static names appearing twice) in a file that both merge parents modified
+
+Action:
+
+- Do manually verify the lexical scope of each candidate pair before applying any fix: class methods, class forwarders (`Foo::method` outside the class), and same-name overloads are not true duplicates. Only `static` definitions or free functions in the same scope with byte-identical bodies are true duplicates. Don't apply a fix based on the regex count alone; a typical scan of a 6800-line server file returns 7-8 candidates, of which 1-2 are real duplicates. Use a 5-line-before-and-after context check to confirm scope, and use `git blame` on each copy to confirm the two copies came from different parents of the merge.
