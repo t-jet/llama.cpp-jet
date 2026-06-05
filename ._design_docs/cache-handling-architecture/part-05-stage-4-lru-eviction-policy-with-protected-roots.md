@@ -204,6 +204,55 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 
 ---
 
+### Stage 11: Upstream Merge Integration
+
+**Objective:** Re-sync the fork with `upstream_master` and rework prior stages when upstream cache or checkpoint changes invalidate them.
+
+**Deliverables:**
+
+- Pre-merge analysis of upstream commits touching cache, checkpoint, speculative decoding, server context, slot, and HTTP layers
+- Merge execution with conflict resolution that keeps `--cache-mode hybrid` and the legacy default path unchanged
+- Rework assessment mapping upstream changes to affected Stages 1-10, with required code or design updates
+- Regression test reruns for any behavior the upstream change touches
+- Merge log: decisions, deferred upstream commits, and known gaps
+
+**Exit criteria:**
+
+- Merge complete with no unresolved conflicts
+- All prior-stage tests pass on the merged tree
+- Hybrid mode invariants from earlier stages hold
+- Upstream cache-related changes are integrated or recorded as known gaps with a follow-up plan
+- Legacy mode behavior is unchanged
+
+**Test coverage:** Prior-stage regression reruns, focused conflict resolution tests, compatibility namespace preservation, CLI flag preservation
+
+---
+
+### Stage 12: Stress Testing and Benchmarking
+
+**Objective:** Validate hybrid mode under sustained load and measure end-to-end performance against the legacy path.
+
+**Deliverables:**
+
+- Stress scenarios: budget exhaustion, concurrent multi-slot access, large branch forests, prompt storms, mixed workload profiles
+- Benchmark scenarios: exact-blob hit rate, checkpoint hit rate, cold transition frequency, end-to-end token throughput, restore latency
+- Configuration matrix: `--cache-ram`, slot count, model size, context length, draft presence, workload profile
+- Long-run checks: memory stability, file descriptor usage, metric counter stability over multi-hour runs
+- Baseline numbers for regression detection in later runs
+- Bottleneck and tuning report for operators
+
+**Exit criteria:**
+
+- No crashes, leaks, or unbounded resource growth under stress
+- Hybrid mode shows measurable gains on the configured benchmarks
+- Baselines recorded for future comparison
+- Bottlenecks and tuning notes are documented
+- Legacy mode performance is unaffected
+
+**Test coverage:** Stress scenarios, benchmark scenarios, configuration matrix, long-run stability, workload profile validation, regression checks against legacy mode
+
+---
+
 ## Implementation Notes
 
 Each stage builds on the previous one and maintains these invariants:
@@ -214,8 +263,9 @@ Each stage builds on the previous one and maintains these invariants:
 - **Incremental value:** Each stage adds measurable capability or reduces risk
 - **Isolated testing:** Each stage's new behavior is testable in isolation
 - **Explicit failures:** Unsupported paths fail explicitly, not silently
+- **Upstream-aware:** Stage 11 re-runs the staged plan against the live upstream, since new cache, checkpoint, or speculative decoding work there can invalidate or require rework on any prior stage
 
-The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5).
+The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5). Stage 11 revisits prior stages after an `upstream_master` merge; Stage 12 closes the validation loop with stress and benchmark evidence at production-relevant scales, not just unit-scale tests.
 
 ## Requirement Traceability Matrix
 

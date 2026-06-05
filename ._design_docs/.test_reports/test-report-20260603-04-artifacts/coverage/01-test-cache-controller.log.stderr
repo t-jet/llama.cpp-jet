@@ -1,4 +1,0 @@
-srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 100.000 MiB, 1000 tokens, 104857600 est)
-srv        update:  - hybrid cache state: 0 entries, 0.000 MiB payload, 0.000 MiB total, 0 tokens (limits: 100.000 MiB payload, 1000 tokens)
-srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)
-srv  record_paylo:  - hybrid cache: descriptor validation failed (admission validation failed)

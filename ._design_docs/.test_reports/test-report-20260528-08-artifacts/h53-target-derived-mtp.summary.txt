@@ -1,7 +1,0 @@
-Command: D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe --model D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf --host 127.0.0.1 --port 18153 --ctx-size 512 --parallel 1 --cont-batching --kv-unified --server-slots --cache-ram 100 --temp 0 --seed 42 --metrics --cache-mode hybrid --spec-type draft-mtp --log-verbosity 5
-Ready: False
-ExitCode: 1
-Health: 
-ResultJson: D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260528-08-artifacts\h53-target-derived-mtp.result.json
-OutLog: D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260528-08-artifacts\h53-target-derived-mtp.out.log
-ErrLog: D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260528-08-artifacts\h53-target-derived-mtp.err.log
