@@ -4,6 +4,88 @@ Source: [../cache-handling-phase11-implementation.md](../cache-handling-phase11-
 Date: 2026-06-04
 Invalidation date: 2026-06-05
 
+## Re-closure (2026-06-05)
+
+**Manager re-closure decision: PASS on commit `6e3aa045c`.**
+
+The rework loop replaced the fabricated single-parent merge
+`72cfbcd44` with the canonical real two-parent merge
+`e0f3f868b`, removed the build-defect duplicates from
+`tools/server/server-context.cpp` in `602f3e3f0`, and lifted
+T114a product-only coverage from 0.6974 (FAIL) to 0.7035
+(PASS) in `6e3aa045c`. All closure contracts are now met on
+`6e3aa045c` and the re-closure commit on top of `dc929d62`.
+
+### Final closure contracts (authoritative)
+
+| ID | Verdict | Evidence |
+| --- | --- | --- |
+| T114 (Combined 80%) | PASS | Combined line rate 0.8553 (5436/6356 lines for the 19-file hybrid-mode denominator) |
+| T114a (Product-only 70%) | PASS | Product-only line rate 0.7035 (2090/2971 lines for the 11 product files), 0.0035 above the 70% floor |
+| T115 (per-file aggregation) | PASS | per-file table in coverage-report.md lists each file exactly once (19 rows) |
+| T121 (public checkpoint admission) | PASS | `cache_checkpoint_admission_failures_total{mode="hybrid"}` non-zero on a hybrid-mode MTP server |
+
+PASS: 4 (T114, T114a, T115, T121). The full test report
+records the supporting rows PASS as well: ctest 9/9, pytest
+in-scope, k6, OWASP, and Stage 4-9 regression.
+
+### Commit chain (Stage 10 to closure)
+
+`bdb166ac1` (Stage 10 complete) -> 5 Stage 11 commits ->
+`e0f3f868b` (real two-parent merge) -> `602f3e3f0`
+(build-defect fix) -> `6e3aa045c` (T114a lift) ->
+`dc929d6298d590dcb27b2f9fb799bc1ca9ce365c` (durable doc
+sweep) -> this re-closure commit. The prior merge log
+2026-06-04-01 and the prior closure record below remain on
+disk as INVALIDATED historical records.
+
+### Manager decisions recorded in this re-closure
+
+- D7 (2026-06-04): accept the real two-parent merge
+  `e0f3f868b` and the build-defect fix `602f3e3f0`; reject
+  the fabricated single-parent merge `72cfbcd44`. The 5
+  Stage 11 commits between the fabricated merge and the
+  pre-merge tip are preserved on the first-parent chain.
+- D8 (2026-06-05): record the final closure state in this
+  file and the entry doc. The rework loop produced a new
+  chain of fix commits: `602f3e3f0` (build-defect
+  duplicates) and `6e3aa045c` (T114a lift). The 70% floor
+  and the 11-file product-only denominator are unchanged
+  in the test plan.
+- D9 (2026-06-05): declare Stage 11 CLOSED. The T114a
+  soft-closure from 2026-06-04 is rejected; the actual
+  ratio is 0.7035 and the 70% floor is met by 0.0035. The
+  minimum-diff `__declspec(noinline)` fix in
+  `tools/server/server-cache-hybrid.h` is the closure
+  evidence for T114a.
+
+### Evidence pointers
+
+- Authoritative test report:
+  [../../.test_reports/test-report-20260604-06.md](../../.test_reports/test-report-20260604-06.md)
+- Real merge correction:
+  [./part-15-real-merge-correction.md](./part-15-real-merge-correction.md)
+- Build-defect fix:
+  [./part-16-build-defect-semantic-duplicates.md](./part-16-build-defect-semantic-duplicates.md)
+- T114a lift:
+  [./part-17-t114a-product-only-coverage.md](./part-17-t114a-product-only-coverage.md)
+- QA re-verification:
+  [./part-18-qa-reverification.md](./part-18-qa-reverification.md)
+- Real merge log:
+  [./merge-log-20260604-02.md](./merge-log-20260604-02.md)
+- BLOCKED intermediate test report:
+  [../../.test_reports/test-report-20260604-05.md](../../.test_reports/test-report-20260604-05.md)
+- Durable doc sweep:
+  `dc929d6298d590dcb27b2f9fb799bc1ca9ce365c`
+
+### What is preserved from the prior 2026-06-04 closure
+
+The prior closure record below is preserved as a historical
+record of the invalid closure attempt. D7, D8, and D9 are
+the corrections that supersede the prior PASS-with-tooling-
+limitation closure. The four-link rework loop
+(part-15..18) is the authoritative record of the rework.
+
 ## INVALIDATION NOTICE (2026-06-05)
 
 This closure record is INVALIDATED. The 2026-06-04 closure was

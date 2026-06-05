@@ -1,14 +1,15 @@
 # Stage 11 implementation log: upstream merge integration
 
-Status: Stage 11 rework loop complete on commit `6e3aa045c`.
-All closure contracts PASS. The prior 2026-06-04 closure
-(based on the fabricated single-parent merge `72cfbcd44`
-and a soft T114a closure as a tooling limitation) is
-INVALIDATED. The Manager re-closes Stage 11 in a
-separate gate. This log records the implementation
-plan, the rework loop, and the durable state of the
-durable docs after the rework loop. It does not
-declare Stage 11 closed.
+Status: Stage 11 CLOSED. Manager re-closure PASS on commit
+`6e3aa045c` (effective from the re-closure commit on top of
+`dc929d62`). All closure contracts met: T114 0.8553 PASS,
+T114a 0.7035 PASS, T115 PASS, T121 PASS. The rework loop
+replaced the prior 2026-06-04 closure (fabricated single-
+parent merge `72cfbcd44`, soft T114a closure as tooling
+limitation) with the real two-parent merge `e0f3f868b`,
+the build-defect fix `602f3e3f0`, and the T114a lift
+`6e3aa045c`. The authoritative test report is
+[test-report-20260604-06.md](.test_reports/test-report-20260604-06.md).
 Planning date: 2026-06-04
 Rework loop dates: 2026-06-04 to 2026-06-05
 Design document: [cache-handling-phase11-design.md](cache-handling-phase11-design.md)
@@ -237,7 +238,7 @@ design rework is required before implementation planning.
 | Stage 11 build-defect fix (D8) | PASS, 2026-06-05 (commit `602f3e3f0`) |
 | Stage 11 T114a product-only coverage fix (D9) | PASS, 2026-06-05 (commit `6e3aa045c`, 0.7035 PASS by 0.0035) |
 | Stage 11 QA re-verification (test-report-20260604-06) | PASS, 2026-06-05 (all closure contracts PASS on `6e3aa045c`) |
-| Stage 11 Manager re-closure | NOT STARTED (next gate) |
+| Stage 11 Manager re-closure | PASS, 2026-06-05 (commit `6e3aa045c`, effective from the re-closure commit on top of `dc929d62`) |
 
 ## Handoff
 
@@ -277,15 +278,32 @@ to the PASS
 is in
 [part-18-qa-reverification.md](cache-handling-phase11-implementation/part-18-qa-reverification.md).
 
-The Stage 11 closure is not declared closed by this log. The
-Manager re-closes Stage 11 in a separate gate. The next owner
-is the Manager. The T114a soft-closure from 2026-06-04 is
+Stage 11 is CLOSED on commit `6e3aa045c` (Manager re-closure
+PASS, effective from the re-closure commit on top of
+`dc929d62`). The T114a soft-closure from 2026-06-04 is
 rejected; the actual ratio is 0.7035 and the 70% floor is met
 by 0.0035. The next stage (per the architecture doc) is Stage
 12 (Stress Testing and Benchmarking) or a future Stage 11
 cycle that re-opens the upstream merge activity.
 
 ## Stage 11 closure (2026-06-04)
+
+### Re-closure (2026-06-05)
+
+Manager re-closure: PASS on commit `6e3aa045c` (effective
+from the re-closure commit on top of `dc929d62`). The rework
+loop replaced the fabricated single-parent merge `72cfbcd44`
+with the canonical real two-parent merge `e0f3f868b`, fixed
+the build-defect duplicates in `602f3e3f0`, and lifted the
+T114a product-only coverage from 0.6974 to 0.7035 in
+`6e3aa045c`. The full re-closure record, final closure
+contracts, commit chain, D7/D8/D9 decisions, and evidence
+pointers are in
+[part-09-stage11-closure.md](cache-handling-phase11-implementation/part-09-stage11-closure.md)
+under the "Re-closure (2026-06-05)" section. The prior
+2026-06-04 closure (fabricated single-parent merge and soft
+T114a closure) remains preserved as INVALIDATED historical
+record below.
 
 > **INVALIDATED 2026-06-05**. The 2026-06-04 closure used the
 > fabricated single-parent commit `72cfbcd44` (D7) and a soft
