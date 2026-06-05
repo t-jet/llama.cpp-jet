@@ -9,8 +9,13 @@
 #include <cstddef>
 #include <memory>
 #include <set>
+#include <string>
 
 struct server_context_impl; // private implementation
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_stats);
+#endif
 
 struct server_context_meta {
     std::string build_info;
@@ -110,6 +115,7 @@ struct server_routes {
     server_http_context::handler_t post_completions;
     server_http_context::handler_t post_completions_oai;
     server_http_context::handler_t post_chat_completions;
+    server_http_context::handler_t post_control;
     server_http_context::handler_t post_responses_oai;
     server_http_context::handler_t post_transcriptions_oai;
     server_http_context::handler_t post_anthropic_messages;
@@ -133,7 +139,8 @@ private:
             server_task_type type,
             const json & data,
             const std::vector<raw_buffer> & files,
-            task_response_type res_type);
+            task_response_type res_type,
+            const json * chat_messages = nullptr);
     std::unique_ptr<server_res_generator> handle_slots_save(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_restore(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_erase(const server_http_req &, int id_slot);

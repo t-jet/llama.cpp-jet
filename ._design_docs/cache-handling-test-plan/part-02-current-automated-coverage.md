@@ -1,0 +1,84 @@
+# Cache handling test plan - Part 2: current integration coverage
+
+Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
+
+## Scope boundary
+
+This plan is primarily for model-backed public integration tests. It also classifies focused C++ and Python metric-shape evidence when public HTTP cannot create or observe an internal precondition.
+
+Do not count these as model-backed public integration coverage:
+
+- `tests/test-cache-controller.cpp`
+- focused cache-controller line coverage
+- pure prefix-index, LRU, metadata, or compatibility-key helper tests
+- adopted Jinja fixture tests that do not start `llama-server`
+
+Those tests are useful, but reports must label them as focused or metric-shape evidence, not public HTTP evidence.
+
+For Stage 5, focused controller or fault-injection tests may be cited as supplemental evidence for internal failure preconditions that public HTTP cannot create. Report them as focused evidence, not as model-backed integration coverage.
+
+For Stage 7, focused graph and controller tests are expected evidence for branch node lifecycle, traversal, slot refs, metadata soft-limit diagnostics, checksum candidate selection, and global cross-namespace eviction ordering. Public HTTP remains required for model-backed save/load and public surface regression rows.
+
+For Stage 8, focused graph and controller tests are expected evidence for metadata-only retention, re-materialization planning, mismatch-parent selection, equivalent-branch deduplication, safe metadata pruning, cold cleanup ownership, and metadata admission rejection. Python metric-shape evidence may cover public Prometheus labels. Public HTTP remains useful for model-backed regression and metrics snapshots, but it cannot directly create every metadata-only or branch pressure precondition.
+
+## Integration coverage needed
+
+Model-backed integration tests must cover behavior that depends on real `llama_context` state and the server scheduler:
+
+- target-only save/load round trip
+- repeated hybrid restore from the same cached entry
+- target/draft paired save/load when a normal separate draft model is configured
+- draft context mode namespace isolation for no draft, normal separate draft model, target-derived `draft-mtp`, and separate-model `draft-mtp`
+- restore failure after target or draft restore begins
+- idle-slot save/load through the scheduler path
+- metrics changing after real cache save, hit, miss, eviction, and restore failure
+- resident payload byte pressure from `--cache-ram`
+- deterministic LRU ordering after successful restore and equivalent-entry refresh
+- no recency refresh after failed restore
+- protected-root priority, protected fallback eviction, and protected admission rejection
+- Stage 4 metrics for payload eviction and protected-root decisions
+- descriptor-owned exact blob payload save/load shape
+- descriptor validation for version, kind, size, checksum, store reference, owner, residency, and target/draft pair state
+- pair-state/runtime mismatch rejection
+- paired target/draft eviction and byte accounting
+- transactional restore failure behavior: no hit, no usage or recency refresh, fallback counted, and pre-restore state restored
+- exact empty-preimage rollback and unsupported clear preflight
+- Stage 5 metrics for descriptor validation failures, pairing violations, fallback restores, hot descriptors, and evicted descriptors
+- stable public HTTP surface: `/health`, `/metrics`, and missing `/cache/stats`
+- cold store opt-in behavior (server works identically to Stage 5 when `--cache-cold-path` is absent)
+- demotion: hot payloads are demoted to cold when `--cache-cold-path` is configured and `--cache-ram` budget is exceeded
+- promotion: cold payloads are promoted back to hot on cache hit; current request falls back
+- startup validation: invalid `--cache-cold-path` terminates server with error
+- cold layer metrics: demotion/promotion counters, cold payload bytes, cold payload count, hot payload count, cold restore latency, eviction exclusion of demoted payloads
+- fault tolerance: cold file corruption, cold store read failure, queue-full fallback
+- protected root demotion warning
+- target/draft pair demotion and promotion as a unit
+- Stage 4 and Stage 5 regression with cold store configured
+- metadata-only branch retention after payload eviction
+- successful and failed re-materialization of a selected metadata-only node
+- token or checksum mismatch handling and deterministic mismatch-parent selection
+- equivalent branch reuse for payload-bearing and metadata-only candidates
+- branch metadata admission rejection when protected or referenced topology prevents safe pruning
+- cold cleanup ownership checks during eviction or pruning
+- Stage 8 metric names and label combinations
+- Stage 4 through Stage 7 regression after Stage 8
+
+Some Stage 5 rows need focused controller evidence or another fault-injection harness. Public HTTP can prove normal model-backed save, hit, metrics shape, budget pressure, and legacy compatibility, but it cannot directly corrupt a descriptor, change a hot-store reference, force a draft apply failure after target apply, or make the memory clear primitive unsupported.
+
+Some Stage 8 rows need focused graph/controller evidence or another stats-capable harness. Public HTTP can prove public surface stability, model-backed regression, and metric output, but it cannot directly force branch metadata pressure, retain an internal metadata-only parent with descendants, corrupt a cold descriptor, or inspect canonical branch identity.
+
+The current public runner still treats draft-model rows as placeholders unless a session adds a draft-capable command path. Public HTTP evidence can pass a draft-mode row only when the server actually starts in that runtime mode and the repeated request proves a restore with `timings.cache_n > 0`. If code inspection shows that the compatibility key does not include a runtime discriminator for MTP versus non-MTP draft contexts, report the cross-mode isolation rows as `BLOCKED` and hand the gap to Developer.
+
+## Coverage reporting
+
+Do not report unit-test line coverage in this integration plan. Unit coverage belongs to focused/unit coverage reports and does not prove server integration behavior.
+
+Integration reports should instead list:
+
+- server binary path
+- model path
+- command line used to start the server
+- HTTP requests sent
+- response status and relevant response fields
+- metrics before and after cache events
+- pass, fail, skip counts

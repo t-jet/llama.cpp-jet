@@ -333,8 +333,62 @@ static common_chat_msg simple_msg(const std::string & role, const std::string & 
     return msg;
 }
 
+static std::string strip_template_markup(std::string prompt) {
+    prompt = std::regex_replace(prompt, std::regex("<\\|template_markup:[^|]*\\|>"), "");
+    prompt = std::regex_replace(prompt, std::regex("<\\|cache_boundary:[^|]*\\|>"), "");
+    return prompt;
+}
+
+static void test_template_markup_protocol(void) {
+    static const char * tmpl = R"jinja(
+{%- set template_markup = namespace(features=[]) -%}
+{%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+    {%- set template_markup.features = template_markup.features + ['cache_boundary=1'] -%}
+{%- endif -%}
+{%- macro cache_mark(kind, label='') -%}
+    {%- if emit_cache_boundaries is defined and emit_cache_boundaries -%}
+        {{- '<|cache_boundary:' ~ kind ~ (':' ~ label if label else '') ~ '|>' -}}
+    {%- endif -%}
+{%- endmacro -%}
+{%- if template_markup.features|length > 0 -%}
+    {{- '<|template_markup:v1:' ~ template_markup.features|join(',') ~ '|>' -}}
+{%- endif -%}
+{%- for message in messages -%}
+    {{- cache_mark('message_start', message.role) -}}
+    {{- message.role ~ ': ' ~ message.content ~ '\n' -}}
+    {{- cache_mark('message_end', message.role) -}}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- cache_mark('generation_prompt_start', 'assistant') -}}
+    {{- 'assistant:' -}}
+    {{- cache_mark('generation_prompt_end', 'assistant') -}}
+{%- endif -%}
+)jinja";
+
+    auto tmpls = common_chat_templates_init(nullptr, tmpl, "", "");
+    common_chat_templates_inputs inputs;
+    inputs.use_jinja = true;
+    inputs.messages = {
+        simple_msg("user", "Hello"),
+    };
+    inputs.add_generation_prompt = true;
+
+    const std::string normal = common_chat_templates_apply(tmpls.get(), inputs).prompt;
+    assert(normal == "user: Hello\nassistant:");
+
+    inputs.chat_template_kwargs["emit_cache_boundaries"] = "true";
+    const std::string marked = common_chat_templates_apply(tmpls.get(), inputs).prompt;
+    assert(marked.rfind("<|template_markup:v1:", 0) == 0);
+    assert(std::regex_search(marked, std::regex("^<\\|template_markup:v1:([^|,=]+=[0-9]+,)*cache_boundary=1(,[^|,=]+=[0-9]+)*\\|>")));
+    assert(marked.find("<|cache_boundary:message_start:user|>") != std::string::npos);
+    assert(marked.find("<|cache_boundary:generation_prompt_start:assistant|>") != std::string::npos);
+    assert(strip_template_markup(marked) == normal);
+}
+
 int main_automated_tests(void) {
     // jinja::enable_debug(true);
+
+    test_template_markup_protocol();
 
     std::vector<llama_chat_message> conversation {
         {"system", "You are a helpful assistant"},
@@ -618,6 +672,16 @@ int main_automated_tests(void) {
         },
         {
             /* .name= */ "ibm-granite/granite-4.0 (tool call)",
+            /* .template_str= */ "{%- for message in messages %}\n    {%- if message['role'] == 'assistant_tool_call' %}\n    {{- '<|start_of_role|>assistant<|end_of_role|><|tool_call|>' + message['content'] + '<|end_of_text|>\\n' }}\n    {%- else %}\n    {{- '<|start_of_role|>' + message['role'] + '<|end_of_role|>' + message['content'] + '<|end_of_text|>\\n' }}\n    {%- endif %}\n    {%- if loop.last and add_generation_prompt %}\n    {{- '<|start_of_role|>assistant<|end_of_role|>' }}\n    {%- endif %}\n{%- endfor %}\n{# <tool_call> <tools> g4_default_system_message #}",
+            /* .expected_output= */       "<|start_of_role|>system<|end_of_role|>You are a helpful assistant<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Hello<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>Hi there<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Who are you<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>   I am an assistant   <|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Another question<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>What is the weather?<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|><|tool_call|><tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"location\": \"NYC\"}}\n</tool_call><|end_of_text|>\n<|start_of_role|>tool_response<|end_of_role|>{\"temperature\": 72}<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
+            /* .expected_output_jinja= */ "",
+            /* .bos_token= */ "",
+            /* .eos_token= */ "",
+            /* .supported_with_jinja= */ true,
+            /* .extra_conversation= */ {{"user", "What is the weather?"}, {"assistant_tool_call", "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"location\": \"NYC\"}}\n</tool_call>"}, {"tool_response", "{\"temperature\": 72}"}},
+        },
+        {
+            /* .name= */ "ibm-granite/granite-4.1 (tool call)",
             /* .template_str= */ "{%- for message in messages %}\n    {%- if message['role'] == 'assistant_tool_call' %}\n    {{- '<|start_of_role|>assistant<|end_of_role|><|tool_call|>' + message['content'] + '<|end_of_text|>\\n' }}\n    {%- else %}\n    {{- '<|start_of_role|>' + message['role'] + '<|end_of_role|>' + message['content'] + '<|end_of_text|>\\n' }}\n    {%- endif %}\n    {%- if loop.last and add_generation_prompt %}\n    {{- '<|start_of_role|>assistant<|end_of_role|>' }}\n    {%- endif %}\n{%- endfor %}\n{# <tool_call> <tools> #}",
             /* .expected_output= */       "<|start_of_role|>system<|end_of_role|>You are a helpful assistant<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Hello<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>Hi there<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Who are you<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>   I am an assistant   <|end_of_text|>\n<|start_of_role|>user<|end_of_role|>Another question<|end_of_text|>\n<|start_of_role|>user<|end_of_role|>What is the weather?<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|><|tool_call|><tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"location\": \"NYC\"}}\n</tool_call><|end_of_text|>\n<|start_of_role|>tool_response<|end_of_role|>{\"temperature\": 72}<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
             /* .expected_output_jinja= */ "",

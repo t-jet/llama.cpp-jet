@@ -88,6 +88,21 @@ K6 metrics might be compared against [server metrics](../README.md), with:
 curl http://localhost:8080/metrics
 ```
 
+#### Hybrid cache benchmark evidence
+
+When benchmarking `--cache-mode hybrid`, classify each measurement before the
+run. Use public Prometheus for hit counts, fallback counts, resident bytes, cold
+transitions, queue pressure, and cold latency. Use structured logs for restore
+strategy and fallback reason. Use direct stats only for controller state that is
+not public. Use harness-only timing for prompt-processing time saved and
+before/after request latency.
+
+Record the model or fixture identity without local paths, the prompt shape,
+branch pattern, cache flags, budgets, workload profile, cold-store setting,
+slot count, concurrency, warmup window, and measurement window. Correctness
+evidence comes before performance claims. See
+[../hybrid-cache.md](../hybrid-cache.md) for the operator contract.
+
 ### Using the CI python script
 The `bench.py` script does several steps:
 - start the server

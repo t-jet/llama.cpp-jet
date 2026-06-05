@@ -105,6 +105,7 @@ class ServerProcess:
     media_path: str | None = None
     sleep_idle_seconds: int | None = None
     cache_ram: int | None = None
+    cache_mode: str | None = None
     no_cache_idle_slots: bool = False
     log_path: str | None = None
     webui_mcp_proxy: bool = False
@@ -135,7 +136,16 @@ class ServerProcess:
         elif "LLAMA_SERVER_BIN_PATH" in os.environ:
             server_path = os.environ["LLAMA_SERVER_BIN_PATH"]
         elif os.name == "nt":
-            server_path = "../../../build/bin/Release/llama-server.exe"
+            server_path = os.path.abspath(os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "build",
+                "bin",
+                "Release",
+                "llama-server.exe",
+            ))
         else:
             server_path = "../../../build/bin/llama-server"
         server_args = [
@@ -249,6 +259,8 @@ class ServerProcess:
             server_args.extend(["--sleep-idle-seconds", self.sleep_idle_seconds])
         if self.cache_ram is not None:
             server_args.extend(["--cache-ram", self.cache_ram])
+        if self.cache_mode is not None:
+            server_args.extend(["--cache-mode", self.cache_mode])
         if self.no_cache_idle_slots:
             server_args.append("--no-cache-idle-slots")
         if self.webui_mcp_proxy:

@@ -226,9 +226,8 @@ void server_queue::cleanup_pending_task(int id_target) {
 //
 
 void server_response::add_waiting_task_id(int id_task) {
-    RES_DBG("add task %d to waiting list. current waiting = %d (before add)\n", id_task, (int) waiting_task_ids.size());
-
     std::unique_lock<std::mutex> lock(mutex_results);
+    RES_DBG("add task %d to waiting list. current waiting = %d (before add)\n", id_task, (int) waiting_task_ids.size());
     waiting_task_ids.insert(id_task);
 }
 
@@ -242,9 +241,8 @@ void server_response::add_waiting_task_ids(const std::unordered_set<int> & id_ta
 }
 
 void server_response::remove_waiting_task_id(int id_task) {
-    RES_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
-
     std::unique_lock<std::mutex> lock(mutex_results);
+    RES_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
     waiting_task_ids.erase(id_task);
     // make sure to clean up all pending results
     queue_results.erase(
@@ -381,8 +379,6 @@ server_task_result_ptr server_response_reader::next(const std::function<bool()> 
         if (result == nullptr) {
             // timeout, check stop condition
             if (should_stop()) {
-                SRV_WRN("%s", "stopping wait for next result due to should_stop condition (adjust the --timeout argument if needed)\n");
-                SRV_WRN("%s", "ref: https://github.com/ggml-org/llama.cpp/pull/22907\n");
                 return nullptr;
             }
         } else {

@@ -19,6 +19,7 @@ enum server_task_type {
     SERVER_TASK_TYPE_RERANK,
     SERVER_TASK_TYPE_INFILL,
     SERVER_TASK_TYPE_CANCEL,
+    SERVER_TASK_TYPE_CONTROL,
     SERVER_TASK_TYPE_NEXT_RESPONSE,
     SERVER_TASK_TYPE_METRICS,
     SERVER_TASK_TYPE_SLOT_SAVE,
@@ -47,7 +48,7 @@ enum stop_type {
 };
 
 struct task_params {
-    bool stream          = true;
+    bool stream          = false;
     bool include_usage   = false;
     bool cache_prompt    = true; // remember the prompt to avoid reprocessing all prompt
     bool return_tokens   = false;
@@ -60,6 +61,9 @@ struct task_params {
     int32_t n_cmpl    =  1; // number of completions to generate from this prompt
 
     int32_t n_cache_reuse = 0; // min chunk size to attempt reusing from the cache via KV shifting (0 = disabled)
+
+    // number of prompt tokens before the latest user message
+    int32_t n_before_user = -1;
 
     int64_t t_max_prompt_ms  = -1; // TODO: implement
     int64_t t_max_predict_ms = -1; // if positive, limit the generation phase to this time limit
@@ -80,6 +84,10 @@ struct task_params {
     task_response_type res_type = TASK_RESPONSE_TYPE_NONE;
     std::string        oaicompat_model;
     std::string        oaicompat_cmpl_id;
+
+    // realtime control (SERVER_TASK_TYPE_CONTROL)
+    std::string        control_action;
+    std::string        control_cmpl_id;
 
     // per-request parameters for chat parsing
     common_chat_parser_params chat_parser_params;
@@ -122,6 +130,108 @@ struct task_result_state {
         bool filter_tool_calls = false);
 };
 
+//
+// Boundary metadata for prepared prompts (Phase 1)
+//
+
+// Represents one boundary span in the prepared prompt
+struct prompt_boundary {
+    enum boundary_type {
+        SYSTEM_START,      // start of system prompt
+        SYSTEM_END,        // end of system prompt
+        MESSAGE_START,     // start of a user/assistant message
+        MESSAGE_END,       // end of a user/assistant message
+        TOOL_CALL_START,   // start of a tool call
+        TOOL_CALL_END,     // end of a tool call
+    };
+
+    boundary_type type;        // type of boundary
+    size_t token_index;        // legacy point position, equal to token_start
+    size_t token_start;        // inclusive token offset
+    size_t token_end;          // exclusive token offset, or token_start for point markers
+    uint64_t checksum = 0;     // optional span checksum, 0 when not computed
+    bool protect = false;      // hint that this span should be retained preferentially
+    std::string metadata;      // optional metadata (e.g., role, tool name)
+
+    prompt_boundary() = default;
+    prompt_boundary(boundary_type t, size_t idx, const std::string & meta = "")
+        : type(t), token_index(idx), token_start(idx), token_end(idx), metadata(meta) {}
+
+    prompt_boundary(
+            boundary_type t,
+            size_t start,
+            size_t end,
+            uint64_t checksum_value,
+            bool protect_value,
+            const std::string & meta = "")
+        : type(t)
+        , token_index(start)
+        , token_start(start)
+        , token_end(end)
+        , checksum(checksum_value)
+        , protect(protect_value)
+        , metadata(meta) {}
+};
+
+// Metadata for a prepared prompt with boundaries
+struct prepared_prompt_metadata {
+    std::vector<prompt_boundary> boundaries;
+    std::string compatibility_key;
+    std::string preparation_id;
+    std::string degraded_reason;
+    bool protect_system = false;
+    bool protect_messages = false;
+    bool boundaries_native = false;  // true if boundaries captured natively, false if inferred
+
+    prepared_prompt_metadata() = default;
+
+    void add_boundary(prompt_boundary::boundary_type type, size_t token_index, const std::string & metadata = "") {
+        boundaries.emplace_back(type, token_index, metadata);
+    }
+
+    void add_span(
+            prompt_boundary::boundary_type type,
+            size_t token_start,
+            size_t token_end,
+            uint64_t checksum = 0,
+            bool protect = false,
+            const std::string & metadata = "") {
+        boundaries.emplace_back(type, token_start, token_end, checksum, protect, metadata);
+        if (type == prompt_boundary::SYSTEM_END ||
+            type == prompt_boundary::MESSAGE_END ||
+            type == prompt_boundary::TOOL_CALL_END) {
+            boundaries.back().token_index = token_end;
+        }
+    }
+
+    std::vector<prompt_boundary> get_boundaries(prompt_boundary::boundary_type type) const {
+        std::vector<prompt_boundary> result;
+        for (const auto & b : boundaries) {
+            if (b.type == type) {
+                result.push_back(b);
+            }
+        }
+        return result;
+    }
+
+    bool has_boundaries() const {
+        return !boundaries.empty();
+    }
+
+    bool degraded() const {
+        return !degraded_reason.empty();
+    }
+
+    void clear() {
+        boundaries.clear();
+        compatibility_key.clear();
+        preparation_id.clear();
+        degraded_reason.clear();
+        protect_system = false;
+        protect_messages = false;
+    }
+};
+
 struct server_task {
     int id = -1; // to be filled by server_queue
 
@@ -141,6 +251,7 @@ struct server_task {
     // used by SERVER_TASK_TYPE_INFERENCE
     task_params   params;
     server_tokens tokens;
+    prepared_prompt_metadata prompt_metadata;  // boundary metadata for the prompt
 
     // only used by CLI, this allow tokenizing CLI inputs on server side
     // we need this because mtmd_context and vocab are not accessible outside of server_context
@@ -229,6 +340,7 @@ struct server_task {
         copy.params    = params;
         copy.type      = type;
         copy.tokens    = tokens.clone();
+        copy.prompt_metadata = prompt_metadata;
         copy.id_slot   = -1; // child tasks cannot specify slot
 
         // use different sampling seed for each child
@@ -415,6 +527,8 @@ struct server_task_result_cmpl_partial : server_task_result {
 
     bool post_sampling_probs;
     bool is_progress = false;
+    bool is_begin = false; // whether to send 200 status to HTTP client (begin of SSE stream)
+                           // ref: https://github.com/ggml-org/llama.cpp/pull/23884
     completion_token_output prob_output;
     result_timings timings;
     result_prompt_progress progress;
@@ -546,6 +660,19 @@ struct server_task_result_slot_erase : server_task_result {
     virtual json to_json() override;
 };
 
+struct server_task_result_control : server_task_result {
+    bool        success = false;
+    std::string message; // optional detail when success is false
+
+    virtual json to_json() override {
+        json out = json { { "success", success } };
+        if (!message.empty()) {
+            out["message"] = message;
+        }
+        return out;
+    }
+};
+
 struct server_task_result_get_lora : server_task_result {
     struct lora {
         common_adapter_lora_info info;
@@ -621,6 +748,8 @@ struct server_prompt_cache {
     size_t n_tokens() const;
 
     server_prompt * alloc(const server_prompt & prompt, size_t state_size_main, size_t state_size_drft);
+
+    void discard(server_prompt * prompt);
 
     bool load(server_prompt & prompt, const server_tokens & tokens_new, llama_context * ctx_main, llama_context * ctx_drft, int32_t id_slot);
 

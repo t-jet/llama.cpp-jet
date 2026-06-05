@@ -26,7 +26,7 @@ class common_params_fit_exception : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-static std::vector<llama_device_memory_data> common_get_device_memory_data(
+std::vector<llama_device_memory_data> common_get_device_memory_data(
         const char * path_model,
         const llama_model_params * mparams,
         const llama_context_params * cparams,
@@ -761,6 +761,80 @@ static void common_params_fit_impl(
     }
 
     set_ngl_tensor_split_tbo(ngl_per_device, overflow_bufts, *mparams);
+}
+
+std::vector<size_t> common_get_mtp_ctx_memory_overhead(
+        const char * path_model,
+        const llama_model_params * mparams,
+        const llama_context_params * cparams,
+        ggml_log_level log_level) {
+    // Suppress noisy log output the same way common_get_device_memory_data does.
+    struct user_data_t {
+        struct {
+            ggml_log_callback callback;
+            void * user_data;
+        } original_logger;
+        ggml_log_level min_level;
+    };
+    user_data_t ud;
+    llama_log_get(&ud.original_logger.callback, &ud.original_logger.user_data);
+    ud.min_level = log_level;
+    llama_log_set([](ggml_log_level level, const char * text, void * user_data) {
+        const user_data_t * ud = (const user_data_t *) user_data;
+        const ggml_log_level level_eff = level >= ud->min_level ? level : GGML_LOG_LEVEL_DEBUG;
+        ud->original_logger.callback(level_eff, text, ud->original_logger.user_data);
+    }, &ud);
+
+    llama_model_params mparams_copy = *mparams;
+    mparams_copy.no_alloc  = true;
+    mparams_copy.use_mmap  = false;
+    mparams_copy.use_mlock = false;
+
+    llama_model * model = llama_model_load_from_file(path_model, mparams_copy);
+    if (model == nullptr) {
+        llama_log_set(ud.original_logger.callback, ud.original_logger.user_data);
+        return {};
+    }
+
+    llama_context_params cparams_mtp = *cparams;
+    cparams_mtp.ctx_type  = LLAMA_CONTEXT_TYPE_MTP;
+    cparams_mtp.n_rs_seq  = 0;
+
+    llama_context * ctx = llama_init_from_model(model, cparams_mtp);
+    if (ctx == nullptr) {
+        llama_model_free(model);
+        llama_log_set(ud.original_logger.callback, ud.original_logger.user_data);
+        return {};
+    }
+
+    const size_t nd = llama_model_n_devices(model);
+    // one entry per device + one for host (last element)
+    std::vector<size_t> overhead(nd + 1, 0);
+
+    llama_memory_breakdown memory_breakdown = llama_get_memory_breakdown(ctx);
+    for (const auto & [buft, mb] : memory_breakdown) {
+        const size_t cost = mb.context + mb.compute; // model weights are shared, only count context+compute
+        if (ggml_backend_buft_is_host(buft)) {
+            overhead.back() += cost;
+            continue;
+        }
+        ggml_backend_dev_t dev = ggml_backend_buft_get_device(buft);
+        if (!dev) {
+            continue;
+        }
+        for (size_t i = 0; i < nd; i++) {
+            if (dev == llama_model_get_device(model, i)) {
+                overhead[i] += cost;
+                break;
+            }
+        }
+    }
+
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_log_set(ud.original_logger.callback, ud.original_logger.user_data);
+
+    return overhead;
 }
 
 enum common_params_fit_status common_fit_params(

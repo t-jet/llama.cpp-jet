@@ -1,6 +1,11 @@
 #pragma once
 
 #include "ggml.h"
+#include "ggml-backend.h"
+#include "llama.h"
+#include "../src/llama-ext.h"
+
+#include <vector>
 
 enum common_params_fit_status {
     COMMON_PARAMS_FIT_STATUS_SUCCESS = 0, // found allocations that are projected to fit
@@ -23,6 +28,16 @@ enum common_params_fit_status common_fit_params(
                                    uint32_t   n_ctx_min,             // minimum context size to set when trying to reduce memory use
                         enum ggml_log_level   log_level);            // minimum log level to print during fitting, lower levels go to debug log
 
+// returns the per-device memory overhead (context + compute, NOT model weights) of an MTP context
+// in bytes; one entry per model device, last entry is host memory.
+// returns an empty vector if the model could not be loaded.
+// this is used to pre-subtract MTP context costs from fit margins when draft-mtp is active.
+std::vector<size_t> common_get_mtp_ctx_memory_overhead(
+                               const char   * path_model,
+                const struct llama_model_params   * mparams,
+                const struct llama_context_params * cparams,
+                        enum ggml_log_level   log_level);
+
 // print estimated memory to stdout
 void common_fit_print(
                                const char   * path_model,
@@ -30,3 +45,14 @@ void common_fit_print(
                 struct llama_context_params * cparams);
 
 void common_memory_breakdown_print(const struct llama_context * ctx);
+
+// Load a model + context with no_alloc and return the per-device memory breakdown.
+std::vector<llama_device_memory_data> common_get_device_memory_data(
+                                  const char   * path_model,
+        const struct llama_model_params         * mparams,
+        const struct llama_context_params       * cparams,
+        std::vector<ggml_backend_dev_t>         & devs,
+                                      uint32_t  & hp_ngl,
+                                      uint32_t  & hp_n_ctx_train,
+                                      uint32_t  & hp_n_expert,
+                           enum ggml_log_level    log_level);

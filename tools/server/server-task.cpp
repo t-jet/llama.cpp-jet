@@ -149,7 +149,7 @@ task_result_state::task_result_state(const common_chat_parser_params & chat_pars
     , oai_resp_id("resp_" + random_string())
     , oai_resp_reasoning_id("rs_" + random_string())
     , oai_resp_message_id("msg_" + random_string()) {
-    if (!chat_parser_params.echo) {
+    if (chat_parser_params.is_continuation && !chat_parser_params.echo) {
         // initialize chat_msg to avoid emitting a delta containing the assistant prefill
         chat_msg = common_chat_parse("", true, chat_parser_params);
     }
@@ -432,6 +432,10 @@ task_params server_task::params_from_json_cmpl(
         if (data.contains("chat_parser")) {
             params.chat_parser_params.parser.load(data.at("chat_parser").get<std::string>());
         }
+        if (data.contains("continue_final_message")) {
+            auto continuation = common_chat_continuation_parse(data.at("continue_final_message"));
+            params.chat_parser_params.is_continuation = continuation != COMMON_CHAT_CONTINUATION_NONE;
+        }
         params.chat_parser_params.echo = json_value(data, "echo", false);
     }
 
@@ -495,6 +499,7 @@ task_params server_task::params_from_json_cmpl(
         const auto end_tag   = json_value(data, "reasoning_budget_end_tag", std::string());
         const auto message   = json_value(data, "reasoning_budget_message", std::string());
         params.sampling.reasoning_budget_tokens = budget;
+        params.sampling.reasoning_control = json_value(data, "reasoning_control", false);
 
         if (!start_tag.empty()) {
             params.sampling.reasoning_budget_start = common_tokenize(vocab, start_tag, false, true);
@@ -1418,6 +1423,9 @@ void server_task_result_cmpl_partial::update(task_result_state & state) {
 
 json server_task_result_cmpl_partial::to_json() {
     GGML_ASSERT(is_updated && "update() must be called before to_json()");
+    if (is_begin) {
+        return nullptr; // simply signal to HTTP handler to send the headers and status code
+    }
     switch (res_type) {
         case TASK_RESPONSE_TYPE_NONE:
             return to_json_non_oaicompat();
@@ -2018,13 +2026,33 @@ server_prompt * server_prompt_cache::alloc(const server_prompt & prompt, size_t 
         }
     }
 
-    std::vector<uint8_t> state_data_tgt;
-    std::vector<uint8_t> state_data_dft;
+    const size_t estimated_size = prompt.size() + state_size_tgt + state_size_dft;
 
-    // check if we can allocate enough memory for the new state
+    if (limit_size > 0 && estimated_size > limit_size) {
+        SRV_WRN(" - skipping prompt cache save for length %d, estimated size = %.3f MiB exceeds cache limit of %.3f MiB\n",
+                prompt.n_tokens(),
+                estimated_size / (1024.0 * 1024.0),
+                limit_size / (1024.0 * 1024.0));
+        return nullptr;
+    }
+
+    if (limit_tokens > 0 && (size_t) prompt.n_tokens() > limit_tokens) {
+        SRV_WRN(" - skipping prompt cache save for length %d, token count exceeds cache limit of %zu\n",
+                prompt.n_tokens(),
+                limit_tokens);
+        return nullptr;
+    }
+
     try {
-        state_data_tgt.resize(state_size_tgt);
-        state_data_dft.resize(state_size_dft);
+        std::vector<uint8_t> state_data_tgt(state_size_tgt);
+        std::vector<uint8_t> state_data_dft(state_size_dft);
+
+        states.emplace_back();
+        auto & state = states.back();
+        state.data.main = std::move(state_data_tgt);
+        state.data.drft = std::move(state_data_dft);
+
+        return &state;
     } catch (const std::bad_alloc & e) {
         SRV_ERR("failed to allocate memory for prompt cache state: %s\n", e.what());
 
@@ -2036,17 +2064,20 @@ server_prompt * server_prompt_cache::alloc(const server_prompt & prompt, size_t 
 
         return nullptr;
     }
+}
 
-    states.push_back({
-        /*.tokens      =*/ prompt.tokens.clone(),
-        /*.data        =*/ {
-            /*.main =*/ std::move(state_data_tgt),
-            /*.drft =*/ std::move(state_data_dft),
-        },
-        /*.checkpoints =*/ prompt.checkpoints,
-    });
+void server_prompt_cache::discard(server_prompt * prompt) {
+    if (prompt == nullptr) {
+        return;
+    }
 
-    return &states.back();
+    for (auto it = states.begin(); it != states.end(); ++it) {
+        if (&*it == prompt) {
+            SRV_WRN(" - discarding incomplete cached prompt with length %d\n", it->n_tokens());
+            states.erase(it);
+            return;
+        }
+    }
 }
 
 bool server_prompt_cache::load(server_prompt & prompt, const server_tokens & tokens_new, llama_context * ctx_tgt, llama_context * ctx_dft, int32_t id_slot) {
@@ -2126,8 +2157,7 @@ bool server_prompt_cache::load(server_prompt & prompt, const server_tokens & tok
 
 void server_prompt_cache::update() {
     if (limit_size > 0) {
-        // always keep at least one state, regardless of the limits
-        while (states.size() > 1 && size() > limit_size) {
+        while (!states.empty() && size() > limit_size) {
             if (states.empty()) {
                 break;
             }
@@ -2145,7 +2175,7 @@ void server_prompt_cache::update() {
     const size_t limit_tokens_cur = limit_size > 0 ? std::max<size_t>(limit_tokens, limit_size/size_per_token) : limit_tokens;
 
     if (limit_tokens > 0) {
-        while (states.size() > 1 && n_tokens() > limit_tokens_cur) {
+        while (!states.empty() && n_tokens() > limit_tokens_cur) {
             if (states.empty()) {
                 break;
             }

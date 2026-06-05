@@ -1,0 +1,208 @@
+# Cache handling test plan - Part 6: stress tests and acceptance criteria
+
+Source: [../cache-handling-test-plan.md](../cache-handling-test-plan.md)
+
+## Current scripted coverage
+
+The implemented PowerShell runner currently covers:
+
+- **R01-R04:** Regression prevention (legacy unchanged, default mode, opt-in, dependencies)
+- **C01-C06:** Mode selection (default, legacy, hybrid, invalid, HTTP endpoints)
+- **C10:** Legacy compatibility with prompt reuse
+- **C11-C15:** Concurrent access safety (save, load, metrics under concurrency)
+- **B01-B06:** Stage 2 boundary metadata (extraction, threading, fallbacks, edge cases)
+- **H01-H29:** Phase 3 hybrid cache (non-destructive hits, LRU eviction, namespace isolation)
+- Stage 4 metric-export and protected-root checks only where the current harness can verify them directly
+- Stage 5 metric-shape checks only where the current server/unit harness can verify them directly
+- **D01-D08:** skipped unless the requested draft runtime is configured and startup proves it is active; do not treat the placeholder branch as acceptance evidence
+- **N01-N15:** Edge and negative scenarios that the public harness can exercise or classify.
+- **N16-N23:** Stage 5 descriptor and transactional failure rows remain acceptance scenarios, but they need focused controller or fault-injection evidence before they can pass.
+- **C60-C65:** Stage 6 cold store opt-in and startup validation (no cold path, valid cold path, hybrid mode required, invalid paths)
+- **H60-H65:** Stage 6 demotion (budget pressure, target/draft pair, hot store release, protected root warning, non-blocking, queue-full fallback)
+- **H66-H70:** Stage 6 promotion (cache hit, target/draft pair, failure marks evicted, queue-full fallback, latency observable)
+- **N30-N35:** Stage 6 startup validation (empty path, non-existent path, file path, non-writable, world-writable warning, hybrid mode required)
+- **M10-M17:** Stage 6 metrics (demotion/promotion counters, cold payload bytes, cold payload count, hot payload count, eviction exclusion, latency histogram, failure reason counters)
+- **F01-F10:** Stage 6 fault tolerance (checksum corruption, read failure, header truncation, format version, payload ID mismatch, pair state mismatch, magic mismatch, draft-side failure, write failure, shutdown race)
+- **H71:** Protected root demotion warning
+- **H72-H74:** Target/draft pair demotion and promotion as a unit
+- **R10-R12:** Stage 4 and Stage 5 regression with cold store configured
+- **S80-S99:** Stage 8 metadata-only and re-materialization scenarios are acceptance scenarios. Most rows need focused Stage 8, controller, stats-capable, or fault-injection evidence before they can pass.
+- **R20-R23:** Stage 4 through Stage 7 regression after Stage 8.
+
+See Parts 3 and 4 of this test plan for the complete test matrix.
+
+Stage 4 H30-H39 remain acceptance scenarios in Part 3. A test report may mark those rows `PASS` only when it captures the Stage 4 evidence listed in Part 5, including measured resident payload size, budget choice, recency order, equivalent refresh behavior, protected priority or fallback evidence, and metrics, stats-capable harness evidence, or focused C++ controller stats. A script result that only proves requests completed is not enough. Public chat with degraded metadata is not protected-root evidence for H35-H37.
+
+Stage 5 H40-H58 are acceptance scenarios in Part 3. Public HTTP can prove only the public portions of those rows. Descriptor corruption, store-ref mismatch, owner mismatch, residency mismatch, pair-state/runtime mismatch, cross-mode draft namespace isolation, target/draft transactional failure, empty-preimage rollback, and unsupported clear preflight need focused controller, cross-run cache persistence, or fault-injection evidence. If the session lacks that evidence source, report the row as `BLOCKED` or `SKIP` with the missing precondition; do not convert it to a pass by weakening the expected behavior.
+
+Stage 8 S80-S99 and R20-R23 are acceptance scenarios in Part 10. Public HTTP can prove only public surface, metrics output, and model-backed regression. Metadata-only transitions, re-materialization validation, mismatch-parent selection, equivalent deduplication, cold cleanup ownership, and metadata admission rejection need focused Stage 8, focused controller, stats-capable, or fault-injection evidence. If the session lacks that evidence source, report the row as `BLOCKED` with the missing precondition.
+
+## Future enhancements
+
+The current runner does not yet implement:
+
+- `-SkipBuild` switch (build must be done separately)
+- `-IncludeDraft` switch (draft runtime mode tests not yet implemented)
+- `-IncludeStress` switch (stress tests not yet implemented)
+- Complete automation for every Stage 4 protected-root branch
+- Complete public automation for every Stage 5 descriptor and transactional restore branch
+- Dedicated public automation for Stage 8 metadata-only and re-materialization rows
+- Public automation for the local Qwen3-8B target plus Qwen3-0.6B normal separate draft model fixture
+- Public or focused automation for `draft-mtp` modes, after the selected local model or model pair is proven MTP-capable
+- Direct public JSON stats collection, because `/cache/stats` is intentionally absent
+
+These features should be added as the cache implementation matures and the test scope expands.
+
+## Acceptance criteria
+
+The test matrix scenarios (Parts 3 and 4) define the testable acceptance criteria for the currently implemented cache scope. Check the design documents listed in [document-index.md](../document-index.md) to understand what features are available for testing.
+
+## Concrete stress test scenarios
+
+Run these only under `-IncludeStress` flag. Each stress test must run to completion without crashes, deadlocks, or memory leaks.
+
+### S01: Memory pressure sustained
+
+**Objective:** Verify stable memory usage under prolonged cache pressure.
+
+**Configuration:**
+
+- `--cache-mode hybrid --cache-ram 10 --parallel 2`
+- 1000 unique prompts (different prefixes, varying lengths 10-100 tokens)
+- 30 minutes continuous runtime
+
+**Procedure:**
+
+1. Generate 1000 unique prompt variations
+2. Loop through prompts with 1-second delay between requests
+3. Monitor memory usage every 60 seconds
+4. Capture `/metrics` every 5 minutes
+
+**Success Criteria:**
+
+- Peak memory (working set) remains stable (< 5% growth over 30 minutes)
+- Resident payload pressure stays within `--cache-ram` after legal evictions
+- No process crashes or hangs
+- Payload eviction metrics show expected churn
+- No memory leaks detected (final memory near initial memory after GC)
+
+### S02: High concurrency
+
+**Objective:** Verify thread safety under high concurrent load.
+
+**Configuration:**
+
+- `--cache-mode hybrid --parallel 8 --cache-ram 50`
+- 50 unique prompts
+- 500 total requests (mix of hits and misses)
+
+**Procedure:**
+
+1. Warm up cache with 50 unique prompts
+2. Send 500 requests with 8 concurrent clients
+3. Mix: 70% cache hits (repeat prompts), 30% misses (new prompts)
+4. No delay between requests (maximum concurrency)
+
+**Success Criteria:**
+
+- All 500 requests complete successfully
+- No deadlocks or race conditions
+- No cache corruption (verify metrics accuracy)
+- `llamacpp_cache_hits + llamacpp_cache_misses = 500` (no lost operations)
+- Response times consistent (no pathological slowdowns)
+
+### S03: Eviction churn
+
+**Objective:** Verify eviction policy stability under constant pressure.
+
+**Configuration:**
+
+- `--cache-mode hybrid --cache-ram 1 --parallel 1`
+- 10 unique prompts (each ~100 tokens, ~10 KB serialized)
+- Budget allows only ~3 entries
+- Rotate through all 10 prompts 100 times (1000 total requests)
+
+**Procedure:**
+
+1. Send prompts in sequence: P1, P2, P3, ..., P10, P1, P2, ...
+2. Each prompt triggers eviction after first 3 entries
+3. Monitor eviction metrics after each cycle
+
+**Success Criteria:**
+
+- All 1000 requests complete successfully
+- Eviction count ~970 (1000 requests - 3 initial fills - ~27 cache hits from LRU)
+- No cache corruption or invalid state
+- Memory usage stable (cache size oscillates but doesn't grow)
+- LRU policy maintains correct ordering (most recent entries retained)
+- Protected-root priority remains visible when the prompt mix includes system roots
+
+### S04: Long-running stability
+
+**Objective:** Verify 6-hour production-like stability.
+
+**Configuration:**
+
+- `--cache-mode hybrid --cache-ram 100 --parallel 4`
+- Mix of operations: 60% cache hits, 30% misses, 10% evictions
+- 10-second intervals between request batches
+
+**Procedure:**
+
+1. Define 100 unique prompts (10-200 tokens each)
+2. Loop for 6 hours:
+   - Send batch of 4 requests (1 per slot)
+   - 60% reuse recent prompts, 30% new prompts, 10% trigger eviction
+   - Wait 10 seconds
+3. Capture `/metrics` every 15 minutes
+4. Monitor memory usage every 15 minutes
+
+**Success Criteria:**
+
+- Process runs 6 hours without crash or hang
+- Memory usage stable (< 10% growth over 6 hours)
+- Metrics remain accurate throughout (spot-check samples)
+- No memory leaks (final memory near stabilized memory after 1 hour)
+- Cache hit rate ~60% as expected
+- Response times consistent (no degradation over time)
+
+## Stress test acceptance criteria
+
+Stress test failures block production-readiness claims. However, they should not block basic implemented-scope coverage claims unless:
+
+1. The failure reproduces in the normal test matrix (C/H/N/B/D/R series)
+2. The failure indicates a fundamental design flaw (not environmental)
+3. The failure severity is critical (crashes, data corruption, security)
+
+Non-blocking stress failures for implemented-scope readiness:
+
+- Performance degradation under extreme load (> 8 concurrent slots)
+- Memory usage slightly above configured limits (< 10% overage)
+- Eviction timing variations under heavy concurrency
+
+Blocking stress failures (must be fixed before production):
+
+- Crashes or hangs
+- Memory leaks (> 20% growth over test duration)
+- Cache corruption (incorrect metrics, lost entries, data mismatch)
+- Race conditions or deadlocks
+- Security issues (unauthorized access, descriptor corruption)
+
+## Evidence to attach to the verification report
+
+For each run, record:
+
+- Git commit or working-tree status.
+- Build directory and server binary path.
+- Model path.
+- Test command lines.
+- Test summary with pass, fail, skip counts.
+- Metrics snapshots around cache save, hit, miss, eviction, and restore failure cases.
+- Stage 4 snapshots around payload eviction and protected-root decisions.
+- Stage 5 snapshots around descriptor validation, pairing violations, fallback restores, hot descriptors, and evicted descriptors.
+- Stage 8 snapshots around metadata-only retention, re-materialization, validation mismatch, mismatch-parent selection, deduplication, branch pruning, cold cleanup, and admission rejection.
+- Focused evidence mapping for descriptor validation, pair-state mismatch, paired byte accounting, transactional rollback, and unsupported clear preflight when public HTTP cannot create the precondition.
+- Focused evidence mapping for metadata-only topology, re-materialization plans, mismatch handling, equivalent deduplication, cold cleanup ownership, and metadata admission rejection when public HTTP cannot create the precondition.
+- Known gaps with references to implementation gap documents.
+
+Do not report focused cache-controller line coverage here. Integration evidence should describe server runs, model paths, HTTP requests, and metrics changes.

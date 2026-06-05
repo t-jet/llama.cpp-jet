@@ -5,9 +5,13 @@
 #include "server-http.h"
 #include "server-task.h"
 #include "server-queue.h"
+#include "server-cache-controller.h"
+#include "server-cache-hybrid.h"
+#include "server-cache-legacy.h"
 
 #include "build-info.h"
 #include "common.h"
+#include "fit.h"
 #include "llama.h"
 #include "log.h"
 #include "sampling.h"
@@ -21,6 +25,7 @@
 #include <exception>
 #include <memory>
 #include <filesystem>
+#include <unordered_set>
 #include <utility>
 
 // fix problem with std::min and std::max
@@ -35,6 +40,181 @@
 using json = nlohmann::ordered_json;
 
 constexpr int HTTP_POLLING_SECONDS = 1;
+constexpr size_t SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES = 256ull * 1024 * 1024;
+constexpr int32_t SPECULATIVE_PROMPT_SAFE_BATCH_SIZE = 128;
+
+using prometheus_labels = std::vector<std::pair<const char *, std::string>>;
+
+static std::string server_prometheus_label_value(const std::string & value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char ch : value) {
+        switch (ch) {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            default:
+                escaped += ch;
+                break;
+        }
+    }
+    return escaped;
+}
+
+static void server_write_cache_metric_with_labels(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const char * type,
+        const char * name,
+        const char * help,
+        const prometheus_labels & labels,
+        size_t value) {
+    prometheus << "# HELP " << name << " " << help << "\n"
+               << "# TYPE " << name << " " << type << "\n"
+               << name << "{mode=\"" << mode << "\"";
+    for (const auto & label : labels) {
+        prometheus << "," << label.first << "=\""
+                   << server_prometheus_label_value(label.second) << "\"";
+    }
+    prometheus << "} " << value << "\n";
+}
+
+static void server_write_stage10_rows(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const char * name,
+        const char * help,
+        const json & rows,
+        const prometheus_labels & defaults) {
+    if (rows.empty()) {
+        server_write_cache_metric_with_labels(prometheus, mode, "counter", name, help, defaults, 0);
+        return;
+    }
+
+    for (const auto & row : rows) {
+        prometheus_labels labels;
+        labels.reserve(defaults.size());
+        for (const auto & label : defaults) {
+            labels.emplace_back(label.first, json_value(row, label.first, label.second));
+        }
+        server_write_cache_metric_with_labels(
+            prometheus, mode, "counter", name, help, labels, json_value(row, "value", 0));
+    }
+}
+
+static void server_write_stage10_cache_rows(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const json & cache_stats) {
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_exact_blob_restores_total",
+        "Exact blob restore attempts by bounded result shape.",
+        cache_stats.contains("cache_exact_blob_restores_by_shape") ?
+            cache_stats["cache_exact_blob_restores_by_shape"] : json::array(),
+        {
+            {"payload_kind", "none"},
+            {"profile", "none"},
+            {"pair_state", "none"},
+            {"residency", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_payload_transitions_total",
+        "Payload promotion and demotion decisions by bounded result shape.",
+        cache_stats.contains("cache_payload_transitions_by_shape") ?
+            cache_stats["cache_payload_transitions_by_shape"] : json::array(),
+        {
+            {"operation", "none"},
+            {"payload_kind", "none"},
+            {"pair_state", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_payload_evictions_by_shape_total",
+        "Payload eviction decisions by bounded result shape.",
+        cache_stats.contains("cache_payload_evictions_by_shape") ?
+            cache_stats["cache_payload_evictions_by_shape"] : json::array(),
+        {
+            {"payload_kind", "none"},
+            {"pair_state", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_protected_root_decisions_by_shape_total",
+        "Protected root admission decisions by bounded result shape.",
+        cache_stats.contains("cache_protected_root_decisions_by_shape") ?
+            cache_stats["cache_protected_root_decisions_by_shape"] : json::array(),
+        {
+            {"decision", "none"},
+            {"pressure_source", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_fallback_restores_by_shape_total",
+        "Fallback restore attempts by bounded result shape.",
+        cache_stats.contains("cache_fallback_restores_by_shape") ?
+            cache_stats["cache_fallback_restores_by_shape"] : json::array(),
+        {
+            {"strategy", "none"},
+            {"payload_kind", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+        });
+    server_write_stage10_rows(
+        prometheus, mode,
+        "cache_structured_diagnostics_total",
+        "Structured cache diagnostic events by bounded result shape.",
+        cache_stats.contains("cache_structured_diagnostics_by_shape") ?
+            cache_stats["cache_structured_diagnostics_by_shape"] : json::array(),
+        {
+            {"event", "none"},
+            {"result", "none"},
+            {"reason", "none"},
+            {"payload_kind", "none"},
+        });
+}
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_stats) {
+    std::stringstream prometheus;
+    const std::string mode = server_prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
+    server_write_stage10_cache_rows(prometheus, mode, cache_stats);
+    return prometheus.str();
+}
+#endif
+
+static uint32_t server_n_outputs_max(const common_params & params) {
+    const uint32_t n_batch  = params.n_batch;
+
+    if (params.embedding ||
+            (params.pooling_type != LLAMA_POOLING_TYPE_UNSPECIFIED && params.pooling_type != LLAMA_POOLING_TYPE_NONE)) {
+        return n_batch;
+    }
+
+    const uint32_t n_outputs_per_seq = 1 + common_speculative_n_max(&params.speculative);
+
+    const uint64_t n_outputs = (uint64_t) params.n_parallel * n_outputs_per_seq;
+
+    return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
+}
 
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
 enum slot_state {
@@ -85,6 +265,7 @@ struct server_slot {
 
     int32_t n_prompt_tokens_cache     = 0;
     int32_t n_prompt_tokens_processed = 0;
+    bool    hybrid_cache_restored     = false;
 
     size_t last_nl_pos = 0;
 
@@ -106,8 +287,134 @@ struct server_slot {
     slot_state state = SLOT_STATE_IDLE;
 
     server_prompt prompt;
+    prepared_prompt_metadata prompt_metadata;
+    bool checkpoints_enabled = true;
+    uint64_t hybrid_cache_branch_node_id = 0;
 
-    void prompt_save(server_prompt_cache & prompt_cache) const {
+    static size_t checkpoints_size(const server_prompt & src_prompt) {
+        size_t total = 0;
+        for (const auto & ckpt : src_prompt.checkpoints) {
+            total += ckpt.size();
+        }
+        return total;
+    }
+
+    size_t trim_checkpoints(server_prompt & dst_prompt, size_t max_bytes, const char * reason) const {
+        size_t total = checkpoints_size(dst_prompt);
+        size_t removed = 0;
+
+        while (dst_prompt.checkpoints.size() > 1 && total > max_bytes) {
+            const auto & cur = dst_prompt.checkpoints.front();
+
+            SLT_WRN(*this,
+                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                    reason,
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens,
+                    (float) cur.size() / 1024 / 1024);
+
+            total -= cur.size();
+            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
+            removed++;
+        }
+
+        return removed;
+    }
+
+    size_t trim_checkpoints_for_allocation(server_prompt & dst_prompt, size_t max_bytes, size_t reserve_bytes, const char * reason) const {
+        if (max_bytes == 0 || reserve_bytes == 0) {
+            return 0;
+        }
+
+        size_t total = checkpoints_size(dst_prompt);
+        size_t removed = 0;
+
+        while (!dst_prompt.checkpoints.empty() && total + reserve_bytes > max_bytes) {
+            const auto & cur = dst_prompt.checkpoints.front();
+
+            SLT_WRN(*this,
+                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                    reason,
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens,
+                    (float) cur.size() / 1024 / 1024);
+
+            total -= cur.size();
+            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
+            removed++;
+        }
+
+        return removed;
+    }
+
+    void disable_checkpoints(const char * reason) {
+        if (checkpoints_enabled) {
+            checkpoints_enabled = false;
+
+            const size_t n_cleared = prompt.checkpoints.size();
+            prompt.checkpoints.clear();
+            spec_ckpt.clear();
+
+            SLT_WRN(*this,
+                    "disabling further context checkpoints for this task after %s; cleared %zu saved checkpoints\n",
+                    reason,
+                    n_cleared);
+        }
+    }
+
+    bool checkpoint_update_tgt(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
+        if (ctx_tgt == nullptr) {
+            return true;
+        }
+
+        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_tgt, id, flags);
+
+        try {
+            ckpt.data_tgt.resize(ckpt_size);
+        } catch (const std::bad_alloc & e) {
+            SLT_ERR(*this, "failed to allocate target checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
+            ckpt.clear_tgt();
+            return false;
+        }
+
+        const size_t n = llama_state_seq_get_data_ext(ctx_tgt, ckpt.data_tgt.data(), ckpt_size, id, flags);
+        if (n != ckpt_size) {
+            SLT_ERR(*this, "failed to save target checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
+            ckpt.clear_tgt();
+            return false;
+        }
+
+        return true;
+    }
+
+    bool checkpoint_update_dft(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
+        if (ctx_dft == nullptr) {
+            return true;
+        }
+
+        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_dft, id, flags);
+
+        try {
+            ckpt.data_dft.resize(ckpt_size);
+        } catch (const std::bad_alloc & e) {
+            SLT_ERR(*this, "failed to allocate draft checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
+            ckpt.clear_dft();
+            return false;
+        }
+
+        const size_t n = llama_state_seq_get_data_ext(ctx_dft, ckpt.data_dft.data(), ckpt_size, id, flags);
+        if (n != ckpt_size) {
+            SLT_ERR(*this, "failed to save draft checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
+            ckpt.clear_dft();
+            return false;
+        }
+
+        return true;
+    }
+
+    bool prompt_save(server_prompt_cache & prompt_cache, bool move_metadata = false) {
         GGML_ASSERT(prompt.data.size() == 0);
 
         const size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
@@ -120,13 +427,36 @@ struct server_slot {
 
         auto * cur = prompt_cache.alloc(prompt, cur_size_tgt, cur_size_dft);
         if (cur == nullptr) {
-            return;
+            return false;
         }
 
-        llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (ctx_dft) {
-            llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != cur_size_tgt) {
+            SLT_ERR(*this, "failed to save target state: expected %zu bytes, got %zu\n", cur_size_tgt, n_tgt);
+            prompt_cache.discard(cur);
+            return false;
         }
+
+        if (ctx_dft) {
+            const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
+            if (n_dft != cur_size_dft) {
+                SLT_ERR(*this, "failed to save draft state: expected %zu bytes, got %zu\n", cur_size_dft, n_dft);
+                prompt_cache.discard(cur);
+                return false;
+            }
+        }
+
+        if (move_metadata) {
+            cur->tokens = std::move(prompt.tokens);
+            cur->checkpoints = std::move(prompt.checkpoints);
+        } else {
+            cur->tokens = prompt.tokens.clone();
+            cur->checkpoints = prompt.checkpoints;
+        }
+
+        trim_checkpoints(*cur, cur_size, "prompt cache checkpoint memory");
+
+        return true;
     }
 
     bool prompt_load(server_prompt_cache & prompt_cache, const server_tokens & tokens) {
@@ -151,6 +481,14 @@ struct server_slot {
         }
 
         prompt.tokens.clear();
+        prompt_metadata.clear();
+        hybrid_cache_restored = false;
+        if (hybrid_cache_branch_node_id != 0) {
+            if (callback_on_branch_ref_release) {
+                callback_on_branch_ref_release(hybrid_cache_branch_node_id);
+            }
+            hybrid_cache_branch_node_id = 0;
+        }
     }
 
     std::vector<common_adapter_lora_info> lora;
@@ -174,6 +512,7 @@ struct server_slot {
     double t_token_generation = 0.0;  // ms
 
     std::function<void(int /* id_slot */)> callback_on_release;
+    std::function<void(uint64_t /* node_id */)> callback_on_branch_ref_release;
 
     // Speculative decoding stats
     int32_t n_draft_total = 0;      // Total draft tokens generated
@@ -183,6 +522,7 @@ struct server_slot {
         SLT_DBG(*this, "%s", "\n");
 
         n_prompt_tokens_cache = 0;
+        hybrid_cache_restored = false;
 
         last_nl_pos    = 0;
         generated_text = "";
@@ -191,6 +531,7 @@ struct server_slot {
         stop           = STOP_TYPE_NONE;
         stopping_word  = "";
         n_sent_text    = 0;
+        checkpoints_enabled = true;
 
         if (can_speculate()) {
             spec_draft.clear();
@@ -240,12 +581,13 @@ struct server_slot {
 
     bool need_embd() const {
         GGML_ASSERT(task);
-        return task->need_embd() || (spec && common_speculative_need_embd(spec));
+        return task->need_embd() ||
+            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_nextn(spec)));
     }
 
-    bool need_embd_pre_norm() const {
+    bool need_embd_nextn() const {
         GGML_ASSERT(task);
-        return spec && common_speculative_need_embd_pre_norm(spec);
+        return spec && common_speculative_need_embd_nextn(spec);
     }
 
     // if the context does not have a memory module then all embeddings have to be computed within a single ubatch
@@ -506,6 +848,9 @@ struct server_slot {
 
         if (ptask) {
             res["id_task"] = ptask->id;
+            res["n_prompt_tokens"]           = (int32_t) prompt.tokens.size();
+            res["n_prompt_tokens_processed"] = n_prompt_tokens_processed;
+            res["n_prompt_tokens_cache"]     = n_prompt_tokens_cache;
             res["params"] = ptask->params.to_json(only_metrics);
             res["next_token"] = {
                 {
@@ -648,6 +993,17 @@ public:
         }
     }
 
+    json get_cache_stats() const {
+        if (!cache_ctrl) {
+            return {
+                {"type", "none"},
+                {"message", "No cache controller initialized"},
+            };
+        }
+
+        return cache_ctrl->get_stats();
+    }
+
 private:
     // note: accessing these fields outside of this class is not thread-safe
     // use server_context methods instead
@@ -684,7 +1040,8 @@ private:
     int slots_debug = 0;
     int n_empty_consecutive = 0;
 
-    std::unique_ptr<server_prompt_cache> prompt_cache;
+    std::unique_ptr<cache_controller> cache_ctrl;
+    cache_mode cache_mode_active = CACHE_MODE_LEGACY;
 
     server_metrics metrics;
 
@@ -717,14 +1074,14 @@ private:
     }
 
     void slot_save_and_clear(server_slot & slot) {
-        if (slot.prompt.n_tokens() == 0) {
+        if (!cache_ctrl || slot.prompt.n_tokens() == 0) {
             return;
         }
         SLT_INF(slot, "%s", "saving idle slot to prompt cache\n");
         SLT_DBG(slot, "%s", "__TEST_TAG_CACHE_IDLE_SLOT__\n");
-        slot.prompt_save(*prompt_cache);
+        cache_ctrl->save_slot(slot, slot.prompt_metadata);
         slot.prompt_clear(false);
-        prompt_cache->update();
+        cache_ctrl->update();
     }
 
     void handle_sleeping_state(bool new_state) {
@@ -749,6 +1106,7 @@ private:
         SRV_INF("loading model '%s'\n", params.model.path.c_str());
 
         params_base = params;
+        params_base.n_outputs_max = server_n_outputs_max(params_base);
 
         std::string & mmproj_path = params_base.mmproj.path;
         bool has_mmproj = !mmproj_path.empty();
@@ -772,7 +1130,7 @@ private:
                 for (auto & [dev, size] : mmproj_mem) {
                     total += size;
                 }
-                SRV_INF("[mtmd] estimated memory usage of mmproj is %.2f MiB\n", total / (1024.0 * 1024.0));
+                SRV_INF("[mtmd] estimated worst-case memory usage of mmproj is %.2f MiB\n", total / (1024.0 * 1024.0));
                 GGML_ASSERT(!params_base.fit_params_target.empty());
                 for (auto & [dev, size] : mmproj_mem) {
                     for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
@@ -787,6 +1145,86 @@ private:
                 }
             } else {
                 SRV_ERR("%s", "[mtmd] failed to get memory usage of mmproj\n");
+            }
+        }
+
+        // optionally reserve VRAM for the draft / MTP context before fitting the target model
+        if (params_base.fit_params) {
+            const bool spec_mtp = std::find(params_base.speculative.types.begin(),
+                                            params_base.speculative.types.end(),
+                                            COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != params_base.speculative.types.end();
+            const bool has_draft = params_base.speculative.has_dft();
+
+            if (has_draft || spec_mtp) {
+                common_params params_dft = params_base;
+                bool measure_model_bytes = true;
+
+                if (has_draft) {
+                    const auto & params_spec = params_base.speculative.draft;
+                    params_dft.devices               = params_spec.devices;
+                    params_dft.model                 = params_spec.mparams;
+                    params_dft.n_gpu_layers          = params_spec.n_gpu_layers;
+                    params_dft.cache_type_k          = params_spec.cache_type_k;
+                    params_dft.cache_type_v          = params_spec.cache_type_v;
+                    params_dft.tensor_buft_overrides = params_spec.tensor_buft_overrides;
+                } else {
+                    // MTP draft context lives on the target model, only context+compute are new
+                    measure_model_bytes = false;
+                }
+
+                params_dft.n_outputs_max = params_base.n_parallel;
+
+                auto mparams_dft = common_model_params_to_llama(params_dft);
+                auto cparams_dft = common_context_params_to_llama(params_dft);
+                if (spec_mtp) {
+                    cparams_dft.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
+                    cparams_dft.type_k   = params_base.speculative.draft.cache_type_k;
+                    cparams_dft.type_v   = params_base.speculative.draft.cache_type_v;
+                }
+                cparams_dft.n_rs_seq = 0;
+
+                std::vector<ggml_backend_dev_t> devs;
+                uint32_t hp_ngl = 0;
+                uint32_t hp_nct = 0;
+                uint32_t hp_nex = 0;
+                try {
+                    auto dmd = common_get_device_memory_data(
+                        params_dft.model.path.c_str(), &mparams_dft, &cparams_dft,
+                        devs, hp_ngl, hp_nct, hp_nex, GGML_LOG_LEVEL_ERROR);
+
+                    GGML_ASSERT(!params_base.fit_params_target.empty());
+                    size_t total = 0;
+
+                    std::vector<ggml_backend_dev_t> tgt_devices = params.devices;
+
+                    if (tgt_devices.empty()) {
+                        for(size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+                           tgt_devices.push_back(ggml_backend_dev_get(i));
+                        }
+                    }
+
+                    for (size_t j = 0; j < devs.size(); ++j) {
+                        const size_t bytes =
+                            (measure_model_bytes ? dmd[j].mb.model : 0) +
+                            dmd[j].mb.context +
+                            dmd[j].mb.compute;
+                        total += bytes;
+                        for (size_t i = 0; i < tgt_devices.size(); i++) {
+                            if (tgt_devices[i] == devs[j]) {
+                                SRV_DBG("[spec] adding %.2f MiB to fit_params_target for device %s\n",
+                                        bytes / (1024.0 * 1024.0), ggml_backend_dev_name(devs[j]));
+                                params_base.fit_params_target[i] += bytes;
+                                break;
+                            }
+                        }
+                    }
+                    SRV_INF("[spec] estimated memory usage of %s is %.2f MiB\n",
+                            has_draft ? "draft model" : "MTP context",
+                            total / (1024.0 * 1024.0));
+                } catch (const std::exception & e) {
+                    SRV_ERR("[spec] failed to measure %s memory: %s\n",
+                            has_draft ? "draft model" : "MTP context", e.what());
+                }
             }
         }
 
@@ -848,6 +1286,10 @@ private:
             //       the extra memory for small models is likely negligible?
             cparams.n_rs_seq = 0;
             ctx_dft.reset(llama_init_from_model(model_dft.get(), cparams));
+            if (ctx_dft == nullptr) {
+                SRV_ERR("failed to create draft context for model '%s'\n", params_dft.model.path.c_str());
+                return false;
+            }
 
             ctx_dft_seq_rm_type = common_context_can_seq_rm(ctx_dft.get());
 
@@ -859,8 +1301,11 @@ private:
                     params_base.model.path.c_str());
 
             auto cparams_mtp = common_context_params_to_llama(params_base);
-            cparams_mtp.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
-            cparams_mtp.n_rs_seq = 0;
+            cparams_mtp.ctx_type      = LLAMA_CONTEXT_TYPE_MTP;
+            cparams_mtp.type_k        = params_base.speculative.draft.cache_type_k;
+            cparams_mtp.type_v        = params_base.speculative.draft.cache_type_v;
+            cparams_mtp.n_rs_seq      = 0;
+            cparams_mtp.n_outputs_max = params_base.n_parallel;
 
             ctx_dft.reset(llama_init_from_model(model_tgt, cparams_mtp));
             if (ctx_dft == nullptr) {
@@ -980,6 +1425,11 @@ private:
             slot.callback_on_release = [this](int id_slot) {
                 queue_tasks.pop_deferred_task(id_slot);
             };
+            slot.callback_on_branch_ref_release = [this](uint64_t node_id) {
+                if (cache_ctrl) {
+                    cache_ctrl->release_branch_node_ref(node_id);
+                }
+            };
 
             slot.reset();
         }
@@ -1017,11 +1467,45 @@ private:
             }
             SRV_INF("%s", "use `--cache-ram 0` to disable the prompt cache\n");
 
-            prompt_cache = std::make_unique<server_prompt_cache>(params_base.cache_ram_mib, n_ctx);
+            // Store active cache mode
+            cache_mode_active = params_base.cache_mode_val;
+
+            cache_ctrl = create_cache_controller(
+                cache_mode_active,
+                params_base,
+                params_base.cache_ram_mib,
+                n_ctx,
+                ctx_tgt,
+                ctx_dft ? ctx_dft.get() : nullptr,
+                params_base.cache_cold_path
+            );
+
+            if (cache_mode_active == CACHE_MODE_LEGACY) {
+                SRV_INF("%s", "cache mode: legacy (FIFO, destructive hits)\n");
+            } else {
+                SRV_INF("%s", "cache mode: hybrid (LRU, non-destructive hits)\n");
+            }
+
+            // Phase 6: Validate cold path configuration
+            if (!params_base.cache_cold_path.empty()) {
+                if (cache_mode_active != CACHE_MODE_HYBRID) {
+                    SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
+                    throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
+                }
+                SRV_INF(" - cache: cold store path: %s\n", params_base.cache_cold_path.c_str());
+            }
         } else {
             SRV_INF("%s", "prompt cache is disabled - use `--cache-ram N` to enable it\n");
+            cache_ctrl.reset();
         }
         SRV_INF("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
+
+        if (params_base.n_ctx_checkpoints > 0) {
+            SRV_INF("context checkpoints enabled, max = %d, min spacing = %d\n",
+                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step);
+        } else {
+            SRV_INF("%s", "context checkpoints disabled\n");
+        }
 
         if (!params_base.model_alias.empty()) {
             // backward compat: use first alias as model name
@@ -1056,13 +1540,54 @@ private:
 
         // wiring up server queues
         queue_tasks.on_new_task([this](server_task && task) {
-            process_single_task(std::move(task));
+            const auto task_ids = collect_task_ids(task);
+
+            try {
+                process_single_task(std::move(task));
+            } catch (const std::bad_alloc & e) {
+                const std::string error = format_runtime_bad_alloc_message("task scheduling", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            } catch (const std::exception & e) {
+                const std::string error = format_runtime_exception_message("task scheduling", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            } catch (...) {
+                const std::string error = "Unhandled non-standard server exception during task scheduling";
+                SRV_ERR("%s\n", error.c_str());
+                fail_task_ids(task_ids, error);
+            }
         });
         queue_tasks.on_update_slots([this]() {
-            update_slots();
+            try {
+                update_slots();
+            } catch (const std::bad_alloc & e) {
+                const std::string error = format_runtime_bad_alloc_message("slot update", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            } catch (const std::exception & e) {
+                const std::string error = format_runtime_exception_message("slot update", e.what());
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            } catch (...) {
+                const std::string error = "Unhandled non-standard server exception during slot update";
+                SRV_ERR("%s\n", error.c_str());
+                fail_processing_slots(error);
+            }
         });
         queue_tasks.on_sleeping_state([this](bool sleeping) {
-            handle_sleeping_state(sleeping);
+            try {
+                handle_sleeping_state(sleeping);
+            } catch (const std::bad_alloc & e) {
+                SRV_ERR("Host memory allocation failed during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (const std::exception & e) {
+                SRV_ERR("Unhandled server exception during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (...) {
+                SRV_ERR("%s", "Unhandled non-standard server exception during sleeping state transition\n");
+                queue_tasks.terminate();
+            }
         });
 
         metrics.init();
@@ -1153,6 +1678,20 @@ private:
         return nullptr;
     }
 
+    server_slot * get_slot_by_cmpl_id(const std::string & cmpl_id) {
+        if (cmpl_id.empty()) {
+            return nullptr;
+        }
+
+        for (server_slot & slot : slots) {
+            if (slot.is_processing() && slot.task && slot.task->params.oaicompat_cmpl_id == cmpl_id) {
+                return &slot;
+            }
+        }
+
+        return nullptr;
+    }
+
     server_slot * get_available_slot(const server_task & task) {
         server_slot * ret = nullptr;
 
@@ -1226,26 +1765,52 @@ private:
         if (ret) {
             const auto & tokens = ret->prompt.tokens;
 
-            update_cache = update_cache && prompt_cache;
+            update_cache = update_cache && cache_ctrl;
 
             // cache prompts only for completion tasks
             update_cache = update_cache && task.type == SERVER_TASK_TYPE_COMPLETION;
 
-            if (update_cache) {
+            // For hybrid mode, ALWAYS try to restore from cache when assigning a slot
+            // Hybrid cache is non-destructive, so we can check even for similarity-matched slots
+            if (cache_ctrl && cache_mode_active == CACHE_MODE_HYBRID && task.type == SERVER_TASK_TYPE_COMPLETION) {
+                const int64_t t_start = ggml_time_us();
+                
+                SRV_INF("%s", " - hybrid cache: attempting non-destructive restore\n");
+                
+                // Try to load a matching entry for the new task
+                if (cache_ctrl->try_restore_from_cache(*ret, task)) {
+                    SRV_INF("%s", " - hybrid cache: restored from cache for new task\n");
+                } else {
+                    // No match found, clear the slot for the new task if needed
+                    // Only clear if the slot has old content from a different task
+                    if (!ret->prompt.tokens.empty()) {
+                        SRV_INF("%s", " - hybrid cache: no match found, clearing slot\n");
+                        ret->prompt_clear(false);
+                    }
+                }
+                
+                cache_ctrl->update();
+                SRV_INF("prompt cache update took %.2f ms\n", (ggml_time_us() - t_start) / 1000.0);
+            }
+            // For legacy mode, only update cache when the flag is set
+            else if (update_cache && cache_mode_active != CACHE_MODE_HYBRID) {
                 SRV_INF("%s", "updating prompt cache\n");
 
                 const int64_t t_start = ggml_time_us();
 
+                // Legacy cache: destructive save/load cycle
                 // don't save the slot's state if its context is empty
                 if (tokens.size() > 0) {
-                    ret->prompt_save(*prompt_cache);
+                    if (cache_ctrl->save_slot(*ret, ret->prompt_metadata)) {
+                        ret->prompt_clear(false);
+                    }
                 }
 
-                if (!ret->prompt_load(*prompt_cache, task.tokens)) {
+                if (!cache_ctrl->load_slot(*ret, task)) {
                     ret->prompt_clear(false);
                 }
 
-                prompt_cache->update();
+                cache_ctrl->update();
 
                 SRV_INF("prompt cache update took %.2f ms\n", (ggml_time_us() - t_start) / 1000.0);
             }
@@ -1407,6 +1972,7 @@ private:
             slot.smpl.reset();
         }
 
+        slot.prompt_metadata = task.prompt_metadata;
         slot.task = std::make_unique<const server_task>(std::move(task));
 
         slot.state = slot.task->is_child()
@@ -1634,6 +2200,77 @@ private:
         queue_results.send(std::move(res));
     }
 
+    void try_send_error(const int id_task, const std::string & error, const enum error_type type = ERROR_TYPE_SERVER, const int32_t n_prompt_tokens = 0, const int32_t n_ctx = 0) {
+        try {
+            send_error(id_task, error, type, n_prompt_tokens, n_ctx);
+        } catch (const std::exception & e) {
+            SRV_ERR("failed to send task error for task %d: %s\n", id_task, e.what());
+        } catch (...) {
+            SRV_ERR("failed to send task error for task %d: unknown exception\n", id_task);
+        }
+    }
+
+    void try_send_error(const server_slot & slot, const std::string & error, const enum error_type type = ERROR_TYPE_SERVER) {
+        try_send_error(slot.task->id, error, type, slot.task->n_tokens(), slot.n_ctx);
+    }
+
+    static std::unordered_set<int> collect_task_ids(const server_task & task) {
+        std::unordered_set<int> task_ids;
+        task_ids.reserve(task.child_tasks.size() + 1);
+        task_ids.insert(task.id);
+
+        for (const auto & child_task : task.child_tasks) {
+            task_ids.insert(child_task.id);
+        }
+
+        return task_ids;
+    }
+
+    static std::string format_runtime_bad_alloc_message(const char * phase, const char * details) {
+        return string_format("Host memory allocation failed during %s: %s", phase, details);
+    }
+
+    static std::string format_runtime_exception_message(const char * phase, const char * details) {
+        return string_format("Unhandled server exception during %s: %s", phase, details);
+    }
+
+    void fail_task_ids(const std::unordered_set<int> & task_ids, const std::string & error) {
+        auto remaining = task_ids;
+
+        for (auto & slot : slots) {
+            if (!slot.is_processing() || !slot.task) {
+                continue;
+            }
+
+            auto it = remaining.find(slot.task->id);
+            if (it == remaining.end()) {
+                continue;
+            }
+
+            try_send_error(slot, error);
+            slot.release();
+            slot.prompt_clear(false);
+
+            remaining.erase(it);
+        }
+
+        for (const int id_task : remaining) {
+            try_send_error(id_task, error);
+        }
+    }
+
+    void fail_processing_slots(const std::string & error) {
+        for (auto & slot : slots) {
+            if (!slot.is_processing() || !slot.task) {
+                continue;
+            }
+
+            try_send_error(slot, error);
+            slot.release();
+            slot.prompt_clear(false);
+        }
+    }
+
     // if multimodal is enabled, send an error and return false
     bool check_no_mtmd(const int id_task) {
         if (mctx) {
@@ -1643,7 +2280,7 @@ private:
         return true;
     }
 
-    void send_partial_response(server_slot & slot, const completion_token_output & tkn, bool is_progress) {
+    void send_partial_response(server_slot & slot, const completion_token_output & tkn, bool is_progress, bool is_begin = false) {
         auto res = std::make_unique<server_task_result_cmpl_partial>();
 
         res->id    = slot.task->id;
@@ -1655,6 +2292,9 @@ private:
             res->progress.cache     = slot.n_prompt_tokens_cache;
             res->progress.processed = slot.prompt.tokens.size();
             res->progress.time_ms   = (ggml_time_us() - slot.t_start_process_prompt) / 1000;
+        }
+        if (is_begin) {
+            res->is_begin = true;
         } else {
             res->content = tkn.text_to_send;
             res->tokens  = { tkn.tok };
@@ -1904,6 +2544,10 @@ private:
 
     // n_tokens_cur: the number of tokens added to the batch for the current slot
     void create_checkpoint(server_slot & slot, const int64_t n_tokens_cur, llama_pos pos_min, llama_pos pos_max) {
+        if (!slot.checkpoints_enabled) {
+            return;
+        }
+
         while (slot.prompt.checkpoints.size() >= (size_t) params_base.n_ctx_checkpoints) {
             // make room for the new checkpoint, if needed
             const auto & cur = slot.prompt.checkpoints.front();
@@ -1914,17 +2558,47 @@ private:
             slot.prompt.checkpoints.erase(slot.prompt.checkpoints.begin());
         }
 
-        auto & cur = slot.prompt.checkpoints.emplace_back();
+        const size_t checkpoint_budget =
+            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) +
+            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0);
+
+        const size_t checkpoint_reserve =
+            llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) +
+            (ctx_dft ? llama_state_seq_get_size_ext(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) : 0);
+
+        slot.trim_checkpoints_for_allocation(
+                slot.prompt,
+                checkpoint_budget,
+                checkpoint_reserve,
+                "upcoming live checkpoint allocation");
+
+        common_prompt_checkpoint cur;
 
         cur.update_pos(slot.prompt.n_tokens() - n_tokens_cur, pos_min, pos_max);
 
-        cur.update_tgt(ctx_tgt,       slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        cur.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const bool ok_tgt = slot.checkpoint_update_tgt(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const bool ok_dft = ok_tgt ? slot.checkpoint_update_dft(cur, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) : false;
+
+        if (!ok_tgt || !ok_dft) {
+            slot.disable_checkpoints("checkpoint export failure");
+            SLT_WRN(slot,
+                    "skipping context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ") due to checkpoint export failure\n",
+                    cur.pos_min,
+                    cur.pos_max,
+                    cur.n_tokens);
+            return;
+        }
+
+        slot.prompt.checkpoints.emplace_back(std::move(cur));
+
+        slot.trim_checkpoints(slot.prompt, checkpoint_budget, "live checkpoint memory");
+
+        const auto & saved = slot.prompt.checkpoints.back();
 
         SLT_INF(slot,
                 "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, cur.pos_min,
-                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
+                (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, saved.pos_min,
+                saved.pos_max, saved.n_tokens, (float) saved.size() / 1024 / 1024);
     }
 
     void process_single_task(server_task && task) {
@@ -2000,6 +2674,37 @@ private:
                             break;
                         }
                     }
+                } break;
+            case SERVER_TASK_TYPE_CONTROL:
+                {
+                    auto res = std::make_unique<server_task_result_control>();
+                    res->id = task.id;
+
+                    server_slot * slot = get_slot_by_cmpl_id(task.params.control_cmpl_id);
+                    if (slot == nullptr) {
+                        res->success = false;
+                        res->message = "no active completion for this id";
+                        queue_results.send(std::move(res));
+                        break;
+                    }
+
+                    if (task.params.control_action == "reasoning_end") {
+                        // the budget sampler only exists when reasoning control was armed
+                        if (!slot->task->params.sampling.reasoning_control) {
+                            res->success = false;
+                            res->message = "reasoning control not enabled for this completion";
+                            queue_results.send(std::move(res));
+                            break;
+                        }
+                        // act on the live slot mid generation, never defer
+                        common_sampler_reasoning_budget_force(slot->smpl.get());
+                        res->success = true;
+                    } else {
+                        res->success = false;
+                        res->message = "unknown control action";
+                    }
+
+                    queue_results.send(std::move(res));
                 } break;
             case SERVER_TASK_TYPE_NEXT_RESPONSE:
                 {
@@ -2310,6 +3015,7 @@ private:
 
         // track if given slot can be batched with slots already in the batch
         server_slot * slot_batched = nullptr;
+        bool batch_request_embd = false;
 
         std::vector<server_slot *> generating;
         std::vector<server_slot *> drafting;
@@ -2354,7 +3060,10 @@ private:
                                 llama_memory_seq_pos_max(llama_get_memory(ctx_tgt), slot.id));
 
                         if (use_ckpt_dft) {
-                            slot.spec_ckpt.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                            if (!slot.checkpoint_update_dft(slot.spec_ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                                slot.spec_ckpt.clear();
+                                continue;
+                            }
                         }
 
                         slot.spec_prompt = slot.prompt.tokens.get_text_tokens();
@@ -2410,7 +3119,11 @@ private:
                 if (use_ckpt_tgt) {
                     //const int64_t t_start = ggml_time_us();
 
-                    ckpt.update_tgt(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                    if (!slot.checkpoint_update_tgt(ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                        slot.spec_draft.clear();
+                        ckpt.clear();
+                        continue;
+                    }
 
                     //const int64_t t_total = ggml_time_us() - t_start;
                     //printf("checkpoint total: %f ms\n", t_total / 1000.0);
@@ -2422,7 +3135,11 @@ private:
                 }
 
                 if (use_ckpt_dft) {
-                    ckpt.update_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE);
+                    if (!slot.checkpoint_update_dft(ckpt, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY | LLAMA_STATE_SEQ_FLAGS_ON_DEVICE)) {
+                        slot.spec_draft.clear();
+                        ckpt.clear();
+                        continue;
+                    }
                 }
             }
         }
@@ -2432,16 +3149,32 @@ private:
             auto & slot = *slot_ptr;
 
             slot.update_batch(batch);
+            batch_request_embd = batch_request_embd || slot.task->need_embd();
         }
 
         // process in chunks of params.n_batch
         int32_t n_batch  = llama_n_batch(ctx_tgt);
         int32_t n_ubatch = llama_n_ubatch(ctx_tgt);
 
+        int32_t n_batch_prompt = n_batch;
+        const bool has_speculative_prompt = std::any_of(slots.begin(), slots.end(), [&](const server_slot & slot) {
+            return slot.is_processing() &&
+                (slot.state == SLOT_STATE_STARTED || slot.state == SLOT_STATE_PROCESSING_PROMPT) &&
+                slot.need_embd() &&
+                !slot.task->need_embd();
+        });
+
+        if (has_speculative_prompt) {
+            const size_t vocab_bytes = (size_t) llama_vocab_n_tokens(vocab) * sizeof(float);
+            const size_t max_outputs = std::max<size_t>(1, vocab_bytes == 0 ? 1 : SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES / vocab_bytes);
+            n_batch_prompt = std::max<int32_t>(1, std::min<int32_t>(n_batch, (int32_t) max_outputs));
+            n_batch_prompt = std::min(n_batch_prompt, SPECULATIVE_PROMPT_SAFE_BATCH_SIZE);
+        }
+
         float  alora_scale       = -1.0f;
         size_t alora_disabled_id = 0;
 
-        // next, batch any pending prompts without exceeding n_batch
+        // next, batch any pending prompts without exceeding the effective prompt batch size
         if (params_base.cont_batching || batch.n_tokens == 0) {
             for (auto & slot : slots) {
                 if (!slot.is_processing()) {
@@ -2543,7 +3276,7 @@ private:
                                 continue;
                             }
 
-                            if (slot.task->params.cache_prompt) {
+                            if (slot.task->params.cache_prompt || slot.hybrid_cache_restored) {
                                 // reuse any previously computed tokens that are common with the new prompt
                                 n_past = slot.prompt.tokens.get_common_prefix(input_tokens);
 
@@ -2627,7 +3360,7 @@ private:
                             // the largest pos_min required for a checkpoint to be useful
                             const auto pos_min_thold = std::max(0, pos_next - n_swa - 1);
 
-                            if (n_past > 0 && n_past <= slot.prompt.n_tokens()) {
+                            if (!slot.hybrid_cache_restored && n_past > 0 && n_past <= slot.prompt.n_tokens()) {
                                 const auto pos_min = llama_memory_seq_pos_min(llama_get_memory(ctx_tgt), slot.id);
                                 if (pos_min == -1) {
                                     SLT_ERR(slot, "n_past = %d, slot.prompt.tokens.size() = %d, seq_id = %d, pos_min = %d\n", n_past, (int) slot.prompt.tokens.size(), slot.id, pos_min);
@@ -2678,8 +3411,6 @@ private:
                                 }
 
                                 if (pos_min >= pos_min_thold) {
-                                    SLT_WRN(slot, "n_past = %d, slot.prompt.tokens.size() = %d, seq_id = %d, pos_min = %d, n_swa = %d\n", n_past, (int) slot.prompt.tokens.size(), slot.id, pos_min, n_swa);
-
                                     // search for a context checkpoint
                                     const auto it = std::find_if(
                                         slot.prompt.checkpoints.rbegin(),
@@ -2696,7 +3427,6 @@ private:
 
                                     if (!do_reset) {
                                         // restore the context checkpoint
-
                                         it->load_tgt(ctx_tgt,       slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
                                         it->load_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
 
@@ -2740,10 +3470,15 @@ private:
 
                         slot.prompt.tokens.keep_first(n_past);
 
-                        // send initial 0% progress update if needed
                         // this is to signal the client that the request has started processing
-                        if (slot.task->params.stream && slot.task->params.return_progress) {
-                            send_partial_response(slot, {}, true);
+                        if (slot.task->params.stream) {
+                            if (slot.task->params.return_progress) {
+                                // send initial 0% progress update if needed
+                                send_partial_response(slot, {}, true);
+                            } else {
+                                // otherwise, for streaming without progress, signal HTTP to send the headers (i.e. 200 status)
+                                send_partial_response(slot, {}, false, true);
+                            }
                         }
                     }
 
@@ -2783,6 +3518,8 @@ private:
                     }
 
                     bool do_checkpoint = params_base.n_ctx_checkpoints > 0;
+
+                    do_checkpoint = do_checkpoint && slot.checkpoints_enabled;
 
                     // make checkpoints only for completion tasks
                     do_checkpoint = do_checkpoint && slot.task->type == SERVER_TASK_TYPE_COMPLETION;
@@ -2832,8 +3569,11 @@ private:
                         has_mtmd = true;
                     }
 
+                    const int32_t n_before_user = slot.task->params.n_before_user;
+                    const bool n_before_user_known = n_before_user > 0;
+
                     // add prompt tokens for processing in the current batch
-                    while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.n_tokens < n_batch) {
+                    while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.n_tokens < n_batch_prompt) {
                         // get next token to process
                         llama_token cur_tok = input_tokens[slot.prompt.n_tokens()];
                         if (cur_tok == LLAMA_TOKEN_NULL) {
@@ -2850,7 +3590,7 @@ private:
 
                         // embedding requires all tokens in the batch to be output;
                         // MTP also wants logits at every prompt position so the
-                        // streaming hook can mirror t_h_pre_norm into ctx_dft.
+                        // streaming hook can mirror t_h_nextn into ctx_dft.
                         common_batch_add(batch,
                             cur_tok,
                             slot.prompt.tokens.pos_next(),
@@ -2860,17 +3600,24 @@ private:
 
                         slot.n_prompt_tokens_processed++;
 
+                        // stop the prompt batch exactly before the latest user input, so a checkpoint
+                        // can be created after the previous messages
+                        if (n_before_user_known &&
+                            slot.prompt.n_tokens() == n_before_user) {
+                            break;
+                        }
+
                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
                         // create checkpoints that many tokens before the end of the prompt:
-                        //  - 4 + n_ubatch
+                        //  - 4 + current prompt batch limit
                         //  - 4
                         // ref: https://github.com/ggml-org/llama.cpp/pull/20288
                         if (do_checkpoint) {
-                            static const int checkpoint_offsets[] = {4 + n_ubatch, 4};
+                            const int checkpoint_offsets[] = {4 + n_batch_prompt, 4};
 
                             bool should_break = false;
                             for (int offset : checkpoint_offsets) {
-                                const int n_last = std::min(n_batch, offset);
+                                const int n_last = std::min(n_batch_prompt, offset);
                                 if (slot.task->n_tokens() == slot.prompt.n_tokens() + n_last) {
                                     should_break = true;
                                     break;
@@ -2884,6 +3631,9 @@ private:
 
                     // the number of tokens added to the batch for the current slot
                     const auto n_tokens_cur = batch.n_tokens - n_tokens_prev;
+                    batch_request_embd = batch_request_embd || (n_tokens_cur > 0 && slot.task->need_embd());
+
+                    const bool near_prompt_end = slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch;
 
                     // entire prompt has been processed
                     if (slot.prompt.n_tokens() == slot.task->n_tokens()) {
@@ -2899,39 +3649,49 @@ private:
 
                         slot.init_sampler();
                     } else {
-                        if (slot.task->n_tokens() < slot.prompt.n_tokens() + n_ubatch) {
-                            // near the end of the prompt
-                            do_checkpoint = do_checkpoint && true;
-                        } else {
-                            // only do non-end checkpoints if the "checkpoint every n tokens" option is set
-                            do_checkpoint = do_checkpoint && params_base.checkpoint_every_nt > 0;
-
-                            if (do_checkpoint) {
-                                llama_pos last_checkpoint = 0;
-                                if (!slot.prompt.checkpoints.empty()) {
-                                    last_checkpoint = slot.prompt.checkpoints.back().n_tokens;
-                                }
-
-                                do_checkpoint = do_checkpoint && slot.prompt.n_tokens() - batch.n_tokens - last_checkpoint >= params_base.checkpoint_every_nt;
-
-                                if (do_checkpoint) {
-                                    SLT_INF(slot, "%d tokens since last checkpoint at %d, creating new checkpoint during processing at position %d\n", params_base.checkpoint_every_nt, last_checkpoint, slot.prompt.n_tokens());
-                                }
-                            }
+                        // skip ordinary mid-prompt checkpoints
+                        if (!n_before_user_known && !near_prompt_end) {
+                            do_checkpoint = false;
                         }
                     }
 
                     const auto pos_min = llama_memory_seq_pos_min(llama_get_memory(ctx_tgt), slot.id);
                     const auto pos_max = llama_memory_seq_pos_max(llama_get_memory(ctx_tgt), slot.id);
 
-                    // no need for empty or small checkpoints
-                    do_checkpoint = do_checkpoint && (pos_min >= 0 && slot.prompt.n_tokens() >= 64);
+                    // checkpoints are created before the current batch is decoded, so
+                    // their token position is the batch start rather than the prompt end
+                    const int32_t n_tokens_start = slot.prompt.n_tokens() - n_tokens_cur;
+
+                    {
+                        const bool is_on_user =
+                            n_before_user_known &&
+                            n_tokens_start == n_before_user;
+
+                        const bool is_after_user =
+                            n_before_user_known &&
+                            n_tokens_start > n_before_user;
+
+                        const bool is_allowed =
+                            !n_before_user_known ||
+                            is_on_user ||
+                            (is_after_user && near_prompt_end);
+
+                        if (do_checkpoint && !is_allowed) {
+                            do_checkpoint = false;
+                        }
+                    }
+
+                    // nothing to checkpoint yet
+                    // TODO: is this check needed?
+                    if (do_checkpoint && pos_min < 0) {
+                        do_checkpoint = false;
+                    }
 
                     // do not checkpoint after mtmd chunks
                     do_checkpoint = do_checkpoint && !has_mtmd;
 
                     // no need to create checkpoints that are too close together
-                    do_checkpoint = do_checkpoint && (slot.prompt.checkpoints.empty() || slot.prompt.n_tokens() - n_tokens_cur > slot.prompt.checkpoints.back().n_tokens + 64);
+                    do_checkpoint = do_checkpoint && (slot.prompt.checkpoints.empty() || n_tokens_start > slot.prompt.checkpoints.back().n_tokens + params_base.checkpoint_min_step);
                     SLT_DBG(slot, "main/do_checkpoint = %s, pos_min = %d, pos_max = %d\n", do_checkpoint ? "yes" : "no", pos_min, pos_max);
 
                     // note: we create the checkpoint before calling llama_decode(), so the current batch is not
@@ -2945,7 +3705,7 @@ private:
                     slot_batched = &slot;
                 }
 
-                if (batch.n_tokens >= n_batch) {
+                if (batch.n_tokens >= n_batch_prompt) {
                     break;
                 }
             }
@@ -2969,7 +3729,7 @@ private:
                 slot_batched->lora[alora_disabled_id].scale = alora_scale;
             }
 
-            llama_set_embeddings(ctx_tgt, slot_batched->need_embd());
+            llama_set_embeddings(ctx_tgt, batch_request_embd);
         }
 
         if (batch.n_tokens == 0) {
@@ -3211,6 +3971,13 @@ private:
                     slot.print_timings();
                     send_final_response(slot);
                     metrics.on_prediction(slot);
+
+                    // Save to hybrid cache after successful completion
+                    if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
+                        cache_ctrl->save_slot(slot, slot.prompt_metadata);
+                        cache_ctrl->update();  // Trigger eviction check after save
+                    }
+
                     slot.release();
 
                     continue;
@@ -3325,6 +4092,13 @@ private:
                         slot.print_timings();
                         send_final_response(slot);
                         metrics.on_prediction(slot);
+
+                        // Save to hybrid cache after successful completion
+                        if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
+                            cache_ctrl->save_slot(slot, slot.prompt_metadata);
+                            cache_ctrl->update();  // Trigger eviction check after save
+                        }
+
                         slot.release();
 
                         break;
@@ -3448,22 +4222,244 @@ void server_context::on_sleeping_changed(std::function<void(bool)> callback) {
     impl->queue_tasks.on_sleeping_state(std::move(callback));
 }
 
+// compute the number of tokens before the last user message in the prompt
+static int32_t prompt_get_n_before_user(
+        const json & message_spans,
+        const std::string & prompt,
+        const std::vector<raw_buffer> & files,
+        const llama_vocab * vocab,
+        mtmd_context * mctx) {
+    int32_t result = -1;
+    int32_t byte_pos = -1;
+
+    for (const auto & span : message_spans) {
+        const std::string role = json_value(span, "role", std::string());
+
+        if (role == "user") {
+            byte_pos = json_value(span, "pos", -1);
+        }
+    }
+
+    if (byte_pos >= 0) {
+        GGML_ASSERT((size_t) byte_pos <= prompt.size());
+
+        const std::string prefix = prompt.substr(0, (size_t) byte_pos);
+
+        const std::string marker = get_media_marker();
+        size_t n_prefix_media = 0;
+        for (size_t pos = 0; (pos = prefix.find(marker, pos)) != std::string::npos; pos += marker.size()) {
+            n_prefix_media++;
+        }
+
+        GGML_ASSERT(n_prefix_media <= files.size());
+
+        if (mctx != nullptr && n_prefix_media > 0) {
+            // TODO: this makes a copy - avoid it
+            std::vector<raw_buffer> prefix_files(files.begin(), files.begin() + n_prefix_media);
+
+            result = (int32_t) process_mtmd_prompt(mctx, prefix, prefix_files).size();
+        } else {
+            result = (int32_t) tokenize_input_prompts(vocab, nullptr, prefix, true, true)[0].size();
+        }
+
+        SRV_TRC("message_spans: last user message: byte_pos=%d, media=%zu, n_before_user=%d\n",
+                byte_pos, n_prefix_media, result);
+    }
+
+    return result;
+}
+
 
 //
 // server_routes
 //
+
+static std::string cache_metadata_content_text(const json & content) {
+    if (content.is_string()) {
+        return content.get<std::string>();
+    }
+    if (content.is_null()) {
+        return "";
+    }
+    if (!content.is_array()) {
+        return content.dump();
+    }
+
+    std::string result;
+    for (const auto & part : content) {
+        const std::string type = json_value(part, "type", std::string());
+        if (type == "text" || type == "media_marker") {
+            result += json_value(part, "text", std::string());
+        }
+    }
+    return result;
+}
+
+static size_t cache_metadata_token_index(
+        const llama_vocab * vocab,
+        const std::string & prompt,
+        size_t char_index) {
+    char_index = std::min(char_index, prompt.size());
+    if (char_index == 0) {
+        return 0;
+    }
+
+    return common_tokenize(vocab, prompt.substr(0, char_index), true, true).size();
+}
+
+static uint64_t cache_metadata_checksum(
+        const server_tokens & tokens,
+        size_t token_start,
+        size_t token_end) {
+    const llama_tokens & token_ids = tokens.get_tokens();
+    token_start = std::min(token_start, token_ids.size());
+    token_end = std::min(std::max(token_end, token_start), token_ids.size());
+
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = token_start; i < token_end; ++i) {
+        hash ^= static_cast<uint64_t>(static_cast<uint32_t>(token_ids[i]));
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static prepared_prompt_metadata cache_metadata_from_chat_messages(
+        const llama_vocab * vocab,
+        const std::string & prompt,
+        const json & messages,
+        const server_tokens & tokens,
+        size_t n_prompt_tokens) {
+    prepared_prompt_metadata metadata;
+    metadata.preparation_id = "chat-template-rendered-text-search";
+    metadata.boundaries_native = false;  // Using inferred boundaries from rendered text search
+
+    if (!messages.is_array()) {
+        metadata.degraded_reason = "chat metadata source is not an array";
+        return metadata;
+    }
+
+    // Mark as degraded if using fallback rendered-text inference
+    if (metadata.degraded_reason.empty()) {
+        metadata.degraded_reason = "boundaries inferred from rendered text (not native capture)";
+    }
+
+    size_t search_pos = 0;
+    size_t fallback_token = 0;
+
+    for (const auto & message : messages) {
+        const std::string role = json_value(message, "role", std::string());
+        const std::string content = message.contains("content")
+            ? cache_metadata_content_text(message.at("content"))
+            : std::string();
+
+        size_t token_start = fallback_token;
+        size_t token_end = fallback_token;
+
+        if (!content.empty()) {
+            const size_t char_start = prompt.find(content, search_pos);
+            if (char_start != std::string::npos) {
+                const size_t char_end = char_start + content.size();
+                token_start = cache_metadata_token_index(vocab, prompt, char_start);
+                token_end = cache_metadata_token_index(vocab, prompt, char_end);
+                search_pos = char_end;
+            } else {
+                SRV_DBG("cache metadata: could not map chat message role '%s' into rendered prompt\n", role.c_str());
+                if (metadata.degraded_reason.empty()) {
+                    metadata.degraded_reason = "one or more chat messages could not be mapped to the rendered prompt";
+                }
+            }
+        }
+
+        token_start = std::min(token_start, n_prompt_tokens);
+        token_end = std::min(std::max(token_end, token_start), n_prompt_tokens);
+
+        const bool protect = role == "system" || role == "developer";
+        const uint64_t checksum = cache_metadata_checksum(tokens, token_start, token_end);
+
+        metadata.add_span(prompt_boundary::MESSAGE_START, token_start, token_end, checksum, protect, role);
+        if (role == "system" || role == "developer") {
+            metadata.protect_system = true;
+            metadata.add_span(prompt_boundary::SYSTEM_START, token_start, token_end, checksum, true, role);
+            metadata.add_span(prompt_boundary::SYSTEM_END, token_start, token_end, checksum, true, role);
+        }
+        metadata.add_span(prompt_boundary::MESSAGE_END, token_start, token_end, checksum, protect, role);
+        fallback_token = token_end;
+
+        if (message.contains("tool_calls") && message.at("tool_calls").is_array()) {
+            for (const auto & tool_call : message.at("tool_calls")) {
+                const json fn = tool_call.contains("function") ? tool_call.at("function") : json::object();
+                const std::string name = json_value(fn, "name", std::string());
+                const std::string args = json_value(fn, "arguments", std::string());
+                const std::string needle = !name.empty() ? name : args;
+                if (needle.empty()) {
+                    continue;
+                }
+                const size_t char_start = prompt.find(needle, search_pos);
+                if (char_start == std::string::npos) {
+                    continue;
+                }
+                const size_t char_end = char_start + needle.size();
+                const size_t tool_start = cache_metadata_token_index(vocab, prompt, char_start);
+                const size_t tool_end = cache_metadata_token_index(vocab, prompt, char_end);
+                const size_t span_start = std::min(tool_start, n_prompt_tokens);
+                const size_t span_end = std::min(tool_end, n_prompt_tokens);
+                const uint64_t tool_checksum = cache_metadata_checksum(tokens, span_start, span_end);
+                metadata.add_span(prompt_boundary::TOOL_CALL_START, span_start, span_end, tool_checksum, false, name);
+                metadata.add_span(prompt_boundary::TOOL_CALL_END, span_start, span_end, tool_checksum, false, name);
+            }
+        }
+    }
+
+    return metadata;
+}
+
+static prepared_prompt_metadata cache_metadata_for_request(
+        const llama_vocab * vocab,
+        const json & data,
+        const server_tokens & tokens,
+        const json * chat_messages = nullptr) {
+    prepared_prompt_metadata metadata;
+
+    if (chat_messages != nullptr && data.contains("prompt") && data.at("prompt").is_string()) {
+        metadata = cache_metadata_from_chat_messages(
+            vocab,
+            data.at("prompt").get<std::string>(),
+            *chat_messages,
+            tokens,
+            tokens.size());
+        if (metadata.has_boundaries()) {
+            metadata.degraded_reason = "rendered text boundary inference";
+        }
+    }
+
+    if (!metadata.has_boundaries() && !tokens.empty()) {
+        const uint64_t checksum = cache_metadata_checksum(tokens, 0, tokens.size());
+        metadata.preparation_id = "completion-minimal";
+        metadata.degraded_reason = "minimal completion metadata";
+        metadata.add_span(prompt_boundary::MESSAGE_START, 0, tokens.size(), checksum, false, "prompt");
+        metadata.add_span(prompt_boundary::MESSAGE_END, 0, tokens.size(), checksum, false, "prompt");
+    }
+
+    if (metadata.compatibility_key.empty()) {
+        metadata.compatibility_key = "server-prepared-prompt-v1";
+    }
+
+    return metadata;
+}
 
 std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const server_http_req & req,
             server_task_type type,
             const json & data,
             const std::vector<raw_buffer> & files,
-            task_response_type res_type) {
+            task_response_type res_type,
+            const json * chat_messages) {
     GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
     auto completion_id = gen_chatcmplid();
     auto & rd = res->rd;
+    auto & params = this->params;
 
     try {
         std::vector<server_task> tasks;
@@ -3491,12 +4487,25 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             task.id = rd.get_new_id();
 
             task.tokens = std::move(inputs[i]);
+            task.prompt_metadata = cache_metadata_for_request(ctx_server.vocab, data, task.tokens, chat_messages);
             task.params = server_task::params_from_json_cmpl(
                     ctx_server.vocab,
                     params,
                     meta->slot_n_ctx,
                     meta->logit_bias_eog,
                     data);
+
+            const auto message_spans = json_value(data, "message_spans", json::array());
+            if (prompt.is_string() && message_spans.is_array()) {
+                task.params.n_before_user =
+                    prompt_get_n_before_user(
+                        message_spans,
+                        prompt.get<std::string>(),
+                        files,
+                        ctx_server.vocab,
+                        ctx_server.mctx);
+            }
+
             task.id_slot = json_value(data, "id_slot", -1);
 
             // OAI-compat
@@ -3576,7 +4585,9 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         // next responses are streamed
         // to be sent immediately
         json first_result_json = first_result->to_json();
-        if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
+        if (first_result_json == nullptr) {
+            res->data = ""; // simply send HTTP headers and status code
+        } else if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
             res->data = format_anthropic_sse(first_result_json);
         } else if (res_type == TASK_RESPONSE_TYPE_OAI_RESP) {
             res->data = format_oai_resp_sse(first_result_json);
@@ -3585,7 +4596,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         }
         res->status = 200;
         res->content_type = "text/event-stream";
-        res->next = [res_this = res.get(), res_type, &req](std::string & output) -> bool {
+        res->next = [res_this = res.get(), res_type, &req, &params](std::string & output) -> bool {
             static auto format_error = [](task_response_type res_type, const json & res_json) {
                 if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
                     return format_anthropic_sse({
@@ -3630,7 +4641,25 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
                 }
 
                 // receive subsequent results
-                auto result = rd.next(req.should_stop);
+                bool timeout = false;
+                int64_t start_time = ggml_time_ms();
+                auto result = rd.next([&timeout, &req, &start_time, &params]() {
+                    if (req.should_stop()) {
+                        return true; // should_stop condition met
+                    } else if (params.sse_ping_interval > 0 && ggml_time_ms() - start_time > (int64_t)params.sse_ping_interval * 1000) {
+                        timeout = true;
+                        return true; // timeout
+                    }
+                    return false;
+                });
+
+                if (timeout) {
+                    // some clients may time out (e.g. undici) will time out if no data is received for a while, so we need to send a ping to keep the connection alive
+                    SRV_DBG("%s", "sending SSE ping\n");
+                    output = ":\n\n";
+                    return true;
+                }
+
                 if (result == nullptr) {
                     SRV_DBG("%s", "stopping streaming due to should_stop condition\n");
                     GGML_ASSERT(req.should_stop());
@@ -3696,8 +4725,8 @@ void server_routes::init_routes() {
 
         // this endpoint can be accessed during sleeping
         // the next LOC is to avoid someone accidentally use ctx_server
-        bool ctx_server; // do NOT delete this line
-        GGML_UNUSED(ctx_server);
+        bool ctx_server_shadow; // do NOT delete this line
+        GGML_UNUSED(ctx_server_shadow);
 
         res->ok({{"status", "ok"}});
         return res;
@@ -3799,6 +4828,287 @@ void server_routes::init_routes() {
                             << "# TYPE llamacpp:" << name << " " << type  << "\n"
                             << "llamacpp:"        << name << " " << value << "\n";
             }
+        }
+
+        try {
+            const json cache_stats = this->ctx_server.get_cache_stats();
+            const auto prometheus_label_value = server_prometheus_label_value;
+            const std::string mode = prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
+            const auto write_cache_metric = [&prometheus, &mode](const char * type, const char * name, const char * help, auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_label = [&prometheus, &mode, &prometheus_label_value](
+                    const char * type, const char * name, const char * help,
+                    const char * label_name, const std::string & label_value, auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_name << "=\""
+                            << prometheus_label_value(label_value) << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_two_labels = [&prometheus, &mode, &prometheus_label_value](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_three_labels = [&prometheus, &mode, &prometheus_label_value](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    const char * label_c_name, const std::string & label_c_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
+                            << prometheus_label_value(label_c_value) << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_four_labels = [&prometheus, &mode, &prometheus_label_value](
+                    const char * type, const char * name, const char * help,
+                    const char * label_a_name, const std::string & label_a_value,
+                    const char * label_b_name, const std::string & label_b_value,
+                    const char * label_c_name, const std::string & label_c_value,
+                    const char * label_d_name, const std::string & label_d_value,
+                    auto value) {
+                prometheus << "# HELP " << name << " " << help << "\n"
+                            << "# TYPE " << name << " " << type << "\n"
+                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                            << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
+                            << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
+                            << prometheus_label_value(label_c_value) << "\"," << label_d_name << "=\""
+                            << prometheus_label_value(label_d_value) << "\"} " << value << "\n";
+            };
+
+            write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_tokens",  "Current cached token count by mode.", json_value(cache_stats, "n_tokens", 0));
+            write_cache_metric("counter", "llamacpp_cache_hits_total", "Successful cache restores by mode.", json_value(cache_stats, "n_hits", 0));
+            write_cache_metric("counter", "llamacpp_cache_misses_total", "Cache lookup misses by mode.", json_value(cache_stats, "n_misses", 0));
+            write_cache_metric("counter", "llamacpp_cache_evictions_total", "Cache evictions by mode.", json_value(cache_stats, "n_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_evictions_total", "Hot payload evictions by mode.", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_protected_root_decisions_total", "Protected-root cache policy decisions by mode.", json_value(cache_stats, "n_protected_root_decisions", 0));
+            write_cache_metric("counter", "llamacpp_cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_descriptor_validation_failures_total", "Payload descriptor validation failures by mode.", json_value(cache_stats, "n_descriptor_validation_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_pairing_violations_total", "Payload target and draft pairing violations by mode.", json_value(cache_stats, "n_pairing_violations", 0));
+            write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
+            write_cache_metric("counter", "cache_branch_nodes_created_total", "Branch nodes created by mode.", json_value(cache_stats, "n_branch_nodes_created", 0));
+            const json branch_lookup_namespaces = cache_stats.contains("branch_lookup_namespaces") ? cache_stats["branch_lookup_namespaces"] : json::object();
+            const auto write_lookup_method = [&](
+                    const char * method,
+                    const char * legacy_total_key,
+                    const json & namespace_stats) {
+                const json method_stats = branch_lookup_namespaces.contains(method) ?
+                    branch_lookup_namespaces[method] : json::object();
+                if (method_stats.empty()) {
+                    if (namespace_stats.empty()) {
+                        write_cache_metric_with_two_labels(
+                            "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                            "namespace", "none", "method", method, json_value(cache_stats, legacy_total_key, 0));
+                    } else {
+                        for (const auto & ns : namespace_stats.items()) {
+                            write_cache_metric_with_two_labels(
+                                "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                                "namespace", ns.key(), "method", method, 0);
+                        }
+                    }
+                    return;
+                }
+                for (const auto & ns : method_stats.items()) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                        "namespace", ns.key(), "method", method, ns.value());
+                }
+            };
+            write_cache_metric("counter", "cache_branch_lookup_hits_total", "Branch lookup hits by mode.", json_value(cache_stats, "n_branch_lookup_hits", 0));
+            const json branch_forest = cache_stats.contains("branch_forest") ? cache_stats["branch_forest"] : json::object();
+            const json namespace_stats = branch_forest.contains("namespaces") ? branch_forest["namespaces"] : json::object();
+            write_lookup_method("token_span", "n_branch_token_lookups", namespace_stats);
+            write_lookup_method("checksum_span", "n_branch_checksum_lookups", namespace_stats);
+            const json branch_traversals = cache_stats.contains("branch_traversals") ? cache_stats["branch_traversals"] : json::object();
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "path_to_root", json_value(branch_traversals, "path_to_root", 0));
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "descendants", json_value(branch_traversals, "descendants", 0));
+            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "children", json_value(branch_traversals, "children", 0));
+            write_cache_metric("gauge",   "cache_namespace_count", "Current branch namespace count by mode.", namespace_stats.size());
+            if (namespace_stats.empty()) {
+                write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", "none", 0);
+            } else {
+                for (const auto & ns : namespace_stats.items()) {
+                    const std::string namespace_id = ns.key();
+                    write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", namespace_id, json_value(ns.value(), "nodes", 0));
+                    write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", namespace_id, json_value(ns.value(), "roots", 0));
+                    write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", namespace_id, json_value(ns.value(), "metadata_bytes", 0));
+                }
+            }
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_bytes", "Current branch metadata RAM bytes by mode.", json_value(cache_stats, "branch_metadata_bytes", 0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_soft_max_bytes", "Branch metadata RAM soft limit by mode.", json_value(cache_stats, "branch_metadata_soft_max_bytes", 0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_ratio", "Branch metadata RAM ratio by mode.", json_value(branch_forest, "metadata_ratio", 0.0));
+            write_cache_metric("gauge",   "cache_budget_branch_metadata_over_limit", "Whether branch metadata exceeds its soft limit by mode.", json_value(cache_stats, "branch_metadata_over_limit", false) ? 1 : 0);
+            write_cache_metric_with_label("counter", "cache_eviction_payloads_total", "Payload eviction or demotion decisions by action.", "action", "evict", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric_with_label("counter", "cache_eviction_payload_bytes_total", "Payload bytes evicted or demoted by action.", "action", "evict", json_value(cache_stats, "n_payload_eviction_bytes", 0));
+            write_cache_metric("counter", "cache_eviction_payload_blocked_refs_total", "Payload eviction candidates blocked by active slot refs by mode.", json_value(cache_stats, "n_eviction_payload_blocked_refs", 0));
+            write_cache_metric_with_label("counter", "cache_protected_root_payload_decisions_total", "Protected-root payload decisions by decision.", "decision", "all", json_value(cache_stats, "n_protected_root_decisions", 0));
+            write_cache_metric_with_label("gauge", "cache_protected_root_payload_bytes", "Protected-root payload bytes by residency.", "residency", "hot", json_value(cache_stats, "protected_payload_bytes", 0));
+            write_cache_metric("counter", "cache_slot_ref_acquires_total", "Branch slot reference acquires by mode.", json_value(cache_stats, "n_slot_ref_acquires", 0));
+            write_cache_metric("counter", "cache_slot_ref_releases_total", "Branch slot reference releases by mode.", json_value(cache_stats, "n_slot_ref_releases", 0));
+            write_cache_metric("counter", "cache_forest_lock_acquires_total", "Branch forest lock acquires by mode.", json_value(cache_stats, "n_forest_lock_acquires", 0));
+            write_cache_metric("counter", "cache_forest_lock_retries_total", "Branch forest lock retries by mode.", json_value(cache_stats, "n_forest_lock_retries", 0));
+            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "pass", json_value(cache_stats, "n_namespace_validation_passes", 0));
+            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "fail", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            write_cache_metric("counter", "cache_namespace_validation_failures_total", "Namespace validation failures by mode.", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            const int branch_peak_refs = cache_stats.contains("branch_forest") ? json_value(cache_stats["branch_forest"], "peak_concurrent_refs", 0) : 0;
+            write_cache_metric("gauge", "cache_slot_ref_concurrent_peak", "Peak branch slot references by mode.", branch_peak_refs);
+            write_cache_metric("gauge",   "llamacpp_cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
+            // Phase 6 Step 10: Cold layer Prometheus metrics
+            write_cache_metric("counter", "llamacpp_cache_payload_demotions_total", "Demotion operations completed by mode.", json_value(cache_stats, "n_demotion_successes", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_demotion_failures_total", "Demotion operations failed by mode.", json_value(cache_stats, "n_demotion_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_promotions_total", "Promotion operations completed by mode.", json_value(cache_stats, "n_promotion_successes", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_promotion_failures_total", "Promotion operations failed by mode.", json_value(cache_stats, "n_promotion_failures", 0));
+            write_cache_metric("counter", "llamacpp_cache_payload_cold_evictions_total", "Cold payload evictions by mode.", json_value(cache_stats, "n_cold_evictions", 0));
+            write_cache_metric("counter", "llamacpp_cache_demotion_queue_full_total", "Demotion queue-full events by mode.", json_value(cache_stats, "n_demotion_queue_full", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_queue_full_total", "Promotion queue-full events by mode.", json_value(cache_stats, "n_promotion_queue_full", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
+            write_cache_metric("counter", "llamacpp_cache_protected_root_demotions_total", "Protected root demotions by mode.", json_value(cache_stats, "n_protected_root_demotions", 0));
+            // Step 10: Promotion latency histogram
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_0_1ms", "Promotion latency bucket 0-1ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_0_1ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_1_5ms", "Promotion latency bucket 1-5ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_1_5ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_5_10ms", "Promotion latency bucket 5-10ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_5_10ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_10_50ms", "Promotion latency bucket 10-50ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_10_50ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_50_100ms", "Promotion latency bucket 50-100ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_50_100ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_100_500ms", "Promotion latency bucket 100-500ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_100_500ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_500_1000ms", "Promotion latency bucket 500ms-1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_500_1000ms", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_over_1000ms", "Promotion latency bucket over 1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_over_1000ms", 0));
+            // Step 10: Promotion failure reason counters
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_checksum_mismatch_total", "Promotion failures due to checksum mismatch by mode.", json_value(cache_stats, "n_promotion_failure_checksum_mismatch", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_not_found_total", "Promotion failures due to file not found by mode.", json_value(cache_stats, "n_promotion_failure_not_found", 0));
+            write_cache_metric("counter", "llamacpp_cache_promotion_failure_other_total", "Promotion failures due to other reasons by mode.", json_value(cache_stats, "n_promotion_failure_other", 0));
+            // Step 10: Demotion failure reason counters
+            write_cache_metric("counter", "llamacpp_cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
+            write_cache_metric("counter", "llamacpp_cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
+            server_write_stage10_cache_rows(prometheus, mode, cache_stats);
+            const json protected_rows = cache_stats.contains("cache_protected_root_decisions_by_shape") ?
+                cache_stats["cache_protected_root_decisions_by_shape"] : json::array();
+            if (protected_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_protected_root_decisions_by_shape_total",
+                    "Protected-root decisions by bounded pressure shape.",
+                    "decision", "none", "pressure_source", "none", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : protected_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_protected_root_decisions_by_shape_total",
+                        "Protected-root decisions by bounded pressure shape.",
+                        "decision", json_value(row, "decision", std::string("unknown")),
+                        "pressure_source", json_value(row, "pressure_source", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json fallback_rows = cache_stats.contains("cache_fallback_restores_by_shape") ?
+                cache_stats["cache_fallback_restores_by_shape"] : json::array();
+            if (fallback_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_fallback_restores_by_shape_total",
+                    "Fallback restore decisions by bounded strategy shape.",
+                    "strategy", "none", "payload_kind", "none", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : fallback_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_fallback_restores_by_shape_total",
+                        "Fallback restore decisions by bounded strategy shape.",
+                        "strategy", json_value(row, "strategy", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json diagnostic_rows = cache_stats.contains("cache_structured_diagnostics_by_shape") ?
+                cache_stats["cache_structured_diagnostics_by_shape"] : json::array();
+            if (diagnostic_rows.empty()) {
+                write_cache_metric_with_four_labels(
+                    "counter", "cache_structured_diagnostics_total",
+                    "Structured hybrid-cache diagnostics by bounded event shape.",
+                    "event", "none", "result", "none", "reason", "none", "payload_kind", "none", 0);
+            } else {
+                for (const auto & row : diagnostic_rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_structured_diagnostics_total",
+                        "Structured hybrid-cache diagnostics by bounded event shape.",
+                        "event", json_value(row, "event", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("none")),
+                        json_value(row, "value", 0));
+                }
+            }
+            write_cache_metric_with_two_labels("counter", "cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
+            write_cache_metric_with_label("counter", "cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_validation_mismatches_total", "Token or checksum validation mismatches.", "namespace", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "namespace", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+            write_cache_metric_with_three_labels("counter", "cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
+            write_cache_metric_with_label("counter", "cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
+            write_cache_metric_with_two_labels("counter", "cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
+            const auto write_checkpoint_hits = [&]() {
+                const json rows = cache_stats.contains("cache_checkpoint_hits_by_shape") ?
+                    cache_stats["cache_checkpoint_hits_by_shape"] : json::array();
+                if (rows.empty()) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "profile", "none", "payload_residency", "none", "pair_state", "none",
+                        json_value(cache_stats, "cache_checkpoint_hits_total", 0));
+                    return;
+                }
+                for (const auto & row : rows) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "profile", json_value(row, "profile", std::string("unknown")),
+                        "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
+                        "pair_state", json_value(row, "pair_state", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            };
+            const auto write_checkpoint_restores = [&]() {
+                const json rows = cache_stats.contains("cache_checkpoint_restores_by_shape") ?
+                    cache_stats["cache_checkpoint_restores_by_shape"] : json::array();
+                if (rows.empty()) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "profile", "none", "payload_residency", "none", "pair_state", "none", "result", "none",
+                        json_value(cache_stats, "cache_checkpoint_restores_total", 0));
+                    return;
+                }
+                for (const auto & row : rows) {
+                    write_cache_metric_with_four_labels(
+                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "profile", json_value(row, "profile", std::string("unknown")),
+                        "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
+                        "pair_state", json_value(row, "pair_state", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            };
+            write_checkpoint_restores();
+            write_checkpoint_hits();
+            write_cache_metric("counter", "cache_checkpoint_admissions_total", "Checkpoint payload admissions by mode.", json_value(cache_stats, "cache_checkpoint_admissions_total", 0));
+            write_cache_metric("counter", "cache_checkpoint_admission_failures_total", "Checkpoint payload admission failures by mode.", json_value(cache_stats, "cache_checkpoint_admission_failures_total", 0));
+        } catch (const std::exception & e) {
+            SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
 
         res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->t_start);
@@ -4065,7 +5375,82 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_CHAT);
+            TASK_RESPONSE_TYPE_OAI_CHAT,
+            body.contains("messages") ? &body.at("messages") : nullptr);
+    };
+
+    this->post_control = [this](const server_http_req & req) {
+        auto res = create_response();
+        const json body = json::parse(req.body);
+
+        const std::string cmpl_id = json_value(body, "id", std::string());
+        const std::string action  = json_value(body, "action", std::string());
+        if (cmpl_id.empty()) {
+            res->error(format_error_response("missing completion id", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        if (action != "reasoning_end") {
+            res->error(format_error_response("unknown control action", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+
+        auto & rd = res->rd;
+        {
+            server_task task(SERVER_TASK_TYPE_CONTROL);
+            task.id              = rd.get_new_id();
+            task.params.control_cmpl_id = cmpl_id;
+            task.params.control_action  = action;
+            rd.post_task(std::move(task));
+        }
+
+        auto result = rd.next(req.should_stop);
+        if (!result) {
+            GGML_ASSERT(req.should_stop());
+            return res;
+        }
+        if (result->is_error()) {
+            res->error(result->to_json());
+            return res;
+        }
+        res->ok(result->to_json());
+        return res;
+    };
+
+    this->post_control = [this](const server_http_req & req) {
+        auto res = create_response();
+        const json body = json::parse(req.body);
+
+        const std::string cmpl_id = json_value(body, "id", std::string());
+        const std::string action  = json_value(body, "action", std::string());
+        if (cmpl_id.empty()) {
+            res->error(format_error_response("missing completion id", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        if (action != "reasoning_end") {
+            res->error(format_error_response("unknown control action", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+
+        auto & rd = res->rd;
+        {
+            server_task task(SERVER_TASK_TYPE_CONTROL);
+            task.id              = rd.get_new_id();
+            task.params.control_cmpl_id = cmpl_id;
+            task.params.control_action  = action;
+            rd.post_task(std::move(task));
+        }
+
+        auto result = rd.next(req.should_stop);
+        if (!result) {
+            GGML_ASSERT(req.should_stop());
+            return res;
+        }
+        if (result->is_error()) {
+            res->error(result->to_json());
+            return res;
+        }
+        res->ok(result->to_json());
+        return res;
     };
 
     this->post_responses_oai = [this](const server_http_req & req) {
@@ -4083,7 +5468,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_RESP);
+            TASK_RESPONSE_TYPE_OAI_RESP,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_transcriptions_oai = [this](const server_http_req & req) {
@@ -4111,7 +5497,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_OAI_ASR);
+            TASK_RESPONSE_TYPE_OAI_ASR,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_anthropic_messages = [this](const server_http_req & req) {
@@ -4129,7 +5516,8 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body_parsed,
             files,
-            TASK_RESPONSE_TYPE_ANTHROPIC);
+            TASK_RESPONSE_TYPE_ANTHROPIC,
+            body.contains("messages") ? &body.at("messages") : nullptr);
     };
 
     this->post_anthropic_count_tokens = [this](const server_http_req & req) {
@@ -4625,4 +6013,769 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
         : json(responses);
     res->ok(root);
     return res;
+}
+
+//
+// Cache controller methods that need server_slot.
+// server_slot is private to this translation unit.
+//
+
+static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
+    const llama_tokens & raw = tokens.get_tokens();
+    return std::vector<llama_token>(raw.begin(), raw.end());
+}
+
+bool hybrid_cache_controller::acquire_branch_node_ref_for_slot(server_slot & slot, uint64_t node_id) {
+    if (node_id == 0 || slot.hybrid_cache_branch_node_id == node_id) {
+        return node_id != 0;
+    }
+    if (!forest.acquire_slot_ref(node_id)) {
+        return false;
+    }
+    n_slot_ref_acquires++;
+    if (slot.hybrid_cache_branch_node_id != 0) {
+        release_branch_node_ref(slot.hybrid_cache_branch_node_id);
+    }
+    slot.hybrid_cache_branch_node_id = node_id;
+    return true;
+}
+
+bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    if (slot.prompt.tokens.empty()) {
+        SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
+        return false;
+    }
+
+    const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t total_size = state_size_tgt + state_size_dft;
+    const bool protected_root = !metadata.degraded() &&
+        (metadata.protect_system || metadata.protect_messages ||
+         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
+             return boundary.protect;
+         }));
+    const std::string namespace_id = compute_namespace_id(metadata);
+
+    SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
+            slot.id,
+            slot.prompt.tokens.size(),
+            total_size / (1024.0 * 1024.0),
+            state_size_tgt / (1024.0 * 1024.0),
+            state_size_dft / (1024.0 * 1024.0));
+
+    const bool runtime_has_draft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+
+    if (ctx_tgt && state_size_tgt == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
+        return false;
+    }
+
+    if (runtime_has_draft && state_size_dft == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
+        n_pairing_violations++;
+        return false;
+    }
+
+    if (hot_payload_budget_enabled() && total_size > limit_size) {
+        if (protected_root) {
+            n_protected_root_decisions++;
+            n_protected_root_admission_rejections++;
+        }
+        SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
+                namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
+        return false;
+    }
+
+    server_tokens entry_tokens = slot.prompt.tokens.clone();
+
+    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
+    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+        n_cache_equivalent_branch_deduplications++;
+        refresh_existing_entry(existing, protected_root);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
+                entry_tokens.size(), namespace_id.c_str());
+        return true;
+    }
+
+    std::vector<uint8_t> target_payload;
+    std::vector<uint8_t> draft_payload;
+
+    if (ctx_tgt && state_size_tgt > 0) {
+        try {
+            target_payload.resize(state_size_tgt);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate target state buffer (%zu bytes): %s\n", state_size_tgt, e.what());
+            return false;
+        }
+
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_payload.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt) {
+            SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
+            return false;
+        }
+    }
+
+    if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
+        try {
+            draft_payload.resize(state_size_dft);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate draft state buffer (%zu bytes): %s\n", state_size_dft, e.what());
+            return false;
+        }
+
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_payload.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft) {
+            SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
+            return false;
+        }
+    }
+
+    std::string descriptor_failure;
+    if (existing != entries.end()) {
+        n_cache_equivalent_branch_deduplications++;
+        if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+            SRV_WRN(" - hybrid cache: metadata-only re-materialization rejected (%s)\n", descriptor_failure.c_str());
+            return false;
+        }
+        existing->protected_root = existing->protected_root || protected_root;
+        existing->checkpoints = slot.prompt.checkpoints;
+        existing->metadata = metadata;
+        if (!slot.prompt.checkpoints.empty()) {
+            std::string checkpoint_failure;
+            if (!admit_latest_checkpoint(*existing, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+                SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+            }
+        }
+        sync_branch_node_from_entry(*existing);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_INF(" - hybrid cache: re-materialized slot %d (namespace: %s, entries: %zu)\n",
+                slot.id, existing->namespace_id.c_str(), entries.size());
+        return true;
+    }
+
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(entry_tokens, namespace_id);
+    auto it_new = admit_entry_with_payload(
+        std::move(entry_tokens),
+        metadata,
+        namespace_id,
+        protected_root,
+        std::move(target_payload),
+        std::move(draft_payload),
+        runtime_has_draft,
+        parent_node_id,
+        &descriptor_failure);
+    if (it_new == entries.end()) {
+        SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
+        return false;
+    }
+    it_new->checkpoints = slot.prompt.checkpoints;
+    if (!slot.prompt.checkpoints.empty()) {
+        std::string checkpoint_failure;
+        if (!admit_latest_checkpoint(*it_new, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+            SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+        }
+    }
+    acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
+
+    SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
+            slot.id, it_new->namespace_id.c_str(), entries.size());
+
+    return true;
+}
+
+// Non-destructive cache restore for hybrid mode
+// This method attempts to load a matching cache entry without requiring the slot to be cleared first
+// Returns true if a match was found and successfully restored
+bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const server_task & task) {
+    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+    record_workload_profile(profile);
+    
+    SRV_DBG(" - hybrid cache: try_restore - looking up %zu tokens in namespace %s\n",
+            task.tokens.size(), lookup_namespace_id.c_str());
+
+    record_branch_lookup(lookup_namespace_id, "token_span");
+    
+    const auto lookup_tokens = cache_tokens_to_vector(task.tokens);
+    auto forest_candidates = forest.find_nodes_by_token_span(lookup_namespace_id, lookup_tokens, lookup_tokens.size());
+    std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
+    for (const auto & boundary : task.prompt_metadata.boundaries) {
+        if (boundary.token_start != 0 || boundary.checksum == 0 || boundary.token_end == 0 ||
+            boundary.token_end > lookup_tokens.size()) {
+            continue;
+        }
+        record_branch_lookup(lookup_namespace_id, "checksum_span");
+        auto checksum_candidates = forest.find_nodes_by_checksum_span(
+            lookup_namespace_id, boundary.checksum, boundary.token_end);
+        for (uint64_t node_id : checksum_candidates) {
+            if (seen_candidates.insert(node_id).second) {
+                forest_candidates.push_back(node_id);
+            }
+        }
+    }
+    std::vector<uint64_t> compatible_candidates;
+    for (uint64_t node_id : forest_candidates) {
+        auto it = find_entry_by_branch_node(node_id);
+        if (it == entries.end()) {
+            continue;
+        }
+        if (!validate_namespace_compatibility(lookup_namespace_id, it->namespace_id)) {
+            n_namespace_validation_failures++;
+            SRV_DBG("%s", " - hybrid cache: try_restore - skipping entry with different namespace\n");
+            continue;
+        }
+        n_namespace_validation_passes++;
+        compatible_candidates.push_back(node_id);
+
+        const int common_prefix = it->tokens.get_common_prefix(task.tokens);
+        
+        // For hybrid cache, we need the entire task prompt to match the entry prefix
+        // The entry may have more tokens (continuation), but the task prompt must be fully contained
+        if (common_prefix == (int)task.tokens.size()) {
+            SRV_INF(" - hybrid cache: try_restore - found match: task %d tokens, entry %d tokens, prefix %d\n", 
+                    (int)task.tokens.size(), it->n_tokens(), common_prefix);
+        } else {
+            SRV_DBG(" - hybrid cache: try_restore - partial match %d tokens (entry: %d, task: %zu)\n",
+                    common_prefix, it->n_tokens(), task.tokens.size());
+        }
+    }
+    std::list<hybrid_cache_entry>::iterator it_best =
+        select_restore_candidate(compatible_candidates, task.tokens, profile);
+
+    if (it_best == entries.end()) {
+        SRV_INF("%s", " - hybrid cache: try_restore - no exact match found\n");
+        n_misses++;
+        return false;
+    }
+    n_branch_lookup_hits++;
+
+    // Exact match found - restore state
+    int match_len = it_best->n_tokens();
+    SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
+            match_len, it_best->namespace_id.c_str(), it_best->use_count);
+
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const bool runtime_has_draft = need_dft;
+    const hot_payload_record * payload = nullptr;
+    std::string restore_failure;
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    if (profile == cache_workload_profile::checkpoint_dependent) {
+        std::string checkpoint_path_failure;
+        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+            n_misses++;
+            n_fallback_restores++;
+            SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent restore rejected (%s)\n",
+                    checkpoint_path_failure.c_str());
+            return false;
+        }
+        selected_payload_kind = payload_kind::checkpoint;
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    }
+
+    const uint64_t selected_node_id = it_best->branch_node_id;
+    bool metadata_validation_mismatch = false;
+    bool metadata_source_unavailable = false;
+    auto restore_source = select_restore_source_for_metadata_only(
+        it_best, lookup_namespace_id, lookup_tokens, &metadata_validation_mismatch, &metadata_source_unavailable);
+    if (metadata_validation_mismatch) {
+        n_cache_validation_mismatches++;
+        n_cache_mismatch_parent_selections++;
+        n_misses++;
+        SRV_WRN(" - hybrid cache: try_restore - metadata-only validation mismatch (namespace: %s, selected node: %" PRIu64 ")\n",
+                lookup_namespace_id.c_str(), selected_node_id);
+        return false;
+    }
+    if (metadata_source_unavailable || restore_source == entries.end()) {
+        n_misses++;
+        SRV_DBG(" - hybrid cache: try_restore - metadata-only source payload is unavailable (namespace: %s, selected node: %" PRIu64 ")\n",
+                lookup_namespace_id.c_str(), selected_node_id);
+        return false;
+    }
+    if (restore_source != it_best) {
+        const uint64_t source_node_id = restore_source->branch_node_id;
+        it_best = restore_source;
+        selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+        if (profile == cache_workload_profile::checkpoint_dependent) {
+            std::string checkpoint_path_failure;
+            if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+                n_misses++;
+                n_fallback_restores++;
+                SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent source rejected (%s)\n",
+                        checkpoint_path_failure.c_str());
+                return false;
+            }
+            selected_payload_kind = payload_kind::checkpoint;
+            selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+        }
+        SRV_INF(" - hybrid cache: try_restore - using source payload node %" PRIu64 " to re-materialize metadata-only node %" PRIu64 " after prompt replay\n",
+                source_node_id, selected_node_id);
+    }
+    match_len = it_best->n_tokens();
+
+    // Phase 6: Check if the payload is in cold state - attempt promotion
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            SRV_INF(" - hybrid cache: try_restore - payload %" PRIu64 " is cold, initiating promotion\n",
+                    selected_payload_id);
+            promote_payload(selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::demoting) {
+            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is demoting, cannot restore yet\n",
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::promoting) {
+            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is promoting, cannot restore yet\n",
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            return false;
+        }
+    }
+
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: try_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint) {
+            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
+            if (failed_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(failed_descriptor_it->second, false);
+            } else {
+                n_checkpoint_restore_failures++;
+            }
+        }
+        return false;
+    }
+    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
+
+    server_prompt prompt_before = slot.prompt.clone();
+    const int cache_before = slot.n_prompt_tokens_cache;
+    const int processed_before = slot.n_prompt_tokens_processed;
+    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
+    std::vector<uint8_t> target_before;
+    std::vector<uint8_t> draft_before;
+    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    if (state_size_tgt_before > 0) {
+        target_before.resize(state_size_tgt_before);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt_before) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot target state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+    if (state_size_dft_before > 0) {
+        draft_before.resize(state_size_dft_before);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft_before) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot draft state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+
+    const auto clear_live_state = [&](llama_context * ctx) {
+        llama_memory_t mem = llama_get_memory(ctx);
+        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
+    };
+    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore target state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
+        SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore draft state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    const auto rollback_restore = [&]() {
+        bool ok = true;
+        if (ctx_tgt) {
+            if (!target_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_tgt) && ok;
+            }
+        }
+        if (ctx_dft && slot.ctx_dft) {
+            if (!draft_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_dft) && ok;
+            }
+        }
+        slot.prompt = prompt_before.clone();
+        slot.n_prompt_tokens_cache = cache_before;
+        slot.n_prompt_tokens_processed = processed_before;
+        slot.prompt_metadata = metadata_before;
+        if (!ok) {
+            n_restore_rollback_failures++;
+        }
+    };
+
+    // Restore target state
+    if (ctx_tgt && !payload->target.empty()) {
+        const size_t n_tgt = llama_state_seq_set_data_ext(
+            ctx_tgt,
+            payload->target.data(),
+            payload->target.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_tgt != payload->target.size()) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore target state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_target_apply_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: try_restore - restored target state (%zu bytes)\n", n_tgt);
+    }
+
+    // Restore draft state
+    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
+        const size_t n_dft = llama_state_seq_set_data_ext(
+            ctx_dft,
+            payload->draft.data(),
+            payload->draft.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_dft != payload->draft.size()) {
+            SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore draft state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_draft_apply_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
+    }
+
+    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
+    it_best->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it_best);
+    update_lru_index(it_best, old_key);
+    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
+
+    // Update slot state with restored data
+    slot.prompt.tokens.clear();
+    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
+        slot.prompt.tokens.push_back(it_best->tokens[i]);
+    }
+
+    slot.prompt.checkpoints = it_best->checkpoints;
+    slot.n_prompt_tokens_cache = restored_token_count;
+    slot.n_prompt_tokens_processed = restored_token_count;
+    slot.hybrid_cache_restored = true;
+    slot.prompt_metadata = it_best->metadata;
+    
+    n_hits++;
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
+        if (success_descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(success_descriptor_it->second, true);
+        } else {
+            n_checkpoint_restore_successes++;
+        }
+    }
+
+    SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d (hits: %zu, misses: %zu)\n",
+            restored_token_count, slot.id, n_hits, n_misses);
+
+    return true;
+}
+
+bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & task) {
+    auto it_best = find_best_match(task.tokens, task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+
+    if (it_best == entries.end()) {
+        SRV_INF("%s", " - hybrid cache: no match found\n");
+        n_misses++;
+        return false;
+    }
+
+    const int match_len = it_best->tokens.get_common_prefix(task.tokens);
+    SRV_INF(" - hybrid cache: found match with %d tokens (matched: %d/%zu, namespace: %s)\n",
+            it_best->n_tokens(), match_len, task.tokens.size(), it_best->namespace_id.c_str());
+
+    if (match_len != it_best->n_tokens()) {
+        SRV_WRN(" - hybrid cache: rejecting partial exact-blob match (%d/%d tokens)\n",
+                match_len, it_best->n_tokens());
+        n_misses++;
+        return false;
+    }
+
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const bool runtime_has_draft = need_dft;
+    const hot_payload_record * payload = nullptr;
+    std::string restore_failure;
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    if (profile == cache_workload_profile::checkpoint_dependent) {
+        std::string checkpoint_path_failure;
+        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+            n_misses++;
+            n_fallback_restores++;
+            SRV_WRN(" - hybrid cache: load_slot - checkpoint-dependent restore rejected (%s)\n",
+                    checkpoint_path_failure.c_str());
+            return false;
+        }
+        selected_payload_kind = payload_kind::checkpoint;
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    }
+
+    // Phase 6: Check if the payload is in cold/demoting/promoting state
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
+                    selected_payload_id);
+            promote_payload(selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::demoting) {
+            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is demoting, cannot restore yet\n",
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::promoting) {
+            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is promoting, cannot restore yet\n",
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            return false;
+        }
+    }
+
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint) {
+            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
+            if (failed_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(failed_descriptor_it->second, false);
+            } else {
+                n_checkpoint_restore_failures++;
+            }
+        }
+        return false;
+    }
+    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
+
+    server_prompt prompt_before = slot.prompt.clone();
+    const int cache_before = slot.n_prompt_tokens_cache;
+    const int processed_before = slot.n_prompt_tokens_processed;
+    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
+    std::vector<uint8_t> target_before;
+    std::vector<uint8_t> draft_before;
+    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    if (state_size_tgt_before > 0) {
+        target_before.resize(state_size_tgt_before);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot target state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+    if (state_size_dft_before > 0) {
+        draft_before.resize(state_size_dft_before);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot draft state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+    }
+
+    const auto clear_live_state = [&](llama_context * ctx) {
+        llama_memory_t mem = llama_get_memory(ctx);
+        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
+    };
+    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore target state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore draft state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        return false;
+    }
+    const auto rollback_restore = [&]() {
+        bool ok = true;
+        if (ctx_tgt) {
+            if (!target_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_tgt) && ok;
+            }
+        }
+        if (ctx_dft && slot.ctx_dft) {
+            if (!draft_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_dft) && ok;
+            }
+        }
+        slot.prompt = prompt_before.clone();
+        slot.n_prompt_tokens_cache = cache_before;
+        slot.n_prompt_tokens_processed = processed_before;
+        slot.prompt_metadata = metadata_before;
+        if (!ok) {
+            n_restore_rollback_failures++;
+        }
+    };
+
+    if (ctx_tgt && !payload->target.empty()) {
+        const size_t n_tgt = llama_state_seq_set_data_ext(
+            ctx_tgt,
+            payload->target.data(),
+            payload->target.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_tgt != payload->target.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_target_apply_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
+    }
+
+    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
+        const size_t n_dft = llama_state_seq_set_data_ext(
+            ctx_dft,
+            payload->draft.data(),
+            payload->draft.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_dft != payload->draft.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_draft_apply_failures++;
+            n_fallback_restores++;
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
+    }
+
+    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
+    it_best->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it_best);
+    update_lru_index(it_best, old_key);
+    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
+
+    slot.prompt.tokens.clear();
+    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
+        slot.prompt.tokens.push_back(it_best->tokens[i]);
+    }
+
+    slot.prompt.checkpoints = it_best->checkpoints;
+    slot.n_prompt_tokens_cache = restored_token_count;
+    slot.n_prompt_tokens_processed = restored_token_count;
+    slot.prompt_metadata = it_best->metadata;
+    n_hits++;
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
+        if (success_descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(success_descriptor_it->second, true);
+        } else {
+            n_checkpoint_restore_successes++;
+        }
+    }
+
+    SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
+            restored_token_count, slot.id, it_best->use_count);
+
+    return true;
+}
+
+legacy_cache_controller::legacy_cache_controller(
+    const common_params & params,
+    int32_t limit_size_mib,
+    size_t limit_tokens,
+    llama_context * ctx_tgt_param,
+    llama_context * ctx_dft_param)
+    : ctx_tgt(ctx_tgt_param)
+    , ctx_dft(ctx_dft_param) {
+    GGML_UNUSED(params);  // Legacy mode doesn't need params
+    GGML_UNUSED(ctx_tgt);
+    GGML_UNUSED(ctx_dft);
+    cache = std::make_unique<server_prompt_cache>(limit_size_mib, limit_tokens);
+}
+
+bool legacy_cache_controller::save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    GGML_UNUSED(metadata);
+    return const_cast<server_slot &>(slot).prompt_save(*cache, true);
+}
+
+bool legacy_cache_controller::load_slot(server_slot & slot, const server_task & task) {
+    return slot.prompt_load(*cache, task.tokens);
+}
+
+void legacy_cache_controller::update() {
+    cache->update();
+}
+
+json legacy_cache_controller::get_stats() const {
+    return json {
+        {"type",     "legacy"},
+        {"size_bytes", size()},
+        {"size_mib", size() / (1024.0 * 1024.0)},
+        {"n_tokens", n_tokens()},
+        {"n_entries", cache->states.size()},
+    };
+}
+
+size_t legacy_cache_controller::size() const {
+    return cache->size();
+}
+
+size_t legacy_cache_controller::n_tokens() const {
+    return cache->n_tokens();
 }

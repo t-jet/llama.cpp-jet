@@ -28,7 +28,7 @@ It's possible to override some scenario steps values with environment variables:
 | variable                 | description                                                                                    |
 |--------------------------|------------------------------------------------------------------------------------------------|
 | `PORT`                   | `context.server_port` to set the listening port of the server during scenario, default: `8080` |
-| `LLAMA_SERVER_BIN_PATH`  | to change the server binary path, default: `../../../build/bin/llama-server`                         |
+| `LLAMA_SERVER_BIN_PATH`  | to change the server binary path, default: `../../../build/bin/llama-server` on Unix and `<repo>/build/bin/Release/llama-server.exe` on Windows |
 | `DEBUG`                  | to enable steps and server verbose mode `--verbose`                                       |
 | `N_GPU_LAYERS`           | number of model layers to offload to VRAM `-ngl --n-gpu-layers`                                |
 | `LLAMA_CACHE`            | by default server tests re-download models to the `tmp` subfolder. Set this to your cache (e.g. `$HOME/Library/Caches/llama.cpp` on Mac or `$HOME/.cache/llama.cpp` on Unix) to avoid this |
@@ -64,6 +64,25 @@ cmake --build build -j --target llama-server && ./tools/server/tests/tests.sh
 ```
 
 To see all available arguments, please refer to [pytest documentation](https://docs.pytest.org/en/stable/how-to/usage.html)
+
+### Hybrid cache focused evidence
+
+For local hybrid cache checks, build the focused C++ targets before running the
+Python server tests:
+
+```shell
+cmake --build build --config Release --target \
+  test-cache-controller test-step6-demotion-protocol \
+  test-step7-promotion-protocol test-step10-metrics \
+  test-step11-test-hooks-fault-injection test-step12-branch-graph \
+  test-step13-stage8 test-stage10-cold-store-hardening
+ctest --test-dir build -C Release -R "test-(cache-controller|step6-demotion-protocol|step7-promotion-protocol|step10-metrics|step11-test-hooks-fault-injection|step12-branch-graph|step13-stage8|stage10-cold-store-hardening)" --output-on-failure
+```
+
+On Windows, set `LLAMA_SERVER_BIN_PATH` to the absolute `llama-server.exe` path
+when running `unit/test_cache_modes.py`. Use public `/metrics` output only for
+operator-visible values; focused controller stats are direct evidence and should
+be reported as such.
 
 ### Debugging external llama-server
 It can sometimes be useful to run the server in a debugger when invesigating test
