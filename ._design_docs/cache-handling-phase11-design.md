@@ -54,13 +54,31 @@ commits, PR text, or reviewer responses.
 - [Part 4: Rework assessment process](cache-handling-phase11-design/part-04-rework-assessment-process.md)
 - [Part 5: Regression test reruns and evidence](cache-handling-phase11-design/part-05-regression-test-reruns-and-evidence.md)
 - [Part 6: Merge log, constraints, observability, testability, risks, exclusions, traceability, and handoff](cache-handling-phase11-design/part-06-merge-log-constraints-and-traceability.md)
+- [Part 7: Design review gate 01](cache-handling-phase11-design/part-07-design-review-gate-01.md)
+- [Part 8: Speculative decode-batch sizing under the upstream `n_outputs_max` cap (post-closure follow-up)](cache-handling-phase11-design/part-08-n-outputs-max-cap-followup.md)
+
+## Post-closure follow-up
+
+Part 8 is a follow-up design correction recorded after the Stage 11
+design gate closed. The Stage 11 implementation log carries the
+investigation of the MTP draft-context server crash on
+`cache-optimization-caveman` HEAD `02db7a768` in
+[cache-handling-phase11-implementation/part-19-stage11-mtp-crash-investigation.md](cache-handling-phase11-implementation/part-19-stage11-mtp-crash-investigation.md).
+Part 8 records the design correction. The architecture-level invariant
+the correction implements is in
+[cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md](cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md).
+Part 8 does not reopen the Stage 11 design gate. It opens a new
+design review gate and a new Manager design gate, both scoped to the
+follow-up correction only.
 
 ## Current gate
 
 The Stage 10 closure record is the prerequisite baseline. Stage 11 design
 authoring is in progress; the independent design review and Manager design
 gate are not started. Implementation planning, implementation, and QA
-execution remain closed.
+execution remain closed. The post-closure follow-up (Part 8) is the
+new follow-up design deliverable. Its independent design review and
+Manager design gate are not started.
 
 ## Advisory findings from design review
 

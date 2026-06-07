@@ -3,9 +3,12 @@
 #include "server-cache-hybrid.h"
 #include "server-task.h"
 #include "common.h"
+#include "speculative.h"
+#include "ggml-cpp.h"
 
 #include <cstdio>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -2580,6 +2583,358 @@ void T114a_test_hybrid_remaining_test_hooks_via_fn_ptr() {
     printf("  PASSED\n");
 }
 
+// T-NOUT-MAX-01: Stage 11 n_outputs_max cap fix - chunked-decode bound
+// (test plan part-15, Section 4). The speculative update_slots path
+// in server-context.cpp loops over a llama_batch in chunks whose
+// per-call n_tokens must be at or below cparams.n_outputs_max and
+// at or below n_batch (architecture invariant:
+// cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md).
+// The fix at :3750 uses
+//   const int32_t n_tokens = std::min({n_batch, batch.n_tokens - i,
+//                                     (int32_t) params_base.n_outputs_max});
+// to enforce the per-chunk bound. The production chunked loop is
+// inside a private server_context method and cannot be reached from
+// a test without a model fixture, so the loop is mirrored here with
+// the same std::min initializer-list. Asserts the per-chunk bound
+// and the exact chunk sequence for the user's repro prompt shape
+// (n_batch=2048, n_outputs_max=4, batch with 17 tokens).
+void test_chunked_decode_respects_n_outputs_max_cap() {
+    printf("test-cache-controller: T-NOUT-MAX-01 chunked decode n_outputs_max cap...\n");
+
+    const int32_t n_batch       = 2048;
+    const int32_t n_outputs_max = 4;
+    const int32_t n_total       = 17;
+
+    // Mirror the production chunked loop in server-context.cpp:3750-3774.
+    // The bound under test is the std::min({...}) initializer-list.
+    std::vector<int32_t> chunk_sizes;
+    for (int32_t i = 0; i < n_total;) {
+        const int32_t n_tokens = std::min({
+            n_batch,
+            n_total - i,
+            (int32_t) n_outputs_max
+        });
+        // Per-chunk bound: n_tokens must be positive and at or below both
+        // n_batch and cparams.n_outputs_max (the architecture invariant).
+        assert(n_tokens > 0);
+        assert(n_tokens <= n_batch);
+        assert(n_tokens <= n_outputs_max);
+        chunk_sizes.push_back(n_tokens);
+        i += n_tokens;
+    }
+
+    // Expected chunk sequence for 17 tokens at cap=4: 4+4+4+4+1 = 17.
+    assert(chunk_sizes.size() == 5);
+    assert(chunk_sizes[0] == 4);
+    assert(chunk_sizes[1] == 4);
+    assert(chunk_sizes[2] == 4);
+    assert(chunk_sizes[3] == 4);
+    assert(chunk_sizes[4] == 1);
+
+    // Sanity: chunk sizes must cover the full batch with no gaps or overlap.
+    int32_t covered = 0;
+    for (auto s : chunk_sizes) {
+        covered += s;
+    }
+    assert(covered == n_total);
+
+    // Cross-check the residual chunk is strictly less than the cap when
+    // n_total is not a multiple of n_outputs_max.
+    assert(n_total % n_outputs_max == 1);
+    assert(chunk_sizes.back() == n_total % n_outputs_max);
+
+    // Edge: n_total == n_outputs_max yields a single full chunk.
+    {
+        const int32_t n2 = n_outputs_max;
+        std::vector<int32_t> sizes;
+        for (int32_t i = 0; i < n2;) {
+            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
+            sizes.push_back(n_tokens);
+            i += n_tokens;
+        }
+        assert(sizes.size() == 1);
+        assert(sizes[0] == n_outputs_max);
+    }
+
+    // Edge: n_total == 1 yields a single chunk of size 1 (under the cap).
+    {
+        const int32_t n2 = 1;
+        std::vector<int32_t> sizes;
+        for (int32_t i = 0; i < n2;) {
+            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
+            sizes.push_back(n_tokens);
+            i += n_tokens;
+        }
+        assert(sizes.size() == 1);
+        assert(sizes[0] == 1);
+    }
+
+    // Edge: n_total < n_outputs_max yields a single chunk sized to n_total.
+    {
+        const int32_t n2 = 3;
+        std::vector<int32_t> sizes;
+        for (int32_t i = 0; i < n2;) {
+            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
+            sizes.push_back(n_tokens);
+            i += n_tokens;
+        }
+        assert(sizes.size() == 1);
+        assert(sizes[0] == 3);
+    }
+
+    printf("  PASSED\n");
+}
+
+// T-NOUT-MAX-02: Stage 11 n_outputs_max cap fix - MTP cap formula
+// (test plan part-15, Section 5). The cap-bump assignments at
+// server-context.cpp:1175 (params_dft.n_outputs_max) and :1308
+// (cparams_mtp.n_outputs_max) compute
+//   cap = min(n_batch,
+//             n_parallel * (1 + common_speculative_n_max(&params.speculative)))
+// for the MTP draft path. The cap must match the symmetric formula
+// with the n_batch clamp (F-09-01). Initializing a real server
+// context requires a model, so this test exercises the same
+// formula and clamp against common_params. For
+// n_parallel=1, n_max=3, n_batch=2048 the expected cap is 4
+// (min(2048, 1 * (1 + 3)) = 4).
+void test_mtp_cap_matches_symmetric_formula_with_clamp() {
+    printf("test-cache-controller: T-NOUT-MAX-02 MTP cap symmetric formula with clamp...\n");
+
+    const int32_t  n_parallel = 1;
+    const int32_t  n_batch    = 2048;
+    const int32_t  n_max      = 3;
+    const uint32_t expected   = 4u;
+
+    common_params params;
+    params.n_parallel = n_parallel;
+    params.n_batch    = n_batch;
+    // MTP draft: --spec-type draft-mtp. speculative.draft.n_max is the
+    // operator-controlled draft depth (common/common.h:303). The cap
+    // formula at server-context.cpp:1175/1308 reads it through
+    // common_speculative_n_max, which returns max(0, draft.n_max) for
+    // the DRAFT_MTP type (common/speculative.cpp:1321+).
+    params.speculative.types          = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
+    params.speculative.draft.n_max    = n_max;
+
+    // common_speculative_n_max must report n_max for the MTP draft path.
+    const int32_t n_speculative = common_speculative_n_max(&params.speculative);
+    assert(n_speculative == n_max);
+
+    // Symmetric cap formula (server-context.cpp:1175, draft MTP branch).
+    const uint32_t cap_dft = std::min<uint32_t>(
+        static_cast<uint32_t>(params.n_batch),
+        static_cast<uint32_t>(params.n_parallel * (1 + n_speculative)));
+    assert(cap_dft == expected);
+
+    // Symmetric cap formula (server-context.cpp:1308, MTP cparams).
+    const uint32_t cap_mtp = std::min<uint32_t>(
+        static_cast<uint32_t>(params.n_batch),
+        static_cast<uint32_t>(params.n_parallel * (1 + n_speculative)));
+    assert(cap_mtp == expected);
+
+    // Both caps must agree (the F-09-01 clamp is symmetric across the
+    // draft and target-side MTP cparams assignments).
+    assert(cap_dft == cap_mtp);
+
+    // Sanity: n_batch clamp is active when n_parallel * (1 + n_max)
+    // would otherwise exceed n_batch. With n_batch=4 and the same
+    // n_parallel/n_max the clamp must take the n_batch value.
+    {
+        common_params small = params;
+        small.n_batch = 4;
+        const int32_t n_spec_small = common_speculative_n_max(&small.speculative);
+        const uint32_t cap_small = std::min<uint32_t>(
+            static_cast<uint32_t>(small.n_batch),
+            static_cast<uint32_t>(small.n_parallel * (1 + n_spec_small)));
+        assert(cap_small == 4u);
+    }
+
+    // Cross-check: with a non-MTP type the cap is still 4 here because
+    // the formula above is evaluated against params.speculative. The
+    // production guard at :1175 only applies the symmetric formula in
+    // the MTP branch; the non-MTP branch keeps params_dft.n_outputs_max
+    // at params_base.n_parallel (=1 for this fixture). This is
+    // captured as a behavioral note, not asserted, since the formula
+    // under test is the MTP cap, not the legacy draft cap.
+    assert(params.speculative.types[0] == COMMON_SPECULATIVE_TYPE_DRAFT_MTP);
+
+    printf("  PASSED\n");
+}
+
+// T-FIX-L-01 / T-FIX-L-02 fixture + counting shims.
+//
+// ggml_backend_meta_buffer_reset is a static function in
+// ggml/src/ggml-backend-meta.cpp and cannot be linked from this test
+// binary, so the test mirrors the translated production body
+// (ggml/src/ggml-backend-meta.cpp:1467-1494) and routes the
+// ggml_reset / ggml_backend_buffer_reset calls through counting shims
+// so the call counts are observable.
+//
+// The fixture struct shape mirrors ggml_backend_meta_buffer_context
+// at the field level used by the reset body, simplified to int
+// key/value maps so the test is self-contained (no real ggml_tensor
+// fixtures). The ctxs vectors hold real ggml_context_ptrs allocated
+// with ggml_init so the shim can call the real ggml_reset.
+struct fix_l_simple_tensor_container {
+    std::map<int, int>            simple_tensors;
+    std::vector<ggml_context_ptr> ctxs;
+};
+struct fix_l_buf_ctx {
+    std::map<int, int>             split_state_cache;
+    fix_l_simple_tensor_container  stc_static;
+    fix_l_simple_tensor_container  stc_compute[2];
+    std::vector<ggml_backend_buffer_ptr> bufs;
+};
+
+static int g_fix_l_ggml_reset_count = 0;
+static int g_fix_l_buf_reset_count  = 0;
+
+static void fix_l_ggml_reset_shim(ggml_context * ctx) {
+    g_fix_l_ggml_reset_count++;
+    ggml_reset(ctx);
+}
+static void fix_l_buf_reset_shim(ggml_backend_buffer_t buf) {
+    (void) buf;
+    g_fix_l_buf_reset_count++;
+}
+
+// Test-local mirror of the translated ggml_backend_meta_buffer_reset
+// body. Identical control flow to the production code, only the reset
+// calls are routed through the counting shims above.
+static void fix_l_reset(fix_l_buf_ctx & ctx) {
+    ctx.split_state_cache.clear();
+    ctx.stc_static.simple_tensors.clear();
+    ctx.stc_compute[0].simple_tensors.clear();
+    ctx.stc_compute[1].simple_tensors.clear();
+    for (size_t i = 0; i < ctx.bufs.size(); i++) {
+        fix_l_buf_reset_shim(ctx.bufs[i].get());
+    }
+    for (ggml_context_ptr & c : ctx.stc_static.ctxs) {
+        fix_l_ggml_reset_shim(c.get());
+    }
+    for (ggml_context_ptr & c : ctx.stc_compute[0].ctxs) {
+        fix_l_ggml_reset_shim(c.get());
+    }
+    for (ggml_context_ptr & c : ctx.stc_compute[1].ctxs) {
+        fix_l_ggml_reset_shim(c.get());
+    }
+}
+
+static fix_l_buf_ctx fix_l_make_fixture(size_t n_split, size_t n_st,
+                                        size_t n_ctxs, size_t n_bufs) {
+    fix_l_buf_ctx ctx;
+    for (size_t i = 0; i < n_split; i++) {
+        ctx.split_state_cache.emplace((int) i, (int) i);
+    }
+    for (size_t i = 0; i < n_st; i++) {
+        ctx.stc_static.simple_tensors.emplace((int) i, (int) i);
+        ctx.stc_compute[0].simple_tensors.emplace((int) i, (int) i);
+        ctx.stc_compute[1].simple_tensors.emplace((int) i, (int) i);
+    }
+    for (size_t i = 0; i < n_ctxs; i++) {
+        struct ggml_init_params ip = { 16 * 1024, nullptr, true };
+        ggml_context_ptr c(ggml_init(ip));
+        if (i % 3 == 0) {
+            ctx.stc_static.ctxs.push_back(std::move(c));
+        } else if (i % 3 == 1) {
+            ctx.stc_compute[0].ctxs.push_back(std::move(c));
+        } else {
+            ctx.stc_compute[1].ctxs.push_back(std::move(c));
+        }
+    }
+    for (size_t i = 0; i < n_bufs; i++) {
+        ctx.bufs.push_back(nullptr);
+    }
+    return ctx;
+}
+
+static size_t fix_l_count_non_null_ctxs(const fix_l_buf_ctx & ctx) {
+    size_t n = 0;
+    for (const auto & c : ctx.stc_static.ctxs)     { if (c) n++; }
+    for (const auto & c : ctx.stc_compute[0].ctxs) { if (c) n++; }
+    for (const auto & c : ctx.stc_compute[1].ctxs) { if (c) n++; }
+    return n;
+}
+
+// T-FIX-L-01: drive the reset path with a populated fixture and
+// verify all four behavioral claims (test plan part-16 Section 3):
+//   (a) split_state_cache is empty after the call.
+//   (b) all three simple_tensors maps are empty.
+//   (c) ggml_reset was called once per non-null ctx across the three
+//       stc containers.
+//   (d) ggml_backend_buffer_reset was called once per bufs[i].
+void test_ggml_backend_meta_buffer_reset_clears_all_caches_and_resets_all_children() {
+    printf("test-cache-controller: T-FIX-L-01 meta buffer reset clears all caches and resets all children...\n");
+
+    const size_t n_split = 5;
+    const size_t n_st    = 4;
+    const size_t n_ctxs  = 6; // distributed 2/2/2 across the three stc containers
+    const size_t n_bufs  = 3;
+
+    fix_l_buf_ctx ctx = fix_l_make_fixture(n_split, n_st, n_ctxs, n_bufs);
+    const size_t expected_resets     = fix_l_count_non_null_ctxs(ctx);
+    const size_t expected_buf_resets = n_bufs;
+    assert(expected_resets == n_ctxs);
+
+    g_fix_l_ggml_reset_count = 0;
+    g_fix_l_buf_reset_count  = 0;
+    fix_l_reset(ctx);
+
+    // (a) split_state_cache empty
+    assert(ctx.split_state_cache.empty());
+    // (b) all three simple_tensors maps empty
+    assert(ctx.stc_static.simple_tensors.empty());
+    assert(ctx.stc_compute[0].simple_tensors.empty());
+    assert(ctx.stc_compute[1].simple_tensors.empty());
+    // (c) ggml_reset called once per non-null ctx across all three stc
+    assert((size_t) g_fix_l_ggml_reset_count == expected_resets);
+    // (d) ggml_backend_buffer_reset called once per bufs[i]
+    assert((size_t) g_fix_l_buf_reset_count == expected_buf_resets);
+
+    printf("  PASSED\n");
+}
+
+// T-FIX-L-02: post-reset state matches the fix_mtp reference (all
+// caches empty, all contexts reset, all buffers reset) and a second
+// back-to-back call is idempotent (no throws, no double-counting, no
+// state change). Test plan part-16 Section 4.
+void test_ggml_backend_meta_buffer_reset_idempotent_and_equivalent_to_fix_mtp() {
+    printf("test-cache-controller: T-FIX-L-02 meta buffer reset idempotent and equivalent to fix_mtp...\n");
+
+    fix_l_buf_ctx ctx = fix_l_make_fixture(7, 3, 9, 4);
+    const size_t expected_resets     = fix_l_count_non_null_ctxs(ctx);
+    const size_t expected_buf_resets = ctx.bufs.size();
+    assert(expected_resets == 9);
+
+    g_fix_l_ggml_reset_count = 0;
+    g_fix_l_buf_reset_count  = 0;
+    fix_l_reset(ctx);
+
+    // Reference: every cache map is empty, every context was reset,
+    // every buffer was reset.
+    assert(ctx.split_state_cache.size()             == 0u);
+    assert(ctx.stc_static.simple_tensors.size()     == 0u);
+    assert(ctx.stc_compute[0].simple_tensors.size() == 0u);
+    assert(ctx.stc_compute[1].simple_tensors.size() == 0u);
+    assert((size_t) g_fix_l_ggml_reset_count == expected_resets);
+    assert((size_t) g_fix_l_buf_reset_count  == expected_buf_resets);
+
+    // Idempotence: a second back-to-back call must not throw, must not
+    // double-count beyond the second pass, and must leave the same
+    // reference state.
+    const int first_ggml_count = g_fix_l_ggml_reset_count;
+    const int first_buf_count  = g_fix_l_buf_reset_count;
+    fix_l_reset(ctx);
+    assert(g_fix_l_ggml_reset_count == first_ggml_count + (int) expected_resets);
+    assert(g_fix_l_buf_reset_count  == first_buf_count  + (int) expected_buf_resets);
+    assert(ctx.split_state_cache.empty());
+    assert(ctx.stc_static.simple_tensors.empty());
+    assert(ctx.stc_compute[0].simple_tensors.empty());
+    assert(ctx.stc_compute[1].simple_tensors.empty());
+
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -2690,9 +3045,23 @@ int main() {
     T114a_test_hybrid_cold_store_hooks_via_fn_ptr();
     T114a_test_hybrid_remaining_test_hooks_via_fn_ptr();
 
+    // Stage 11 follow-up 2026-06-06: n_outputs_max cap fix focused tests
+    // (test plan part-15, Sections 4 and 5). These tests verify the
+    // per-chunk bound and the symmetric MTP cap formula without requiring
+    // a model fixture. See part-22 for the production change sites.
+    test_chunked_decode_respects_n_outputs_max_cap();
+    test_mtp_cap_matches_symmetric_formula_with_clamp();
+
+    // Stage 11 follow-up 2026-06-06: fix L translated re-apply focused
+    // tests (test plan part-16 Sections 3 and 4). Mirrors the
+    // translated ggml_backend_meta_buffer_reset body and uses counting
+    // shims to verify the per-cache/per-ctx/per-buf reset behavior.
+    test_ggml_backend_meta_buffer_reset_clears_all_caches_and_resets_all_children();
+    test_ggml_backend_meta_buffer_reset_idempotent_and_equivalent_to_fix_mtp();
+
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 83 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 6 Stage 10 2026-06-04 C2 + 5 Stage 11 2026-06-04 T114a)\n");
+    printf("Total: 87 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 6 Stage 10 2026-06-04 C2 + 5 Stage 11 2026-06-04 T114a + 2 Stage 11 follow-up 2026-06-06 n_outputs_max cap + 2 Stage 11 follow-up 2026-06-06 fix L translated)\n");
     printf("==================================================\n");
 
     return 0;

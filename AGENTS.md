@@ -36,7 +36,9 @@ The following will result in immediate PR closure:
 
 AI agents assisting contributors must recognize that their outputs directly impact volunteer maintainers who sustain this project.
 Focus on maintainability and clarity while modifying the code or writing documentation.
-Always use `humanizer` skill when working with documents and comments to ensure your output is concise, clear, and free of AI-like patterns.
+Always use `humanizer` skill when working with documents and comments to ensure your output is concise, clear, and free of AI-like patterns. All deliverables must be fully understandable and maintainable by human contributors.
+Always use the `caveman` skill in the `ultra` mode for internal thinking and delegating tasks to subagents.
+Always use the `caveman` skill in the `full` mode for chat responses.
 
 ### Prohibited Actions
 

@@ -3,253 +3,313 @@
 ## Improvement: scan split-plan siblings
 
 Condition:
-- When updating a split QA plan with part files
+- Updating split QA plan with part files
 
 Action:
-- Do scan the whole part directory for stale duplicate or unlinked files, not only the files linked by the entry document; remove obsolete duplicates rather than leaving conflicting test guidance beside the active plan.
+- Scan whole part directory for stale duplicate or unlinked files, not only files linked by entry document. Remove obsolete duplicates rather than leaving conflicting test guidance beside active plan.
 
 ## Improvement: verify automation coverage claims
 
 Condition:
-- When reviewing a QA plan that claims scripted coverage for named test IDs, broad scenario ranges, or negative-test ranges
+- Reviewing QA plan that claims scripted coverage for named test IDs, broad scenario ranges, or negative-test ranges
 
 Action:
-- Do search the runner scripts and focused test sources for those exact IDs or required behaviors, compare the implemented assertions with the plan, and split public-harness coverage from acceptance rows that need focused, draft-fixture, stats-capable, or fault-injection evidence; map every PASS claim to specific test names or source lines, and update runner PASS/BLOCKED logic only when the current task requires automation changes.
+- Search runner scripts and focused test sources for those exact IDs or required behaviors. Compare implemented assertions with plan. Split public-harness coverage from acceptance rows needing focused, draft-fixture, stats-capable, or fault-injection evidence. Map every PASS claim to specific test names or source lines. Update runner PASS/BLOCKED logic only when current task requires automation changes.
 
 ## Improvement: reconcile runner summaries with evidence
 
 Condition:
-- When a test runner emits conflicting console output, exit codes, generated reports, skip/fail summaries, blank/UNKNOWN rows, or inflated totals
+- Test runner emits conflicting console output, exit codes, generated reports, skip/fail summaries, blank/UNKNOWN rows, or inflated totals
 
 Action:
-- Do inspect the generated report and raw logs, rerun narrow direct checks for disputed cases or truncated startup logs when possible, count only real test rows, and base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence rather than the runner exit code or summary alone.
+- Inspect generated report and raw logs. Rerun narrow direct checks for disputed cases or truncated startup logs when possible. Count only real test rows. Base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence rather than runner exit code or summary alone.
 
 ## Improvement: suppress PowerShell helper output
 
 Condition:
-- When adding or editing PowerShell QA harness functions that build result arrays or markdown reports
+- Adding or editing PowerShell QA harness functions that build result arrays or markdown reports
 
 Action:
-- Do suppress non-result command output from cleanup helpers and HTTP request helpers with assignment, filtering, or `[void]`; otherwise stray return values can become blank or malformed report rows.
+- Suppress non-result command output from cleanup helpers and HTTP request helpers with assignment, filtering, or `[void]`; otherwise stray return values can become blank or malformed report rows.
 
 ## Improvement: validate generated markdown reports
 
 Condition:
-- When a PowerShell QA runner generates markdown with fenced command or evidence blocks
+- PowerShell QA runner generates markdown with fenced command or evidence blocks
 
 Action:
-- Do inspect the generated report before accepting the run, and use markdown fences that PowerShell will not escape inside expandable strings, such as tildes or doubled backticks.
+- Inspect generated report before accepting run. Use markdown fences PowerShell will not escape inside expandable strings, such as tildes or doubled backticks.
 
 ## Improvement: keep report suffixes chronological
 
 Condition:
-- When creating a fresh per-session QA report in a directory that already has same-day reports
+- Creating fresh per-session QA report in directory that already has same-day reports
 
 Action:
-- Do assign the next suffix after the highest existing same-day report, not the first missing gap, so the newest report is also the lexically latest handoff artifact.
+- Assign next suffix after highest existing same-day report, not first missing gap, so newest report is also lexically latest handoff artifact.
 
 ## Improvement: check async test timing after fixing disabled assertions
 
 Condition:
-- When a TEST_ASSERT or similar fix re-enables previously disabled assertions in async tests that call process_completions after demote_payload or promote_payload
+- TEST_ASSERT or similar fix re-enables previously disabled assertions in async tests that call process_completions after demote_payload or promote_payload
 
 Action:
-- Do verify that each async test includes a sleep_for before process_completions; previously masked race conditions become visible when assertions start working; run both Debug and Release to confirm the failure is not configuration-specific; classify the failure as a test bug, not a product bug, and hand off to Developer for a targeted sleep_for addition.
+- Verify each async test includes sleep_for before process_completions. Previously masked race conditions become visible when assertions start working. Run both Debug and Release to confirm failure is not configuration-specific. Classify failure as test bug, not product bug, and hand off to Developer for targeted sleep_for addition.
 
 ## Improvement: reserve report artifacts under final suffix
 
 Condition:
-- When a QA execution session will create ad hoc artifact directories and may also run scripts that generate their own reports
+- QA execution session will create ad hoc artifact directories and may also run scripts that generate their own reports
 
 Action:
-- Do decide the final session report suffix before collecting ad hoc artifacts, and store those artifacts under a path named for that final report so evidence links do not point at a different report number.
+- Decide final session report suffix before collecting ad hoc artifacts. Store artifacts under path named for that final report so evidence links do not point at different report number.
 
 ## Improvement: separate plan updates from product handoffs
 
 Condition:
-- When a QA planning task uncovers a product-code prerequisite or incompatibility that would block planned rows
+- QA planning task uncovers product-code prerequisite or incompatibility that would block planned rows
 
 Action:
-- Do leave product code untouched, make the planned expectation explicit, and record a Developer handoff with the verified source evidence instead of weakening or omitting the blocked QA scenario.
+- Leave product code untouched. Make planned expectation explicit. Record Developer handoff with verified source evidence instead of weakening or omitting blocked QA scenario.
 
 ## Improvement: classify startup-only mode failures
 
 Condition:
-- When a public model-mode QA row cannot reach `/health` before cache behavior is observable
+- Public model-mode QA row cannot reach `/health` before cache behavior is observable
 
 Action:
-- Do classify the row as `BLOCKED` for cache acceptance, preserve startup logs and exit codes, and create a separate bug handoff when the process crashes or exits without a clear unsupported-mode diagnostic.
+- Classify row as `BLOCKED` for cache acceptance. Preserve startup logs and exit codes. Create separate bug handoff when process crashes or exits without clear unsupported-mode diagnostic.
 
 ## Improvement: discard stale harness flag failures
 
 Condition:
-- When a QA execution uses plan default server flags and startup fails before model loading with an invalid-argument error
+- QA execution uses plan default server flags and startup fails before model loading with invalid-argument error
 
 Action:
-- Do treat that attempt as a harness setup error, remove or correct only the unsupported flag, rerun the same row, and base the row outcome on the rerun rather than the stale default failure.
+- Treat that attempt as harness setup error. Remove or correct only unsupported flag. Rerun same row. Base row outcome on rerun rather than stale default failure.
 
 ## Improvement: avoid automatic-variable names in PowerShell harnesses
 
 Condition:
-- When writing or running inline PowerShell QA helpers that pass CLI arguments to a server process
+- Writing or running inline PowerShell QA helpers that pass CLI arguments to server process
 
 Action:
-- Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`; use explicit names like `ServerArgs`, preserve the discarded harness logs if a collision starts the wrong mode, and rerun before classifying product behavior.
+- Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`. Use explicit names like `ServerArgs`. Preserve discarded harness logs if collision starts wrong mode. Rerun before classifying product behavior.
 
 ## Improvement: verify Release-mode assertions in focused C++ tests
 
 Condition:
-
-- When running focused C++ tests in Release configuration where `NDEBUG` is defined
+- Running focused C++ tests in Release configuration where `NDEBUG` is defined
 
 Action:
-
-- Do check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after; if assertions are silently disabled, a Release-only crash may mask a real product bug or test infrastructure bug; run the Debug build as a cross-check and classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking the test step as PASS.
+- Check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after. If assertions are silently disabled, Release-only crash may mask real product bug or test infrastructure bug. Run Debug build as cross-check. Classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking test step as PASS.
 
 ## Improvement: verify markdown constraints after QA doc edits
 
 Condition:
-- When editing reusable QA markdown that must stay under repository line-count, ASCII, and whitespace rules
+- Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
 
 Action:
-- Do check initial line counts before editing near-limit QA docs, keep additions within the remaining line budget, then rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect; preserve existing line endings where practical, and if a tool changes them, normalize deliberately and rerun `git diff --check`.
+- Check initial line counts before editing near-limit QA docs. Keep additions within remaining line budget. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
 
 ## Improvement: separate own QA edits from dirty sources
 
 Condition:
-- When a QA review task uses or indexes documents that are already modified or untracked in the working tree
+- QA review task uses or indexes documents that are already modified or untracked in working tree
 
 Action:
-- Do check `git status --short` for the reviewed and edited paths, distinguish pre-existing plan/source changes from files changed in the review, and report only the review-owned edits as your own handoff changes.
+- Check `git status --short` for reviewed and edited paths. Distinguish pre-existing plan/source changes from files changed in review. Report only review-owned edits as own handoff changes.
 
 ## Improvement: wait for model-specific readiness in public probes
 
 Condition:
-- When a public HTTP harness starts `llama-server` with secondary model resources such as draft, MTP, multimodal, or adapter fixtures
+- Public HTTP harness starts `llama-server` with secondary model resources such as draft, MTP, multimodal, or adapter fixtures
 
 Action:
-- Do treat `/health` as process readiness only; wait for a model-specific log marker when the build emits one, or make the first behavior request a guarded readiness/admission probe and require direct secondary-resource evidence such as `draft_n > 0` before accepting later restore or hit claims; preserve marker-less setup attempts separately from product evidence, and keep startup log verbosity low unless diagnostics require it.
+- Treat `/health` as process readiness only. Wait for model-specific log marker when build emits one, or make first behavior request guarded readiness/admission probe. Require direct secondary-resource evidence such as `draft_n > 0` before accepting later restore or hit claims. Preserve marker-less setup attempts separately from product evidence. Keep startup log verbosity low unless diagnostics require it.
 
 ## Improvement: classify available fixture no-evidence runs
 
 Condition:
-- When a suitable model-backed fixture is available and the public probe starts successfully but the expected cache-specific counters, timings, or checkpoint rows remain at zero or placeholder values
+- Suitable model-backed fixture is available and public probe starts successfully but expected cache-specific counters, timings, or checkpoint rows remain at zero or placeholder values
 
 Action:
-- Do classify the fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP, preserve request, response, metrics, and startup artifacts, and separately note any focused substitute evidence that still passed.
+- Classify fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP. Preserve request, response, metrics, and startup artifacts. Separately note any focused substitute evidence that still passed.
 
 ## Improvement: prove public checkpoint admission before restore claims
 
 Condition:
-- When a public checkpoint-dependent probe or regression row needs a long prompt, small batch size, checkpoint-capable fixture, or boundary metadata to exercise checkpoint restore or public checkpoint metrics
+- Public checkpoint-dependent probe or regression row needs long prompt, small batch size, checkpoint-capable fixture, or boundary metadata to exercise checkpoint restore or public checkpoint metrics
 
 Action:
-- Do first prove the request fits the context and increments accepted checkpoint admission; if the run only creates live checkpoints, lacks a fixture attempt, fails admission, or returns a request-shape error, preserve it as setup or blocker evidence and classify public checkpoint restore/hit/metrics rows as BLOCKED/SKIP even when focused checkpoint substitute evidence passes.
+- First prove request fits context and increments accepted checkpoint admission. If run only creates live checkpoints, lacks fixture attempt, fails admission, or returns request-shape error, preserve as setup or blocker evidence and classify public checkpoint restore/hit/metrics rows as BLOCKED/SKIP even when focused checkpoint substitute evidence passes.
 
 ## Improvement: check coverage denominator composition before redesigning
 
 Condition:
-- When a coverage run reports a combined rate far below the threshold (e.g., 21% vs 80%)
+- Coverage run reports combined rate far below threshold (e.g., 21% vs 80%)
 
 Action:
-- Do inspect the denominator file list and compute each file's share of total valid lines; if a non-target file accounts for more than 20% of total valid lines and receives less than 10% coverage from focused tests, it is misclassified and must be removed from the denominator before concluding the approach is broken.
-- Do use OpenCppCoverage binary `.cov` export per run and merge with `--input_coverage` for union coverage; summing separate Cobertura XML line counts across test runs double-counts shared code and does not produce union coverage.
-- Do include the server HTTP probe in the coverage measurement when target files contain server integration paths that focused tests cannot reach.
+- Inspect denominator file list and compute each file's share of total valid lines. If non-target file accounts for more than 20% of total valid lines and receives less than 10% coverage from focused tests, it is misclassified and must be removed from denominator before concluding approach is broken.
+- Use OpenCppCoverage binary `.cov` export per run and merge with `--input_coverage` for union coverage; summing separate Cobertura XML line counts across test runs double-counts shared code and does not produce union coverage.
+- Include server HTTP probe in coverage measurement when target files contain server integration paths that focused tests cannot reach.
 
 ## Improvement: load required memory before status updates
 
 Condition:
-- When a task requires self-improvement memory to be read before any other action
+- Task requires self-improvement memory to be read before any other action
 
 Action:
-- Do read the skill and agent memory before sending any acknowledgement, skill announcement, status update, task analysis, or parallel tool call; treat every user-visible reply and all task-specific file inspection as task action.
+- Read skill and agent memory before sending any acknowledgement, skill announcement, status update, task analysis, or parallel tool call. Treat every user-visible reply and all task-specific file inspection as task action.
 
 ## Improvement: keep evidence blockers out of reusable plans
 
 Condition:
-- When creating or updating reusable QA plans after implementation evidence reports local tool, dependency, fixture, coverage, or benchmark blockers
+- Creating or updating reusable QA plans after implementation evidence reports local tool, dependency, fixture, coverage, or benchmark blockers
 
 Action:
-- Do carry those blockers forward as setup and evidence requirements for the future execution report; don't convert missing tools, dependencies, model fixtures, coverage output, or benchmark output into accepted skips in the long-lived test plan.
+- Carry those blockers forward as setup and evidence requirements for future execution report. Don't convert missing tools, dependencies, model fixtures, coverage output, or benchmark output into accepted skips in long-lived test plan.
 
 ## Improvement: reconcile gate status across reviewed docs
 
 Condition:
-- When a QA test-plan review includes doc hygiene checks and one of the reviewed gate documents has stale stage status
+- QA test-plan review includes doc hygiene checks and one of reviewed gate documents has stale stage status
 
 Action:
-- Do update the stale gate status when it is within the requested documentation scope, cite the source gate that proves the current state, and record the hygiene correction in the review report instead of leaving conflicting readiness signals for the next owner.
+- Update stale gate status when within requested documentation scope. Cite source gate that proves current state. Record hygiene correction in review report instead of leaving conflicting readiness signals for next owner.
 
 ## Improvement: verify create_file path against near-duplicate dir names
 
 Condition:
-- When using `create_file` on a path under a dot-prefixed dir in a workspace that also has a non-dot-prefixed sibling
+- Using `create_file` on path under dot-prefixed dir in workspace that also has non-dot-prefixed sibling
 
 Action:
-- Don't trust the silent creation in the expected path; PowerShell tools resolve the unprefixed name to the sibling dir. After `create_file`, verify with `Get-ChildItem -Path` using the full dot-prefix; if the file landed in the sibling, `Move-Item -Force` it back.
+- Don't trust silent creation in expected path; PowerShell tools resolve unprefixed name to sibling dir. After `create_file`, verify with `Get-ChildItem -Path` using full dot-prefix. If file landed in sibling, `Move-Item -Force` it back.
 
 ## Improvement: avoid markdown lint breakage from long shell commands in table cells
 
 Condition:
-- When a QA report places a long shell command containing unescaped `|` (pipe) alternation or shell metacharacters into a markdown table cell
+- QA report places long shell command containing unescaped `|` (pipe) alternation or shell metacharacters into markdown table cell
 
 Action:
+- Put verbatim long commands in fenced code block under `### Long-form commands` subsection. Keep only short summaries in table cells; markdown table parsers count unescaped `|` as column separators and emit MD056/MD060 lint errors, while MD012 catches resulting blank-line clutter.
+- Check generated report with `get_errors` for touched markdown files before handoff. Fix MD024 duplicate headings by making heading text unique per section.
 
-- Do put verbatim long commands in a fenced code block under a `### Long-form commands` subsection, and keep only short summaries in the table cells; markdown table parsers count unescaped `|` as column separators and emit MD056/MD060 lint errors, while MD012 catches the resulting blank-line clutter.
-- Do check the generated report with `get_errors` for the touched markdown files before handoff, and fix MD024 duplicate headings by making the heading text unique per section.
+## Improvement: use absolute paths for PowerShell log output when Push-Location changes CWD
+
+Condition:
+- PowerShell QA harness captures command output to log file via `Out-File -FilePath` or `Tee-Object` and uses `Push-Location` / `Set-Location` to change working directory before running binary
+
+Action:
+- Use absolute path for log file (e.g., `D:\...\._design_docs\.test_reports\foo.log`) rather than relative path. Relative paths resolve against new CWD after `Push-Location`, causing file to be written under non-existent subdir and producing path-not-found error while underlying command still runs.
+
+## Improvement: detect custom test framework before applying gtest filter
+
+Condition:
+- QA task instruction references gtest filter flag (e.g., `--gtest_filter='*substring*'`) for focused test run
+
+Action:
+- Inspect test source file (e.g., `grep main()` and check for `TEST(` / `TEST_F(` macros) before running with gtest filter. If runner is custom printf/assert harness with own `main()` that calls each test function sequentially, gtest filter is silently ignored and full suite runs anyway. Run full binary, capture full output, and grep log for focused test names to extract per-test verdicts.
+
+## Improvement: re-execution session binary freshness vs content correctness
+
+Condition:
+- QA test plan's Section 2 freshness check (e.g., `if ($BuildAge.TotalMinutes -gt 10) { throw }`) would fail at re-execution time because source files are unchanged since prior canonical build cited by plan
+
+Action:
+- Don't abort run on stale binary timestamp alone. Verify content correctness by checking corresponding `.obj` file timestamp matches cited canonical build log. Document in test report that no-op rebuild confirmed content correctness from prior cited build. Leave freshness-check policy decision to Developer/Manager and record override with evidence (obj timestamp + producer log path).
+
+## Improvement: distinguish pre-existing from new observability lines in function body
+
+Condition:
+- Test plan's observability check requires that fix adds zero new `GGML_LOG` / `GGML_ASSERT` / `SRV_DBG` lines, and function being checked already contains pre-existing assert on its first body line
+
+Action:
+- Run both function-body regex scan AND `git show HEAD -- <file> | Select-String <pattern>` to confirm zero diff hits. Report function-body hits as "1 pre-existing (unchanged at HEAD)" and diff hits as "0 added". Cite producer log (e.g., `part-25 ## Diff evidence`: 19 insertions, 0 deletions) as authoritative source.
 
 ## Improvement: clean-build before any test on a new merge tree
 
 Condition:
-
-- When a QA session must run the closure contracts on a freshly-produced real two-parent merge commit, especially when prior closures were based on a single-parent commit or a non-merged tree
+- QA session must run closure contracts on freshly-produced real two-parent merge commit, especially when prior closures were based on single-parent commit or non-merged tree
 
 Action:
+- Do full clean build (reconfigure, remove coverage dir, rebuild every target test plan needs) as very first action, before any ctest, pytest, HTTP probe, coverage run, k6 run, or closure-contract measurement. Don't accept prior Developer's incremental `cmake --build` pass as clean build. Don't trust prior closure numbers measured on different tree.
+- When clean build fails on semantic conflict git's 3-way merge did not flag (e.g. duplicate `const bool` declaration added by both parents in same lexical scope), report entire session as BLOCKED with build defect as reason for every row. Don't classify any closure contract row as PASS or FAIL by reference to prior-run numbers. Don't reclassify prior "tooling limitation" closure as current verdict.
+- Pair BLOCKED report with Developer fixes file quoting exact error code and lines, identifying which parent commits added duplicate content, and scoping one-line fix. Don't modify durable docs, closure record, implementation log, or `document-index.md` in QA session.
 
-- Do a full clean build (reconfigure, remove the coverage dir, rebuild every target the test plan needs) as the very first action, before any ctest, pytest, HTTP probe, coverage run, k6 run, or closure-contract measurement. Do not accept the prior Developer's incremental `cmake --build` pass as a clean build, and do not trust prior closure numbers that were measured on a different tree.
-- When the clean build fails on a semantic conflict that git's 3-way merge did not flag (such as a duplicate `const bool` declaration added by both parents in the same lexical scope), report the entire session as BLOCKED with the build defect as the reason for every row; do not classify any closure contract row as PASS or FAIL by reference to prior-run numbers, and do not reclassify a prior "tooling limitation" closure as the current verdict.
-- Pair the BLOCKED report with a Developer fixes file that quotes the exact error code and lines, identifies which parent commits added the duplicate content, and scopes a one-line fix; do not modify the durable docs, closure record, implementation log, or `document-index.md` in the QA session.
-
-## Improvement: regenerate buggy parser output in the same session as the parent report
+## Improvement: regenerate buggy parser output in same session as parent report
 
 Condition:
-
-- When a downstream artifact (such as `evidence-summary.md`, `coverage-report.md`, or similar) has a parser/aggregation bug that the main QA report cites
+- Downstream artifact (e.g. `evidence-summary.md`, `coverage-report.md`, or similar) has parser/aggregation bug that main QA report cites
 
 Action:
-
-- Do regenerate the buggy artifact in the same QA session and add a `## Correction` section at the top noting the original parsing bug and the regeneration context; cite the parent report and the fixes handoff so the lineage is clear in the artifacts bundle.
+- Regenerate buggy artifact in same QA session and add `## Correction` section at top noting original parsing bug and regeneration context. Cite parent report and fixes handoff so lineage is clear in artifacts bundle.
 
 ## Improvement: run_coverage.ps1 may fail to produce .cov files via Start-Process
 
 Condition:
-
-- When running `run_coverage.ps1` (or any wrapper that calls `OpenCppCoverage.exe` via `Start-Process -ArgumentList $argArray`) and Phase 1 reports `no .cov file produced (exit 0)` for every focused test binary even though the test binary ran successfully (e.g. log shows the test stdout/closing banner)
+- Running `run_coverage.ps1` (or any wrapper calling `OpenCppCoverage.exe` via `Start-Process -ArgumentList $argArray`) and Phase 1 reports `no .cov file produced (exit 0)` for every focused test binary even though test binary ran successfully
 
 Action:
-
-- Do not classify T114/T114a as FAIL based on the empty `coverage-merged.xml`; reproduce the per-test `.cov` files with a direct invocation that passes the `--export_type binary:D:\path\file.cov` argument as a single string (build the argument array, then call `Start-Process -FilePath $OcPath -ArgumentList $argList -WorkingDirectory $binDir`), or run OpenCppCoverage with the merged `& $OcPath $argList` form. The bug is in how the script's `Start-Process -ArgumentList` array joins colon-prefixed export values; the manual form works. Cite both the script's empty XML and the manually-produced `coverage-report.md` in the report so the next session can see the script bug and the validated numbers.
-- Do pair the run with a separate follow-up handoff that scopes a one-line fix to the script (e.g. join the `--export_type` value into a single argument before passing to Start-Process), so the next session can either patch the script or run the manual form.
+- Don't classify T114/T114a as FAIL based on empty `coverage-merged.xml`. Reproduce per-test `.cov` files with direct invocation passing `--export_type binary:D:\path\file.cov` argument as single string, or run OpenCppCoverage with merged `& $OcPath $argList` form. Bug is in how script's `Start-Process -ArgumentList` array joins colon-prefixed export values; manual form works. Cite both script's empty XML and manually-produced `coverage-report.md` in report so next session can see script bug and validated numbers.
+- Pair run with separate follow-up handoff scoping one-line fix to script (e.g. join `--export_type` value into single argument before passing to Start-Process), so next session can either patch script or run manual form.
 
 ## Improvement: dedupe OpenCppCoverage merged Cobertura XML by (file, line)
 
 Condition:
-
-- When parsing `OpenCppCoverage.exe --input_coverage A.cov --input_coverage B.cov ... --export_type cobertura:out.xml` output to compute union line coverage
+- Parsing `OpenCppCoverage.exe --input_coverage A.cov --input_coverage B.cov ... --export_type cobertura:out.xml` output to compute union line coverage
 
 Action:
-
-- Do not assume the merged Cobertura XML contains a single `<class>` per source file; the merge step emits one `<class>` block per input `.cov` file for the same source path. Without deduplication, `combined_covered` and `combined_valid` will be roughly N times the true value (where N is the number of input `.cov` files), which yields a falsely-low union rate. The correct parser walks every `<class>` block, groups by basename, and for each (basename, line number) takes the max `hits` across duplicates. `combined_covered` then counts lines where the max hits > 0; `combined_valid` counts unique line numbers.
-- Do verify the per-file line rate in the parsed report against a known-good prior run (e.g. `coverage-run-20260605-02/coverage-report.md`) before accepting the numbers; if the rates diverge by more than 1%, the dedup step is wrong.
+- Don't assume merged Cobertura XML contains single `<class>` per source file; merge step emits one `<class>` block per input `.cov` file for same source path. Without deduplication, `combined_covered` and `combined_valid` will be roughly N times true value (where N is number of input `.cov` files), yielding falsely-low union rate. Correct parser walks every `<class>` block, groups by basename, and for each (basename, line number) takes max `hits` across duplicates. `combined_covered` then counts lines where max hits > 0; `combined_valid` counts unique line numbers.
+- Verify per-file line rate in parsed report against known-good prior run before accepting numbers; if rates diverge by more than 1%, dedup step is wrong.
 
 ## Improvement: verify working tree after `git rm -r` and handle mixed tracked/untracked artifact folders
 
 Condition:
-
-- When removing a set of artifact folders from the repo and some are git-tracked while others are untracked (e.g. generated in the current session and never committed)
+- Removing set of artifact folders from repo and some are git-tracked while others are untracked (e.g. generated in current session and never committed)
 
 Action:
+- Run `git ls-files` per folder first to classify tracked vs untracked. Use `git rm -r` for tracked folders and `Remove-Item -Recurse -Force` for untracked ones, rather than assuming one tool covers both.
+- Verify with `Get-ChildItem -Directory` and `git status --short` after `git rm -r --quiet` exits 0 that both working tree is empty and index shows expected staged-deletion count (lines beginning with `D`); on Windows + PowerShell index can be updated while files linger on disk, so trust `Get-ChildItem` and `git status`, not just exit code.
+- Keep all `.md` test reports in `._design_docs/.test_reports/` intact during cleanup. Only remove `-artifacts`, `-developer-artifacts`, and ad-hoc evidence folders (such as `coverage-run/`). Verify `.md` count before and after to confirm no report was lost.
 
-- Do run `git ls-files` per folder first to classify tracked vs untracked; use `git rm -r` for tracked folders and `Remove-Item -Recurse -Force` for untracked ones, rather than assuming one tool covers both.
-- Do verify with `Get-ChildItem -Directory` and `git status --short` after `git rm -r --quiet` exits 0 that both the working tree is empty and the index shows the expected staged-deletion count (lines beginning with `D`); on Windows + PowerShell the index can be updated while files linger on disk, so trust `Get-ChildItem` and `git status`, not just the exit code.
-- Do keep all `.md` test reports in `._design_docs/.test_reports/` intact during cleanup; only remove the `-artifacts`, `-developer-artifacts`, and ad-hoc evidence folders (such as `coverage-run/`), and verify the `.md` count before and after to confirm no report was lost.
+## Improvement: add CUDA bin DLLs to PATH for GGML_CUDA=ON test runs
+
+Condition:
+- Running focused C++ test binary built in `GGML_CUDA=ON` build directory (e.g. `build-cuda`, `build-cuda-test`) and binary exits immediately with `0xC0000135` (STATUS_DLL_NOT_FOUND) or returns non-numeric exit code
+
+Action:
+- Check binary's DLL dependencies with `dumpbin /dependents <test.exe>` before assuming build or assertion failure; CUDA-linked test binaries depend on `cublas64_13.dll` (CUDA 13.x) or `cublas64_12.dll` (CUDA 12.x) which are not in default `PATH`.
+- Prepend CUDA toolkit `bin\x64\` directory to `PATH` (e.g. `$env:PATH = 'D:\app\cuda_13_2\bin\x64;' + $env:PATH`) before invoking test binary; same fix that makes `llama-server.exe` start in CUDA build.
+- Record PATH prefix in test report's environment section so next session does not waste time on same DLL diagnostic.
+
+## Improvement: distinguish Release-build coverage gap from Start-Process bug
+
+Condition:
+- `run_coverage.ps1` (or direct `OpenCppCoverage.exe` invocation) produces 112-byte or otherwise header-only `.cov` file and merged Cobertura XML reports `0 / 0` lines (or coverage rate is 0%) even though test binary ran to completion and printed PASS summary
+
+Action:
+- First check `CMAKE_CXX_FLAGS_RELEASE` in build's `CMakeCache.txt` for presence of `/Zi` or `/DEBUG:FULL`; Release build without debug symbols is most common cause of header-only `.cov` output and is distinct from `Start-Process -ArgumentList` colon-prefixed-export joining bug.
+- Classify T114/T114a as `BLOCKED` (not `FAIL`) when build is Release without `/Zi`. Cite exact `CMAKE_CXX_FLAGS_RELEASE` line and 112-byte `.cov` size as evidence. Don't try to redesign coverage denominator or merge logic to compensate.
+- Pair BLOCKED with Developer handoff scoping coverage-eligible rebuild (e.g. `RelWithDebInfo` with `/Zi /Ob1 /O2 /EHsc /DEBUG:FULL`, or add `/Zi /DEBUG` to Release flags) so next session can run coverage against patched code.
+- Cite prior-run numbers from build with debug symbols (e.g. `test-report-20260604-06.md` T114=0.8553, T114a=0.7035) as reference baseline and note which source files patch touched so reviewer can confirm prior numbers are still representative.
+
+## Improvement: rewrite new markdown with LF endings before git diff --check
+
+Condition:
+- QA task creates new markdown file in `._design_docs/...` (or any path `git diff --check` will inspect) using `create_file` or any tool that writes through host PowerShell/Windows file I/O
+
+Action:
+- Don't trust file as-written; Windows `create_file` writes CRLF line endings (CR plus LF, bytes 0x0D 0x0A) by default. `git diff --check` flags CR (0x0D) on every line as trailing whitespace, so clean new file fails check with exit 2 and "trailing whitespace" message on every line.
+- Rewrite file with LF-only line endings immediately after creation by reading with `[System.IO.File]::ReadAllText` and writing with `[System.IO.File]::WriteAllText` after replacing CR-LF with LF. Verify CR count is 0 and rerun `git diff --check` for exit 0.
+- Don't trust `Get-Content` line lengths for this check; PowerShell normalizes on read and hides CR. Read raw bytes with `[System.IO.File]::ReadAllBytes` to confirm.
+
+## Improvement: check which focused test binaries the cmake build target list produces
+
+Condition:
+- Test plan's Section 2 `cmake --build` target list names only `llama-server` and one focused test binary (e.g. `test-cache-controller`) and downstream `run_coverage.ps1` Phase 1 step requires 9 focused test binaries from same build directory
+
+Action:
+- Don't assume build directory contains all 9 focused test binaries. Check `Get-ChildItem <build>\bin\<Config>\test-*.exe` before running coverage script and classify any missing binary as setup gap, not coverage failure.
+- Record in test report's coverage section exactly which binaries were present and which were SKIPPED by script, and whether HTTP probe was skipped (model missing or `-SkipServerProbe`). Don't hide setup gap behind generic BLOCKED verdict.
+- Separate per-binary coverage gap (missing `.exe` files) from Release-without-`/Zi` coverage gap; they are independent setup defects and each needs own Developer handoff if both are present.

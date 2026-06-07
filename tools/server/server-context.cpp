@@ -1172,7 +1172,13 @@ private:
                     measure_model_bytes = false;
                 }
 
-                params_dft.n_outputs_max = params_base.n_parallel;
+                if (spec_mtp) {
+                    params_dft.n_outputs_max = std::min<uint32_t>(
+                        static_cast<uint32_t>(params_base.n_batch),
+                        static_cast<uint32_t>(params_base.n_parallel * (1 + common_speculative_n_max(&params_base.speculative))));
+                } else {
+                    params_dft.n_outputs_max = params_base.n_parallel;
+                }
 
                 auto mparams_dft = common_model_params_to_llama(params_dft);
                 auto cparams_dft = common_context_params_to_llama(params_dft);
@@ -1305,7 +1311,9 @@ private:
             cparams_mtp.type_k        = params_base.speculative.draft.cache_type_k;
             cparams_mtp.type_v        = params_base.speculative.draft.cache_type_v;
             cparams_mtp.n_rs_seq      = 0;
-            cparams_mtp.n_outputs_max = params_base.n_parallel;
+            cparams_mtp.n_outputs_max = std::min<uint32_t>(
+                static_cast<uint32_t>(params_base.n_batch),
+                static_cast<uint32_t>(params_base.n_parallel * (1 + common_speculative_n_max(&params_base.speculative))));
 
             ctx_dft.reset(llama_init_from_model(model_tgt, cparams_mtp));
             if (ctx_dft == nullptr) {
@@ -3746,7 +3754,11 @@ private:
 
         // process the created batch of tokens
         for (int32_t i = 0; i < batch.n_tokens; i = i_next) {
-            const int32_t n_tokens = std::min(n_batch, batch.n_tokens - i);
+            const int32_t n_tokens = std::min({
+                n_batch,
+                batch.n_tokens - i,
+                (int32_t) params_base.n_outputs_max
+            });
 
             llama_batch batch_view = {
                 n_tokens,
@@ -3757,6 +3769,9 @@ private:
                 batch.seq_id   + i,
                 batch.logits   + i,
             };
+
+            SRV_DBG("srv  update_slots: speculative chunked decode, chunk=%d n_tokens=%d cap=%d\n",
+                    i / std::max<int32_t>(1, n_batch), n_tokens, (int32_t) params_base.n_outputs_max);
 
             const int ret = llama_decode(ctx_tgt, batch_view);
 

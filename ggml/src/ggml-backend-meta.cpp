@@ -1469,8 +1469,27 @@ static void ggml_backend_meta_buffer_clear(ggml_backend_buffer_t buffer, uint8_t
 static void ggml_backend_meta_buffer_reset(ggml_backend_buffer_t buffer) {
     GGML_ASSERT(ggml_backend_buffer_is_meta(buffer));
     ggml_backend_meta_buffer_context * buf_ctx = (ggml_backend_meta_buffer_context *) buffer->context;
+
+    // Clear per-reset caches that must not survive into the next graph allocation cycle.
+    buf_ctx->split_state_cache.clear();
+    buf_ctx->stc_static.simple_tensors.clear();
+    buf_ctx->stc_compute[0].simple_tensors.clear();
+    buf_ctx->stc_compute[1].simple_tensors.clear();
+
+    // Reset every child buffer.
     for (size_t i = 0; i < buf_ctx->bufs.size(); i++) {
         ggml_backend_buffer_reset(ggml_backend_meta_buffer_simple_buffer(buffer, i));
+    }
+
+    // Reset every child context across the rotating stc containers.
+    for (ggml_context_ptr & ctx : buf_ctx->stc_static.ctxs) {
+        ggml_reset(ctx.get());
+    }
+    for (ggml_context_ptr & ctx : buf_ctx->stc_compute[0].ctxs) {
+        ggml_reset(ctx.get());
+    }
+    for (ggml_context_ptr & ctx : buf_ctx->stc_compute[1].ctxs) {
+        ggml_reset(ctx.get());
     }
 }
 

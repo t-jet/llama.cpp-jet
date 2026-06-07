@@ -98,6 +98,12 @@ This index should be updated whenever new documents are added or existing docume
 | [fix-qwen-eval.md](fix-qwen-eval.md) | Patch notes for the first Qwen evaluation fix. | Use this to understand the original symptoms, fix logic, and possible side effects. |
 | [fix-qwen-summary.md](fix-qwen-summary.md) | Patch summary entry point for Qwen-related fixes, with links to detailed part files. | Use this for a consolidated Qwen fix summary and side-effect review. |
 
+## Operational procedures
+
+| Document | What is inside | Useful for |
+| --- | --- | --- |
+| [upstream-merge-guide.md](upstream-merge-guide.md) | Generic procedure for re-syncing the fork with the upstream project and reworking any prior feature when the upstream changes invalidate it. Covers prerequisites, upstream reference verification, pre-merge analysis, merge execution, per-rework planning, regression test scope, merge log and closure, conflict patterns (textual, semantic duplicates, mechanical renames, stale defensive code, divergent fix paths, new struct fields, new enum values, new helper functions, behavior changes), coverage and evidence rules, citation rules, advanced variant preference, new upstream features that modify local features, refactorings that break private contracts, post-closure follow-ups, architecture-level invariants, stale tracking branch handling, and cycle reuse across stages. | Use this when opening a new upstream merge cycle, when planning a rework for a prior stage, when resolving a conflict the merge tool did not flag, when applying a coverage lift, when opening a post-closure follow-up, or when training a new Architect, Developer, or QA on the upstream merge procedure. |
+
 ## Index and maintenance
 
 | Document | What is inside | Useful for |
