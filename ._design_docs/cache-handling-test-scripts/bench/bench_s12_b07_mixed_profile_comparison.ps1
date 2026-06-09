@@ -75,7 +75,7 @@ foreach ($p in $profiles) {
 
     $flags = @('--cache-mode','hybrid','--parallel','1','--cache-ram','100',
                '--metrics','--ctx-size','512','--temp','0','--seed',"$Seed")
-    if ($p.draft) { $flags += @('--model-draft',$p.draft) }
+    if ($p.draft) { $flags += @('--model-draft',$p.draft,'--spec-type','draft-simple') }
     $flags = Merge-MtpJinjaFlag -Flags $flags -JinjaPath $jinjaPath
     $legacyFlags = $flags | Where-Object { $_ -ne 'hybrid' -and $_ -ne '100' -and $_ -ne $p.draft }
     $legacyFlags = $legacyFlags | Where-Object { $_ -ne '--cache-ram' -and $_ -ne '100' }

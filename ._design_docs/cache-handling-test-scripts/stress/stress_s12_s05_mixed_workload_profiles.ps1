@@ -51,7 +51,7 @@ $serverExe = Join-Path $BuildDir 'bin\Release\llama-server.exe'
 
 $profiles = @(
     @{ name = 'plain-transformer'; model = $ModelPath;      draft = $null;     args = @('--cache-mode','hybrid','--parallel','1','--metrics','--cache-ram','50') }
-    @{ name = 'target-plus-draft'; model = $largerModel;    draft = $DraftModelPath; args = @('--cache-mode','hybrid','--parallel','1','--metrics','--cache-ram','200','--model-draft',$DraftModelPath) }
+    @{ name = 'target-plus-draft'; model = $largerModel;    draft = $DraftModelPath; args = @('--cache-mode','hybrid','--parallel','1','--metrics','--cache-ram','200','--model-draft',$DraftModelPath,'--spec-type','draft-simple') }
     @{ name = 'checkpoint-dependent'; model = $largerModel; draft = $null;     args = @('--cache-mode','hybrid','--parallel','1','--metrics','--cache-ram','200') }
 )
 

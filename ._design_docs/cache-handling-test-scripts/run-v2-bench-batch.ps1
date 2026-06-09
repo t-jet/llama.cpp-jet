@@ -1,9 +1,9 @@
 #requires -Version 5
 # run-v2-bench-batch.ps1
-# QA V1 follow-up batch runner for B01..B08 x 2 jinja = 16 rows.
-# Uses -MtpVariant=1, -JinjaVariant=original|marked, V1 fixture.
-# Re-runs B01 and B02 with the Developer fixes (k6 prefix_match_rate
-# threshold; B02 MtpVariant fixture switch). Per-row timeout 600000 ms.
+# QA V2 follow-up batch runner for B01..B08 x 2 jinja = 16 rows.
+# Uses -MtpVariant=2, -JinjaVariant=original|marked, Qwen3-8B target
+# fixture, and Qwen3-0.6B draft fixture where a driver supports a
+# separate draft model. Per-row timeout is recorded by caller policy.
 # Writes per-row start/end and verdict to the session side log.
 # Verdict read from hybrid/evidence-summary.md ## Verdict (not $LASTEXITCODE).
 #
@@ -15,8 +15,8 @@
 
 param(
     [string] $BuildDir  = 'D:\source\llama.cpp-jet\build-cov',
-    [string] $RunRoot   = 'D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1',
-    [string] $ModelPath = 'D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf',
+    [string] $RunRoot   = 'D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260609-V2',
+    [string] $ModelPath = 'D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf',
     [int]    $PerRowTimeoutMs = 600000
 )
 
@@ -57,7 +57,7 @@ $now = Get-Date -Format 'o'
 
 foreach ($row in $plan) {
     foreach ($jv in @('original','marked')) {
-        $rowId = "S12-MTP-$($row.Id)-V1-J$jv"
+        $rowId = "S12-MTP-$($row.Id)-V2-J$jv"
         $outDir = Join-Path $RunRoot $rowId
         $hybrid = Join-Path $outDir 'hybrid'
         $startIso = (Get-Date).ToString('o')
@@ -72,11 +72,15 @@ foreach ($row in $plan) {
         $driver = Join-Path $benchDir $row.Driver
         $splat = @{
             BuildDir     = $BuildDir
-            ModelPath    = $ModelPath
             OutDir       = $outDir
             Port         = $rowPort
-            MtpVariant   = 1
+            MtpVariant   = 2
             JinjaVariant = $jv
+        }
+        if ($row.Id -eq 'B02') {
+            $splat['LargerModel'] = $ModelPath
+        } else {
+            $splat['ModelPath'] = $ModelPath
         }
         foreach ($k in $row.Extra.Keys) { $splat[$k] = $row.Extra[$k] }
 
@@ -95,10 +99,10 @@ foreach ($row in $plan) {
         $verdict = 'PENDING'
         $notes   = ''
         if (Test-Path $esPath) {
-            $rs = Select-String -Path $esPath -Pattern '^Result:\s*(\S+)' -Raw
-            if ($rs) { $verdict = ($rs -split ':')[-1].Trim() }
-            $ns = Select-String -Path $esPath -Pattern '^Notes:\s*(.+)$' -Raw
-            if ($ns) { $notes = ($ns -split ':',2)[-1].Trim() }
+            $rs = Select-String -Path $esPath -Pattern '^Result:\s*(\S+)' | Select-Object -First 1
+            if ($rs) { $verdict = ($rs.Line -split ':')[-1].Trim() }
+            $ns = Select-String -Path $esPath -Pattern '^Notes:\s*(.+)$' | Select-Object -First 1
+            if ($ns) { $notes = ($ns.Line -split ':',2)[-1].Trim() }
         }
         $baseVerdict = ''
         if (Test-Path $bjPath) {

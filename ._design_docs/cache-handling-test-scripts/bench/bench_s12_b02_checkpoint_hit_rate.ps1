@@ -26,12 +26,6 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 . (Join-Path $libDir 'Write-BenchEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
 
-# MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
-$jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $LargerModel -SourceRoot $sourceRoot
-if ($MtpVariant -gt 0 -and $MtpVariant -ne 2 -and $jinjaPath -and -not (Test-Path $jinjaPath)) {
-    Write-Host "BLOCKED: jinja file missing at $jinjaPath (MtpVariant=$MtpVariant JinjaVariant=$JinjaVariant)"
-}
-
 if (-not $BuildDir) { $BuildDir = Join-Path $sourceRoot 'build' }
 
 # part-21a sec 4: per-driver variant logic is not permitted. Drivers must
@@ -51,6 +45,14 @@ if (-not $LargerModel) {
 if (-not $DraftModel -and -not $isMtpModel) {
     $DraftModel = Join-Path $sourceRoot '._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf'
 }
+
+# Resolve after fixture defaults are known. V2 must use the target
+# Qwen3-8B template, not the draft-model directory fallback.
+$jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $LargerModel -SourceRoot $sourceRoot
+if ($MtpVariant -gt 0 -and $MtpVariant -ne 2 -and $jinjaPath -and -not (Test-Path $jinjaPath)) {
+    Write-Host "BLOCKED: jinja file missing at $jinjaPath (MtpVariant=$MtpVariant JinjaVariant=$JinjaVariant)"
+}
+
 if (-not $OutDir) {
     $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
     $OutDir = Join-Path $sourceRoot "._design_docs\.test_reports\bench-s12-b02-$ts"
@@ -70,7 +72,7 @@ $flags = @('--cache-mode','hybrid','--parallel','1','--cache-ram','200',
 if ($isMtpModel) {
     $flags += @('--spec-type','draft-mtp')
 } elseif (Test-Path $DraftModel) {
-    $flags += @('--model-draft',$DraftModel)
+    $flags += @('--model-draft',$DraftModel,'--spec-type','draft-simple')
 }
 $flags = Merge-MtpJinjaFlag -Flags $flags -JinjaPath $jinjaPath
 

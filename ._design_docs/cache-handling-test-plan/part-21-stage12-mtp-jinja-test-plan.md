@@ -66,8 +66,9 @@ Three MTP variants are added:
 Server flag rules:
 
 - V1 and V3 use `--spec-type draft-mtp`.
-- V2 uses `--model-draft` pointing at Qwen3-0.6B; no
-  `--spec-type`.
+- V2 uses `--model-draft` pointing at Qwen3-0.6B plus
+  `--spec-type draft-simple`. Without the spec type, the server
+  loads the draft model but leaves speculative decoding disabled.
 
 Each base scenario (S12-S01..S08, S12-B01..B08, S12-L01..L03)
 runs under all three MTP variants, yielding 57 MTP sub-rows.

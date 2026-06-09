@@ -1,8 +1,8 @@
 # Stage 12 implementation log: stress testing and benchmarking
 
-Status: Stage 12 CLOSED 2026-06-07; design PASS, cap-fix closure PASS, plan PASS, impl PASS, test execution 18 PASS + 9 BLOCKED-infrastructure-limited + 2 cap-fix BLOCKED, 0 product bugs; Date: 2026-06-07
+Status: Stage 12 CLOSED; post-closure follow-up stopped 2026-06-09 by Manager decision; move to Stage 13 endpoint compatibility corrections and run endpoint-oriented suite afterward; Date: 2026-06-09
 
-Stage 12 CLOSED 2026-06-07. Manager closure decision in part-07-stage12-closure-decision.md. 18 PASS, 9 BLOCKED-infrastructure-limited, 2 cap-fix BLOCKED, 0 product bugs.
+Stage 12 CLOSED 2026-06-07. Manager closure decision in part-07-stage12-closure-decision.md. 18 PASS, 9 BLOCKED-infrastructure-limited, 2 cap-fix BLOCKED, 0 product bugs. Post-closure V1 MTP+Jinja follow-up passed Developer review on 2026-06-09. V2 bench completed with no product bugs. The remaining synthetic matrix expansion is stopped by Manager decision in `test-report-20260609-03-stage12-close-current.md`.
 
 ## Scope
 
@@ -36,20 +36,19 @@ execution results are produced by the implementation log.
 | Stage 12 QA planning | UNBLOCKED 2026-06-07 |
 | Stage 12 stress execution | UNBLOCKED 2026-06-07 |
 | Stage 12 benchmark execution | UNBLOCKED 2026-06-07 |
-| Stage 12 closure | UNBLOCKED 2026-06-07 |
+| Stage 12 closure | CLOSED, follow-up stopped 2026-06-09 |
 
 ## Manager plan-change decisions
 
 - 2026-06-07: D11 (Stage 12 closure PASS). 9 time-budget rows reclassified as BLOCKED-infrastructure-limited; MTP rows held out per cap-fix closure part-29. Follow-up: schedule Stage 12 follow-up session to re-run 9 time-budget rows + 2 MTP rows.
+- 2026-06-09: D12 (V1 MTP+Jinja follow-up PASS). test-report-20260609-01 and its Developer review close V1 with 36 PASS, 2 BLOCKED-infra, 0 FAIL, 0 product bugs. Open V2, V3, and non-MTP follow-up sessions from part-21a.
+- 2026-06-09: D13 (V2 bench complete). test-report-20260609-02-V2-bench records 14 PASS, 2 BLOCKED-fixture, 0 FAIL, 0 product bugs. Continue V2 stress and long-run rows before full V2 review.
+- 2026-06-09: D14 (stop synthetic follow-up). User directed Manager to stop Stage 12 tests and move to Stage 13. test-report-20260609-03-stage12-close-current records stopped processes, accepted progress, and the handoff. Do not resume V2/V3/non-MTP synthetic sessions before Stage 13.
 
 ## Handoff
 
-The next gate is Architect implementation review of
-[part-03-implementation.md](cache-handling-phase12-implementation/part-03-implementation.md),
-[part-04-implementation-evidence.md](cache-handling-phase12-implementation/part-04-implementation-evidence.md),
-and [part-05-fixture-requirements.md](cache-handling-phase12-implementation/part-05-fixture-requirements.md).
-After Architect implementation review passes, the next owner is QA
-test planning, which reads part-05 and the build-impl log at
-`._design_docs/.test_reports/build-impl-20260607-01.log`.
-No code, tests, commits, PR text, or reviewer responses are authorized
-by this log beyond the implementation already recorded in part-03.
+Next gate: Stage 13 endpoint compatibility corrections.
+
+Stage 13 testing should use real public endpoints as production clients use
+them. Stage 12 synthetic follow-up gaps are historical evidence only and do
+not gate Stage 13.
