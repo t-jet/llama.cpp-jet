@@ -217,7 +217,7 @@ The implementation is staged into ten incremental phases. Each phase produces ru
 - Add metadata field to `server_task` structure
 - Thread metadata from HTTP layer through task queue to `server_context`
 - Add fallback diagnostics when metadata is absent
-- For `/completion` endpoints, attach minimal metadata or emit degraded-behavior diagnostics
+- For completion-style endpoints, including `/completion`, attach the richest safe metadata available from supported prompt shapes, or emit degraded-behavior diagnostics when only token/position fallback is possible
 
 **Exit criteria:**
 

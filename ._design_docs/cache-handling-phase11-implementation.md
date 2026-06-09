@@ -10,6 +10,9 @@ limitation) with the real two-parent merge `e0f3f868b`,
 the build-defect fix `602f3e3f0`, and the T114a lift
 `6e3aa045c`. The authoritative test report is
 [test-report-20260604-06.md](.test_reports/test-report-20260604-06.md).
+Cap-fix cycle CLOSED 2026-06-07 (T114=0.9276, T114a=0.8418 PASS).
+Manager re-closure PASS on commit 6e3aa045c (effective from the
+re-closure commit on top of dc929d62).
 Planning date: 2026-06-04
 Rework loop dates: 2026-06-04 to 2026-06-05
 Design document: [cache-handling-phase11-design.md](cache-handling-phase11-design.md)
@@ -58,6 +61,14 @@ responses.
   rejected. The closure record in
   [part-09-stage11-closure.md](cache-handling-phase11-implementation/part-09-stage11-closure.md)
   is marked INVALIDATED at the top.
+
+- 2026-06-07: D10 (cap-fix closure PASS). The Manager declared the
+  Stage 11 cap-fix cycle CLOSED on 2026-06-07 with T114=0.9276 and
+  T114a=0.8418 PASS. Stage 12 implementation planning, QA planning,
+  stress execution, benchmark execution, and closure are UNBLOCKED.
+  test-stage10-policy-lru is a pre-existing semantic bug out of cap-fix
+  scope, tracked separately as a new stage to be scheduled after
+  Stage 12 closure.
 
 ## Manager decisions log
 
@@ -108,6 +119,11 @@ section when Step 3 opens.
   and the QA re-verification is in
   [part-18-qa-reverification.md](cache-handling-phase11-implementation/part-18-qa-reverification.md).
 
+- 2026-06-07: D10 (cap-fix closure PASS). Cap-fix cycle CLOSED.
+  T114/T114a both PASS. test-stage10-policy-lru: pre-existing
+  semantic bug, out of scope, separate session. H53/H54: BLOCKED
+  on missing MTP-capable GGUF, unchanged.
+
 ## Contents
 
 - [Part 1: Implementation plan, prerequisites, and gates](cache-handling-phase11-implementation/part-01-implementation-plan.md)
@@ -126,6 +142,7 @@ section when Step 3 opens.
 - [Test report 2026-06-04-04 (initial execution)](.test_reports/test-report-20260604-04.md)
 - [Test report 2026-06-04-05 (BLOCKED, superseded)](.test_reports/test-report-20260604-05.md)
 - [Test report 2026-06-04-06 (PASS, authoritative)](.test_reports/test-report-20260604-06.md)
+- [Part 29: Cap-fix closure decision (2026-06-07)](cache-handling-phase11-implementation/part-29-cap-fix-closure-decision.md)
 
 ## Current gate
 

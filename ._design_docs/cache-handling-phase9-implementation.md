@@ -28,6 +28,8 @@ Part 16 records the product fix for checkpoint restore apply flags and restored
 token accounting. Part 17 records the Architect bug-fix review PASS. Part 18
 reviews QA report 20260602-01 and closes the public Q102/Q103 checkpoint
 restore evidence. Part 19 records the Manager closure decision.
+Part 20 records the 2026-06-09 degraded/non-native boundary fallback fix
+found during Stage 12 B02.
 
 ## Contents
 
@@ -50,6 +52,7 @@ restore evidence. Part 19 records the Manager closure decision.
 - [Part 17: Public checkpoint restore fix review 2026-06-02](cache-handling-phase9-implementation/part-17-public-checkpoint-restore-fix-review-20260602.md)
 - [Part 18: Test-results review 2026-06-02](cache-handling-phase9-implementation/part-18-test-results-review-20260602.md)
 - [Part 19: Manager closure decision 2026-06-02](cache-handling-phase9-implementation/part-19-manager-closure-decision-20260602.md)
+- [Part 20: Degraded boundary fallback 2026-06-09](cache-handling-phase9-implementation/part-20-degraded-boundary-fallback-20260609.md)
 
 ## Current gate
 
@@ -125,3 +128,9 @@ is Manager for Stage 9 closure review or closure decision.
 
 Part 19 records the Manager closure decision. Stage 9 is closed. Next owner is
 Manager or user for the next stage intake.
+
+Part 20 records a post-closure correction found by Stage 12 B02. Native
+checkpoint boundary mismatches still reject admission. Non-native or degraded
+metadata without a matching checkpoint span can use token-span checksum
+fallback, and the final B02 V1 rerun records checkpoint admissions, hits, and
+restores with zero admission failures.

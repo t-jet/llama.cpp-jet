@@ -30,7 +30,7 @@ Condition:
 - Architecture, design, implementation-plan, implementation evidence, or re-review deliverable changes gate state or closes earlier finding; or current entry docs carry stale limitation, owner, or handoff wording
 
 Action:
-- Check live entry docs, active fix reports, correction-evidence status lines, `document-index.md` summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Distinguish historical quoted findings from current contradictions. Keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate has advanced or while open finding remains.
+- Check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff sections, `document-index.md` summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Distinguish historical quoted findings from current contradictions. Keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate has advanced or while open finding remains.
 
 ## Improvement: Misconfigured-probe diagnosis vs product bug
 
@@ -46,7 +46,7 @@ Condition:
 - Adding or updating review part files in doc tree that is untracked or only partly tracked by git
 
 Action:
-- Track paths edited during task. Patch new review files, entry docs, and index rows as separate steps when tree is dirty or untracked. Verify contents directly. Separate task-local edits from pre-existing dirty paths. Report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited" or "not touched", run `git status -- <path>` and read current contents to confirm pre-existing uncommitted changes; report as pre-existing rather than own work.
+- Track paths edited during task. Patch new review files, entry docs, and index rows as separate steps when tree is dirty or untracked. Verify contents directly with targeted reads, `rg`, line counts, and raw byte checks when `git diff` cannot show untracked file content. Separate task-local edits from pre-existing dirty paths. Report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited" or "not touched", run `git status -- <path>` and read current contents to confirm pre-existing uncommitted changes; report as pre-existing rather than own work.
 
 ## Improvement: CRLF trailing whitespace on Windows tool-inserted content
 
@@ -305,6 +305,14 @@ Condition:
 Action:
 - Trace actual call site flow: target `llama_decode` in chunked loop, then `common_speculative_process(spec, batch_view)`, then draft `llama_decode` in `common/speculative.cpp`. Verify draft per-call `batch.n_tokens` is same `batch_view` target just decoded (chunked-loop chunk size, not separate formula). Record non-blocking finding when design's stated per-call bound holds only for `n_parallel = 1` but not `n_parallel > 1`. Verify cap-bump formula includes `min(n_batch, ...)` clamp that target `server_n_outputs_max` applies at `tools/server/server-context.cpp:204`. Don't accept "symmetric formula" wording without checking clamp is present.
 
+## Improvement: Latest follow-up state before stage baseline PASS
+
+Condition:
+- Reviewing a new stage design that names a prior stage as CLOSED, while the prior implementation tree has later follow-up parts, partial reports, or Manager closure records after the cited closure commit
+
+Action:
+- Read latest follow-up parts and test reports, then decide whether they are terminal, open, or unrelated before passing the prerequisite. Flag stale baseline as blocking when the new stage covers behavior changed or still pending in the follow-up. Don't rely on the original closure commit alone when newer durable records exist.
+
 ## Improvement: Per-context cap vs per-sequence cap ambiguity in chunked-decode rules
 
 Condition:
@@ -313,6 +321,22 @@ Condition:
 Action:
 - Verify whether cap is per-context (`n_outputs_max <= cparams.n_outputs_max` assertion at `src/llama-context.cpp:2152` checks per-context total) or per-sequence. Correct per-chunk bound is `min(n_batch, cparams.n_outputs_max)` (per-context cap). Per-sequence share `cparams.n_outputs_max / n_parallel` is implicit in per-context bound. Record non-blocking finding when design "per-sequence cap" wording could be misread as different chunking rule. Don't accept per-sequence wording as equivalent to per-context bound without checking loop actual behavior.
 
+## Improvement: B01 exact-blob threshold vs non-destructive hybrid cache
+
+Condition:
+- Reviewing B01 (S12-B01) exact-blob hit-rate bench FAIL where QA says k6 threshold `rate>=0.60` is unattainable for a probe shorter than the warmed slot, hybrid cache reports LCP f_keep < 0.5, timings.cache_n stays 0, and the k6 metric is wired to timings.cache_n > 0 boolean
+
+Action:
+- Confirm the test framework false-positive by reading k6-results.json (cache_hit_rate value lines), server.err.log (look for "try_restore - no exact match found" + "prefix X of Y" + graph_reused monotonic counter), and bench-cache-correctness.js (threshold definition is hard-coded `rate>=0.60` against `body.timings.cache_n`). Don't open a product bug-fix loop. Recommend re-classify to BLOCKED-test-framework-threshold-incompatible and ask Dev to lower threshold or add prefix_match_rate metric. Cite graph_reused counter as the meaningful hybrid-cache correctness signal when timings.cache_n stays 0. Don't accept "k6 threshold 0.60" as a product gate when non-destructive hybrid restore is the primary path.
+
+## Improvement: B02 driver MtpVariant not honored
+
+Condition:
+- Reviewing B02 (S12-B02) checkpoint hit-rate bench FAIL where driver declares `[int] $MtpVariant = 0` but only consumes it via `Resolve-MtpJinjaPath`, never switches fixtures, never adds `--spec-type draft-mtp`, and server log shows "common_speculative_init: no implementations specified for speculative decoding"
+
+Action:
+- Confirm the driver bug with targeted grep over the bench ps1 for `MtpVariant` (should return 2 hits: param decl + Resolve-MtpJinjaPath only, no fixture branch). Recommend re-classify to BLOCKED-driver-bug and ask Dev to add `if ($MtpVariant -eq 1) { $LargerModel = ...Qwen3.5-4B-MTP...; $flags += @('--spec-type','draft-mtp') }` plus remove `--model-draft` for V1 path. Don't classify as product bug; cache works (14-token restore + hits) but on V2 fixtures. Cite part-21a sec 4 "per-driver variant logic is not permitted" and part-19 sec 7.1 inventory gap.
+
 ## Improvement: Verdict line at top overrides MD041 linter warning
 
 Condition:
@@ -320,3 +344,11 @@ Condition:
 
 Action:
 - Place verdict line at very top of file as first line, before title heading and all sections; task instruction takes precedence over linter warning. Expect linter warning as expected behavior, not defect. Don't restructure file to put heading first just to satisfy linter; that buries verdict and violates task contract.
+
+## Improvement: Closure sweep instruction references missing index row
+
+Condition:
+- Manager or user closure sweep task instructs updating a specific row in `document-index.md` for a phase entry doc (implementation or design), but the row does not exist in the implementation or design table
+
+Action:
+- Verify the row exists with a targeted search (`Select-String` or `Get-Content` line scan) before applying the append. If the row is missing, do not silently invent a new row from template; do not silently skip the index update. Do the appends on the entry docs that do exist, update the rows that do exist, and flag the missing row in the handoff so Manager or follow-up agent can author the index row separately. Verify the pattern in nearby rows (column count, cell content scope, description style) so the follow-up author has concrete template. Don't claim all instructed edits are complete when one of the cells is missing its row.

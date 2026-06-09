@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-06-02
+Last updated: 2026-06-07
 Status: Active reusable integration runner
 
 ## Scope
@@ -218,6 +218,65 @@ Runs long duration stress scenarios separately:
 - S04 long-running stability
 
 Run stress tests only when the session explicitly includes stress coverage.
+
+## Stage 12 stress and benchmark scripts
+
+Stage 12 stress, benchmark, and long-run drivers live in
+`stress/`, `bench/`, and `longrun/` subdirectories under this test
+scripts directory. The drivers write per-run evidence into
+`._design_docs/.test_reports/stress-s12-<id>-<timestamp>/`,
+`bench-s12-<id>-<timestamp>/`, or `longrun-s12-<id>-<timestamp>/`.
+Each evidence dir has a template README that documents its layout.
+
+Evidence helpers live in `lib/`:
+
+- `Write-StressEvidence.ps1` writes per-scenario stress summary
+- `Write-BenchEvidence.ps1` writes per-row benchmark summary
+- `Write-LongrunEvidence.ps1` writes per-run long-run summary
+- `Read-BaselineJson.ps1` reads baseline.json into a hashtable
+- `Write-TuningReport.ps1` writes the seven-section tuning skeleton
+
+`apply_config_matrix.ps1` reads a JSON matrix file and resolves it
+into a run-config JSON that benchmark and stress drivers can consume.
+The matrix dimensions are the ten from design part-02: cache mode,
+hot budget, cold path, slot count, model size, context length, draft
+presence, workload profile, prompt mix, and run length.
+
+Stage 12 stress drivers (`stress/stress_s12_s01..s08_*.ps1`):
+
+- S12-S01 budget exhaustion
+- S12-S02 concurrent multi-slot (supersedes stress_tests.ps1 S02 for Stage 12)
+- S12-S03 large branch forests
+- S12-S04 prompt storms
+- S12-S05 mixed workload profiles
+- S12-S06 cold queue pressure
+- S12-S07 protected-root pressure
+- S12-S08 integrity failure under load
+
+Stage 12 benchmark drivers (`bench/bench_s12_b01..b08_*.ps1`):
+
+- S12-B01 exact-blob hit rate (k6 path)
+- S12-B02 checkpoint hit rate (chat-completions path; marked Jinja enables `emit_cache_boundaries`)
+- S12-B03 cold transition frequency
+- S12-B04 end-to-end token throughput
+- S12-B05 restore latency
+- S12-B06 prompt-storm efficiency (k6 path)
+- S12-B07 mixed-profile comparison
+- S12-B08 large-forest lookup cost
+
+Stage 12 long-run drivers (`longrun/longrun_s12_l01..l03_*.ps1`):
+
+- S12-L01 production-like hybrid 6 hour (60 s sampler, 30 min snapshot)
+- S12-L02 reproducibility 30 minute (30 s sampler, 10 min snapshot)
+- S12-L03 legacy control 2 hour (60 s sampler, 30 min snapshot)
+
+All drivers use `--DryRun` to print the planned flags, ports, and
+fixture list without starting a server. They emit STUB evidence and
+record `Verdict: BLOCKED` when a model fixture or required tool
+(k6, focused fault-injection binary) is missing. STUB rows are not
+counted as PASS for closure. Per design part-04, draft and MTP rows
+are out of required scope (cap-fix closure PASS 2026-06-07;
+Manager plan keeps draft and MTP rows out of scope).
 
 ## Clean build requirement
 

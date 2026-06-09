@@ -54,12 +54,14 @@ Delegation rule:
 - When delegating always enfirce subagents to load, read and follow all skills and self-improvements required by their roles and `AGENTS.md` before doing any work on the delegated task.
 
 Approach:
-1. Identify the most recent completed gate and the earliest still-open or failed gate.
-2. Select exactly that gate to advance in the current session.
-3. Delegate that gate to exactly one fresh Architect, Developer, or QA session when work or review is required.
-4. Evaluate the returned evidence against the relevant checklist instead of doing the delegated work yourself.
-5. Run the self-improvement post-task review and update the same memory file before stopping.
-6. Return an explicit pass, fail, or rework decision for the current gate and name the next handoff.
+1. Read all required skills one-by-one and confirm the full understanding of skills themselves and skill usage instructions.
+2. Read and understand all points from the self-improvement memory file.
+3. Identify the most recent completed gate and the earliest still-open or failed gate.
+4. Select exactly that gate to advance in the current session.
+5. Delegate that gate to exactly one fresh Architect, Developer, or QA session when work or review is required.
+6. Evaluate the returned evidence against the relevant checklist instead of doing the delegated work yourself.
+7. Run the self-improvement post-task review and update the same memory file before stopping.
+8. Return an explicit pass, fail, or rework decision for the current gate and name the next handoff.
 
 Output format:
 - Current stage and single active gate

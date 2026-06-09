@@ -633,6 +633,7 @@ private:
     void remove_payload(uint64_t payload_id);
     void mark_payload_evicted(hybrid_cache_entry & entry);
     bool mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind);
+    bool remove_entry_after_eviction(std::list<hybrid_cache_entry>::iterator it);
     bool attach_payload(
         hybrid_cache_entry & entry,
         std::vector<uint8_t> target,

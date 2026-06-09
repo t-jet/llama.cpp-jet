@@ -446,10 +446,6 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
 }
 
 void hybrid_cache_controller::process_completions() {
-    if (!io_worker.is_running()) {
-        return;
-    }
-
     std::vector<io_completion_result> results = io_worker.drain_results();
     for (auto & result : results) {
         if (result.is_demotion) {
@@ -935,13 +931,13 @@ size_t hybrid_cache_controller::n_tokens() const {
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id) {
-    debug_add_entry_for_tests(std::move(tokens), protected_root, namespace_id, 0, 0);
+    debug_add_entry_for_tests(std::move(tokens), protected_root, namespace_id, 1, 0);
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes) {
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
-    entry.namespace_id = namespace_id.empty() ? compute_namespace_id() : namespace_id;
+    entry.namespace_id = namespace_id.empty() ? compute_namespace_id(prepared_prompt_metadata{}) : namespace_id;
     entry.protected_root = protected_root;
     assign_entry_identity(entry);
     entry.mark_used(next_use_sequence());
@@ -1061,7 +1057,7 @@ bool hybrid_cache_controller::debug_refresh_entry_for_tests(
         const server_tokens & tokens,
         bool protected_root,
         const std::string & namespace_id) {
-    const std::string effective_namespace_id = namespace_id.empty() ? compute_namespace_id() : namespace_id;
+    const std::string effective_namespace_id = namespace_id.empty() ? compute_namespace_id(prepared_prompt_metadata{}) : namespace_id;
     auto it = find_exact_match(tokens, effective_namespace_id);
     if (it == entries.end()) {
         return false;
@@ -1423,6 +1419,10 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_best_match
     const server_tokens & tokens_new,
     const prepared_prompt_metadata & metadata)
 {
+    if (tokens_new.empty()) {
+        return entries.end();
+    }
+
     // Phase 2: Optimized prefix matching using prefix index
     // O(m) complexity where m = number of candidates << n (total entries)
     
@@ -1603,8 +1603,16 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
             return true;
         }
 
-        // Immediate eviction: keep branch metadata and token metadata so Stage 8
-        // can validate and re-materialize the node later.
+        // Immediate eviction: remove the entry when branch topology allows it.
+        // If removal is unsafe, keep branch metadata so Stage 8 can validate
+        // and re-materialize the node later.
+        if (remove_entry_after_eviction(it)) {
+            n_evictions++;
+            n_payload_evictions++;
+            n_payload_eviction_bytes += payload_bytes;
+            return true;
+        }
+
         remove_from_lru_index(it);
         remove_from_prefix_index(it);
         n_evictions++;
@@ -1639,7 +1647,10 @@ bool hybrid_cache_controller::debug_evict_first_payload_for_tests() {
     if (entries.empty()) {
         return false;
     }
+    const size_t payload_bytes = entries.front().resident_payload_bytes();
     mark_payload_evicted(entries.front());
+    n_payload_evictions++;
+    n_payload_eviction_bytes += payload_bytes;
     return true;
 }
 
@@ -1647,7 +1658,10 @@ bool hybrid_cache_controller::debug_evict_last_payload_for_tests() {
     if (entries.empty()) {
         return false;
     }
+    const size_t payload_bytes = entries.back().resident_payload_bytes();
     mark_payload_evicted(entries.back());
+    n_payload_evictions++;
+    n_payload_eviction_bytes += payload_bytes;
     return true;
 }
 
@@ -2531,6 +2545,19 @@ void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
     payload_descriptors.erase(payload_id);
 }
 
+bool hybrid_cache_controller::remove_entry_after_eviction(std::list<hybrid_cache_entry>::iterator it) {
+    if (it == entries.end()) {
+        return false;
+    }
+
+    remove_from_lru_index(it);
+    remove_from_prefix_index(it);
+    remove_payload(it->payload_id);
+    remove_payload(it->checkpoint_payload_id);
+    entries.erase(it);
+    return true;
+}
+
 bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind) {
     const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
     if (payload_id == 0) {
@@ -2768,6 +2795,19 @@ bool hybrid_cache_controller::validate_checkpoint_descriptor_metadata(
 
     const prepared_prompt_metadata * source_metadata = metadata ? metadata : &entry.metadata;
     if (source_metadata && source_metadata->has_boundaries()) {
+        if (!descriptor.checkpoint_boundary_required) {
+            if (source_metadata->degraded() || !source_metadata->boundaries_native) {
+                const uint64_t span_checksum = cache_token_span_checksum(
+                    entry.tokens,
+                    static_cast<size_t>(descriptor.token_span_start),
+                    static_cast<size_t>(descriptor.token_span_end));
+                if (descriptor.boundary_checksum != 0 && descriptor.boundary_checksum != span_checksum) {
+                    return fail("checkpoint token checksum mismatch");
+                }
+                return true;
+            }
+            return fail("missing checkpoint boundary metadata");
+        }
         if (!descriptor.checkpoint_boundary_required || descriptor.boundary_id.empty() ||
             descriptor.boundary_checksum == 0 || descriptor.checkpoint_boundary_kind < 0) {
             return fail("missing checkpoint boundary metadata");
@@ -2830,6 +2870,12 @@ bool hybrid_cache_controller::attach_checkpoint_payload(
     auto new_descriptor_it = payload_descriptors.find(new_checkpoint_payload_id);
     if (new_descriptor_it != payload_descriptors.end()) {
         payload_descriptor & descriptor = new_descriptor_it->second;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (ctx_tgt == nullptr &&
+            descriptor.workload_profile == cache_workload_profile_name(cache_workload_profile::unsupported)) {
+            descriptor.workload_profile = cache_workload_profile_name(cache_workload_profile::checkpoint_dependent);
+        }
+#endif
         if (checkpoint) {
             descriptor.token_span_start = 0;
             descriptor.token_span_end = checkpoint->n_tokens;
@@ -2853,7 +2899,21 @@ bool hybrid_cache_controller::attach_checkpoint_payload(
                 break;
             }
             if (!attached_boundary) {
-                descriptor.checkpoint_boundary_required = true;
+                const bool allow_degraded_fallback =
+                    source_metadata->degraded() ||
+                    !source_metadata->boundaries_native;
+                if (allow_degraded_fallback) {
+                    descriptor.checkpoint_boundary_required = false;
+                    descriptor.checkpoint_boundary_native = false;
+                    descriptor.checkpoint_boundary_kind = -1;
+                    descriptor.boundary_id.clear();
+                    descriptor.boundary_checksum = cache_token_span_checksum(
+                        entry.tokens,
+                        static_cast<size_t>(descriptor.token_span_start),
+                        static_cast<size_t>(descriptor.token_span_end));
+                } else {
+                    descriptor.checkpoint_boundary_required = true;
+                }
             }
         } else {
             descriptor.checkpoint_boundary_required = false;
@@ -3253,9 +3313,9 @@ std::string cache_compatibility_key::compute() const {
     
     // Multimodal configuration
     ss << "|mm.proj=" << mm_projector_id;
+    ss << "|mm.dynamic=" << (mm_use_dynamic_tokens ? "1" : "0");
     if (mm_patch_size > 0) {
         ss << "|mm.patch=" << mm_patch_size;
-        ss << "|mm.dynamic=" << (mm_use_dynamic_tokens ? "1" : "0");
     }
     
     // Context configuration

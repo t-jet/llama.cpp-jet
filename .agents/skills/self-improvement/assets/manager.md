@@ -119,3 +119,32 @@ Condition:
 
 Action:
 - Include explicit falsification steps in investigation prompt: read relevant branch or PR with `git rev-parse`, `git merge-base --is-ancestor`, or `git show` and record verdict. Don't route to fix path until hypothesis is confirmed. Don't silently absorb hypothesis as truth and design fix on top of it. Map actual cause explicitly in investigation report even if it contradicts user. Surface contradiction to user in gate handoff so they can correct course before implementation work begins. Don't let Developer waste fix loop on falsified hypothesis. Require investigation report to include `Hypothesis verdict` section (CONFIRMED / FALSIFIED / PARTIAL) with evidence citations.
+
+## Improvement: per-row sub-session delegation for long-running sequential driver test execution
+
+Condition:
+
+- Active gate is test execution and a sequential driver (e.g., v3 kickoff-v3-sequential-stress-longrun.ps1) is iterating through long-running test rows (cap > 30 min) for a Stage N follow-up, and many rows still pending verdict capture
+
+Action:
+
+- Do delegate exactly one QA sub-session per Manager turn; do not attempt to drive the entire test execution to completion in a single QA sub-session
+- Do prefer option (b) (poll now and hand off to next sub-session) when cap-exit is more than ~30 min away; reserve option (a) (block and wait for cap-exit) for short cap-exit rows under ~30 min so the QA sub-session does not consume a long blocking wait
+- Do parse cap=NNNs from the side log start line to derive cap-exit ETA rather than hard-coding defaults; record both cap value and computed ETA in the QA prompt
+- Do evaluate each sub-session's return against the gate acceptance checklist (fresh session report appended, constraints honored, evidence captured when present) and decide pass/fail/rework before delegating the next sub-session
+- Do trust the most recent sub-session's per-row verdict over the Section 3 table state if they disagree; sub-session reclassifications can lag the table during long-running test execution
+- Don't edit the test report yourself; the QA sub-session is the sole writer of the report file
+- Don't re-do the polling work; the sub-session owns the v3 driver state and side log parse
+
+## Improvement: longrun 1000 threshold does not apply structurally
+
+Condition:
+
+- QA sub-session is reclassifying a V1 longrun row (L01, L02, L03) using the Section 1 stress-row rule that requires hits+misses >= 1000
+
+Action:
+
+- Do remind the QA in the prompt that the 1000 hits+misses threshold is sized for 30-min stress rows (S01..S08) with high request rates; a 2-hour longrun row with structurally lower request rate will not meet the 1000 threshold and the threshold should not block PASS classification
+- Do require the QA to apply the intent of the stress-row rule (clean cache counters: evictions >= 0, restore_failures == 0, descriptor_validation_failures == 0, Stub data flag = MEASURED) for longrun rows rather than the literal 1000 number
+- Do accept PASS reclassification for a longrun row with clean counters and Stub data flag MEASURED even if hits+misses is well below 1000; record the actual hits+misses value in the sub-session entry for the audit trail
+- Don't reject a PASS reclassification for a longrun row purely on threshold; the threshold mismatch is structural, not a product defect

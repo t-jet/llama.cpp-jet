@@ -188,6 +188,9 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 11: Stage 9 checkpoint integration and workload profiles](./cache-handling-test-plan/part-11-stage9-checkpoint-integration.md)
 - [Part 12: Stage 10 observability, security, and hardening](./cache-handling-test-plan/part-12-stage10-observability-security-hardening.md)
 - [Part 13: T114 split: combined rate and product-only rate](./cache-handling-test-plan/part-13-t114-product-only-coverage.md)
+- [Part 18: Stage 12 stress and benchmarks](./cache-handling-test-plan/part-18-stage12-stress-benchmarks.md)
+- [Part 18a: Stage 12 operational details](./cache-handling-test-plan/part-18a-stage12-operational.md)
+- [Part 19: Stage 12 test automation](./cache-handling-test-plan/part-19-stage12-test-automation.md)
 
 ## T114 split (Stage 11 onward)
 

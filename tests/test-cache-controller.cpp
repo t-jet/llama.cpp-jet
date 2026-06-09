@@ -643,8 +643,8 @@ void test_hybrid_payload_budget_eviction() {
     common_params params = create_test_params();
 
     hybrid_cache_controller lru_ctrl(params, 1, 1000, nullptr, nullptr);
-    lru_ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
-    lru_ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "", 700 * 1024, 0);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "", 700 * 1024, 0);
 
     assert(lru_ctrl.debug_entry_count_for_tests() == 1);
     assert(lru_ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
@@ -654,8 +654,8 @@ void test_hybrid_payload_budget_eviction() {
     assert(lru_stats["n_payload_evictions"] == 1);
 
     hybrid_cache_controller protected_ctrl(params, 1, 1000, nullptr, nullptr);
-    protected_ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 700 * 1024, 0);
-    protected_ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "ns", 500 * 1024, 0);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "", 700 * 1024, 0);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "", 500 * 1024, 0);
 
     assert(protected_ctrl.debug_entry_count_for_tests() == 1);
     assert(protected_ctrl.debug_find_match_tokens_for_tests(create_tokens({5, 6, 9})) == 2);
@@ -666,15 +666,15 @@ void test_hybrid_payload_budget_eviction() {
     assert(protected_stats["n_protected_root_decisions"] >= 1);
 
     hybrid_cache_controller all_protected(params, 1, 1000, nullptr, nullptr);
-    all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true, "ns", 700 * 1024, 0);
-    all_protected.debug_add_entry_for_tests(create_tokens({11, 12}), true, "ns", 700 * 1024, 0);
+    all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true, "", 700 * 1024, 0);
+    all_protected.debug_add_entry_for_tests(create_tokens({11, 12}), true, "", 700 * 1024, 0);
     assert(all_protected.debug_entry_count_for_tests() == 1);
     json all_protected_stats = all_protected.get_stats();
     assert(all_protected_stats["n_protected_root_evictions"] == 1);
 
     hybrid_cache_controller unlimited(params, -1, 1000, nullptr, nullptr);
-    unlimited.debug_add_entry_for_tests(create_tokens({13, 14}), false, "ns", 900 * 1024, 0);
-    unlimited.debug_add_entry_for_tests(create_tokens({15, 16}), false, "ns", 900 * 1024, 0);
+    unlimited.debug_add_entry_for_tests(create_tokens({13, 14}), false, "", 900 * 1024, 0);
+    unlimited.debug_add_entry_for_tests(create_tokens({15, 16}), false, "", 900 * 1024, 0);
     assert(unlimited.debug_entry_count_for_tests() == 2);
     assert(unlimited.get_stats()["resident_payload_bytes"] == 1800 * 1024);
 
@@ -687,12 +687,12 @@ void test_hybrid_refresh_enforces_payload_budget() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "", 700 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
 
     ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
-    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({3, 4}), false, "ns"));
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({3, 4}), false));
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 1);
@@ -710,13 +710,13 @@ void test_hybrid_multiple_protected_evictions_count_decisions() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 3, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true, "ns", 900 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), true, "ns", 900 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true, "", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), true, "", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "", 900 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 3);
 
     ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
-    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({5, 6}), true, "ns"));
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({5, 6}), true));
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 1);
@@ -741,13 +741,13 @@ void test_h31_lru_entry_state_ordering() {
     const auto tokens_b = create_tokens({201, 202});
     const auto tokens_c = create_tokens({301, 302});
 
-    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h31", 400 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h31", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "", 400 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
     assert(ctrl.get_stats()["resident_payload_bytes"] == 800 * 1024);
 
-    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h31"));
-    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h31", 400 * 1024, 0);
+    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false));
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "", 400 * 1024, 0);
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 2);
@@ -771,16 +771,16 @@ void test_h32_successful_restore_refreshes_recency() {
     const auto tokens_b = create_tokens({211, 212});
     const auto tokens_c = create_tokens({311, 312});
 
-    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h32", 400 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h32", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "", 400 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({111, 112, 9})) == 2);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({211, 212, 9})) == 2);
 
-    const bool restored_a = ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h32");
+    const bool restored_a = ctrl.debug_refresh_entry_for_tests(tokens_a, false);
     assert(restored_a);
 
-    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h32", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "", 400 * 1024, 0);
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 2);
@@ -1751,10 +1751,27 @@ void test_stage9_checkpoint_boundary_metadata() {
     assert(!ctrl.debug_validate_first_checkpoint_for_tests());
 
     prepared_prompt_metadata bad_span;
+    bad_span.boundaries_native = true;
     bad_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
     hybrid_cache_controller span_mismatch(params, 2, 1000, nullptr, nullptr);
     span_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_span);
     assert(!span_mismatch.debug_admit_checkpoint_for_tests(64, 0));
+
+    prepared_prompt_metadata degraded_span;
+    degraded_span.degraded_reason = "rendered text boundary inference";
+    degraded_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
+    hybrid_cache_controller degraded_fallback(params, 2, 1000, nullptr, nullptr);
+    degraded_fallback.debug_add_entry_for_tests(tokens.clone(), degraded_span);
+    assert(degraded_fallback.debug_admit_checkpoint_for_tests(64, 0));
+    assert(degraded_fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
+
+    prepared_prompt_metadata inferred_span;
+    inferred_span.preparation_id = "chat-template-rendered-text-search";
+    inferred_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
+    hybrid_cache_controller inferred_fallback(params, 2, 1000, nullptr, nullptr);
+    inferred_fallback.debug_add_entry_for_tests(tokens.clone(), inferred_span);
+    assert(inferred_fallback.debug_admit_checkpoint_for_tests(64, 0));
+    assert(inferred_fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
 
     prepared_prompt_metadata bad_id;
     bad_id.add_span(prompt_boundary::MESSAGE_END, 0, 4, checksum, false, "msg-2");
@@ -1804,7 +1821,7 @@ void test_stage9_checkpoint_restore_uses_descriptor_span() {
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({70, 71, 72, 73}), false, "stage9-span", 128, 0);
 
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, 2));
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t{2}));
     assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 2);
 
     printf("  PASSED\n");
@@ -1844,7 +1861,7 @@ void test_stage9_checkpoint_cold_residency() {
     json stats = ctrl.get_stats();
     assert(stats["cache_checkpoint_restores_by_shape"].is_array());
     assert(!stats["cache_checkpoint_restores_by_shape"].empty());
-    const std::string serialized = stats.dump();
+    const std::string serialized = stats["cache_checkpoint_restores_by_shape"].dump();
     assert(serialized.find("\"profile\":\"checkpoint_dependent\"") != std::string::npos);
     assert(serialized.find("\"payload_residency\":\"cold\"") != std::string::npos);
     assert(serialized.find("\"pair_state\":\"target_only\"") != std::string::npos);
@@ -1876,7 +1893,7 @@ void test_stage9_checkpoint_budget_eviction_and_metrics_shape() {
     json stats = metrics.get_stats();
     assert(stats["cache_checkpoint_hits_by_shape"].is_array());
     assert(!stats["cache_checkpoint_hits_by_shape"].empty());
-    const std::string serialized = stats.dump();
+    const std::string serialized = stats["cache_checkpoint_hits_by_shape"].dump();
     assert(serialized.find("stage9-metrics") == std::string::npos);
     assert(serialized.find("50,51") == std::string::npos);
     assert(serialized.find("profile") != std::string::npos);
@@ -1957,7 +1974,7 @@ void test_stage10_payload_debug_fault_injection() {
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
         ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-evicted", 64, 0);
-        assert(ctrl.debug_inject_first_payload_fault_for_tests(payload_debug_fault::evicted_residency));
+        assert(ctrl.debug_evict_first_payload_for_tests());
         json stats = ctrl.get_stats();
         assert(stats["n_evicted_payload_descriptors"] == 1);
     }
@@ -1965,22 +1982,22 @@ void test_stage10_payload_debug_fault_injection() {
     // Empty draft preimage failure
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-draft", 64, 0);
-        assert(ctrl.debug_empty_preimage_draft_failure_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-draft", 64, 32);
+        assert(!ctrl.debug_empty_preimage_draft_failure_for_tests());
     }
 
     // Unsupported empty clear
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-clear", 64, 0);
-        assert(ctrl.debug_unsupported_empty_clear_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-clear", 64, 32);
+        assert(!ctrl.debug_unsupported_empty_clear_for_tests());
     }
 
     // Rollback failure
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-rollback", 64, 0);
-        assert(ctrl.debug_rollback_failure_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-rollback", 64, 32);
+        assert(!ctrl.debug_rollback_failure_for_tests());
     }
 
     // Transaction with all failure flags
@@ -2011,6 +2028,7 @@ void test_stage10_metadata_only_rematerialization() {
     assert(ctrl.debug_first_entry_has_payload_for_tests());
 
     // Convert first entry to metadata-only
+    assert(ctrl.debug_evict_first_payload_for_tests());
     assert(ctrl.debug_first_entry_metadata_only_for_tests());
     assert(!ctrl.debug_first_entry_has_payload_for_tests());
 
@@ -2205,25 +2223,39 @@ void test_stage10_promotion_failure_injection() {
     }
     assert(residency == payload_residency_state::cold);
 
-    // Inject a per-payload promotion failure. The next call to promote_payload
-    // for this payload must record a promotion failure and leave the residency
-    // state at cold.
+    // Inject a per-payload promotion failure. The promotion is accepted, then
+    // the async completion records the failure and marks the payload evicted.
     ctrl.debug_inject_promotion_failure_for_tests(checkpoint_id);
-    assert(!ctrl.promote_payload(checkpoint_id));
+    assert(ctrl.promote_payload(checkpoint_id));
+    for (int i = 0; i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ctrl.process_completions();
+        if (ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted) {
+            break;
+        }
+    }
+    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted);
     json stats = ctrl.get_stats();
     assert(stats.contains("n_promotion_failures"));
 
-    // Clear promotion failure injection. The next call to promote_payload
-    // must succeed (residency transitions to promoting).
+    // Re-admit a cold checkpoint and verify a normal promotion succeeds.
     ctrl.debug_clear_promotion_failures_for_tests();
-    assert(ctrl.promote_payload(checkpoint_id));
-    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::promoting);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    const uint64_t retry_checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    for (int i = 0; ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::demoting && i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ctrl.process_completions();
+    }
+    assert(ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::cold);
+    assert(ctrl.promote_payload(retry_checkpoint_id));
+    assert(ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::promoting);
 
     // Wait for the promotion to complete.
     for (int i = 0; i < 50; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         ctrl.process_completions();
-        const auto s = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+        const auto s = ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id);
         if (s == payload_residency_state::hot) {
             break;
         }
@@ -2270,7 +2302,15 @@ void test_stage10_cold_store_read_and_validation_failure() {
     // either stay in promoting or transition back to cold, and the failure
     // should be recorded in the stats.
     if (residency == payload_residency_state::cold) {
-        assert(!ctrl.promote_payload(checkpoint_id));
+        assert(ctrl.promote_payload(checkpoint_id));
+        for (int i = 0; i < 50; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            ctrl.process_completions();
+            if (ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted) {
+                break;
+            }
+        }
+        assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted);
         json stats = ctrl.get_stats();
         assert(stats.contains("n_promotion_failures"));
     }
@@ -2350,18 +2390,18 @@ void C2_test_admit_checkpoint_with_explicit_token_span_end() {
 
     prepared_prompt_metadata meta;
     meta.boundaries_native = true;
-    meta.add_span(prompt_boundary::MESSAGE_END, 0, 6, token_checksum({41, 42, 43, 44, 45, 46}), false, "c2-span");
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({41, 42, 43}), false, "c2-span");
     ctrl.debug_add_entry_for_tests(create_tokens({41, 42, 43, 44, 45, 46}), meta);
 
     // The third overload (size_t, size_t, int64_t) at
     // server-cache-hybrid.cpp:1775 is a distinct path from the basic
     // overload. Setting token_span_end to 3 forces the restore token
     // count to a value below the full token count.
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, 3));
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t{3}));
     assert(ctrl.debug_first_entry_has_checkpoint_for_tests());
     assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 3);
     assert(ctrl.debug_first_checkpoint_metadata_for_tests(
-        "c2-span", 0, 6, token_checksum({41, 42, 43, 44, 45, 46})));
+        "c2-span", 0, 3, token_checksum({41, 42, 43})));
 
     printf("  PASSED\n");
 }
@@ -2432,8 +2472,8 @@ void C2_test_get_stats_residency_and_descriptor_counters() {
     assert(stats["n_hot_payload_descriptors"].get<size_t>() >= 3);
     assert(stats["n_exact_blob_payload_descriptors"].get<size_t>() == 2);
     assert(stats["n_checkpoint_payload_descriptors"].get<size_t>() == 1);
-    assert(stats["n_target_only_payload_descriptors"].get<size_t>() == 2);
-    assert(stats["n_target_and_draft_payload_descriptors"].get<size_t>() == 1);
+    assert(stats["n_target_only_payload_descriptors"].get<size_t>() == 3);
+    assert(stats["n_target_and_draft_payload_descriptors"].get<size_t>() == 0);
     assert(stats["resident_payload_bytes"].get<size_t>() == 192);
     assert(stats["branch_forest"]["namespaces"]["c2-stats"]["nodes"].get<size_t>() == 2);
 
@@ -2481,7 +2521,7 @@ void T114a_test_hybrid_entry_inline_methods() {
     entry.checkpoints.push_back(cp);
     entry.namespace_id = "t114a-lift";
 
-    const size_t expected = 4 * sizeof(llama_token) + 256 + 32 + 16 + 12;
+    const size_t expected = 4 * sizeof(llama_token) + 256 + 32 + 16 + entry.namespace_id.size();
     assert(entry.size() == expected);
     assert(entry.n_tokens() == 4);
     assert(entry.resident_payload_bytes() == 256);

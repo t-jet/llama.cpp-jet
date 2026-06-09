@@ -192,6 +192,38 @@ Condition:
 Action:
 - Don't pipe `git show HEAD:path` through `Set-Content`; PowerShell can collapse or rewrite line structure. Use binary-safe restore path or direct Git/cmd redirect, then verify line counts and diff scope before continuing.
 
+
+## Improvement: Live-path dry-run echo should match the planned port
+
+Condition:
+- PowerShell driver script has DryRun block that prints plan and exits 0, AND live-path code computes per-iteration port via $portUse =  +  (or similar offset), AND DryRun block hardcoded the base port in the echo string
+
+Action:
+- Compute the same per-iteration value in the DryRun block before the echo so the printed plan matches the live run. Don't ship a dry-run echo that says port  when the live run would actually bind $Port + . Smoke-test by running pwsh -NoProfile -File <script>.ps1 -DryRun 2>&1 | Select-Object -First 5 and confirming the printed port matches the live-path arithmetic. Apply to any driver that loops over $SlotCounts, $ProfileList, or similar per-iteration offset.
+
+## Improvement: Subdir creation must live after the DryRun early-exit
+
+Condition:
+- PowerShell driver script has DryRun early-exit via if () { ...; exit 0 } AND the script creates a per-variant or per-profile subdir with New-Item -ItemType Directory BEFORE the DryRun check
+
+Action:
+- Move the subdir creation to the live path, after the DryRun block. DryRun must leave the filesystem unchanged except for the operator-visible print output. Verify with Test-Path <subdir> after pwsh -NoProfile -File <script>.ps1 -DryRun and confirm the path is absent. If a dry-run echo prints the planned subdir path, that's the right way to communicate the path; the dir itself should not exist until the live run.
+
+## Improvement: Single source of truth for runtime arguments in profile-driven drivers
+
+Condition:
+- PowerShell driver script declares per-profile $args array that hardcodes a runtime value (e.g. --model, $ModelPath), AND the live path appends the actual per-profile value via $startArgs =  + @('--model',._design_docs/.test_reports/test-report-20260607-06-fixes.md.model)
+
+Action:
+- Remove the runtime value from the per-profile $args array. Live path is the single source of truth. Per-profile $args should contain only structural flags (cache mode, parallel, cache-ram, draft model when it differs from primary). Adding the value twice means the per-profile value overrides the live value, but the per-profile value is usually wrong (hardcoded default instead of profile-specific path). Smoke-test by parsing the file and grep'ing the per-profile $args for runtime values to confirm none remain.
+
+## Improvement: Sub-hour wall-clock needs its own int parameter
+
+Condition:
+- PowerShell driver script has -DurationHours (int) parameter and the planned run is multi-hour; user later asks for a 5 min or 10 min sanity run
+
+Action:
+- Add -DurationMin (int, default 0) parameter. When $DurationMin -gt 0 use $DurationMin * 60; otherwise fall back to $DurationHours * 3600. Update the dry-run echo to print the active unit. Don't rely on -DurationHours 0 plus a magic minute parameter; the precedence rule (DurationMin > 0 first) is the simple way to disambiguate.
 ## Improvement: Keep planning-only tasks evidence-scoped
 
 Condition:
@@ -207,6 +239,22 @@ Condition:
 
 Action:
 - Check matching document-index entry and update stale status or handoff wording in same session. Don't leave index pointing to already-corrected blocker or outdated next owner.
+
+## Improvement: Export-ModuleMember errors when dot-sourcing helper scripts
+
+Condition:
+- Authoring PowerShell helper script (`lib/*.ps1`) intended to be dot-sourced by other scripts (`. $path` or `& $path` style), and the helper ends with `Export-ModuleMember -Function Name` for "documentation" purposes
+
+Action:
+- Don't add `Export-ModuleMember` to a script meant to be dot-sourced. When dot-sourced, PowerShell emits non-terminating error `Export-ModuleMember: ... can only be called from inside a module` on every invocation, and the dot-sourcing script aborts at `if ($ErrorActionPreference -eq 'Stop')` even though the export line is at the end. Remove the line; dot-sourcing exposes all functions in the caller's scope automatically. Verify by running `pwsh -File <entry-script> -DryRun` and confirming no Export-ModuleMember lines appear in the captured stderr/stdout.
+
+## Improvement: Pipeline-then-+ in PowerShell is positional arg to Where-Object
+
+Condition:
+- Writing PowerShell that combines a pipeline result with array concatenation on the same assignment, e.g. `$result = $arr | Where-Object { ... } + @('a','b')` or `$flags = $flags + @('x') | Where-Object { ... }`
+
+Action:
+- Split into separate statements when the right-hand side mixes pipeline with `+`. PowerShell parser binds the `+` as a positional argument to the pipeline's last cmdlet (typically `Where-Object`), producing `A positional parameter cannot be found that accepts argument '+'.` even when the result type makes the `+` unambiguous. Use `$filtered = $arr | Where-Object { ... }; $result = $filtered + @('a','b')` or `($arr | Where-Object { ... }) + @('a','b')` with explicit grouping. The parser-tokenize test passes in both shapes; only the runtime parameter binder catches this, so always include a `pwsh -File <script> -DryRun` round in syntax verification log.
 
 ## Improvement: pwsh -Command backslash-dollar escaping
 
@@ -271,3 +319,37 @@ Condition:
 
 Action:
 - Manually verify lexical scope of each candidate pair before applying any fix: class methods, class forwarders (`Foo::method` outside class), and same-name overloads are not true duplicates. Only `static` definitions or free functions in same scope with byte-identical bodies are true duplicates. Don't apply fix based on regex count alone; typical scan of 6800-line server file returns 7-8 candidates, of which 1-2 are real duplicates. Use 5-line-before-and-after context check to confirm scope. Use `git blame` on each copy to confirm two copies came from different parents of merge.
+
+## Improvement: Keep optional runtime failures separate from compile-blocker fixes
+
+Condition:
+- Fixing a QA-reported compile blocker and an optional post-build binary run exposes a different runtime assertion or behavior failure outside the reported blocker
+
+Action:
+- Do document the runtime failure with exact file, line, command, and exit code, then stop unless the user authorized broader runtime triage. Don't keep exploratory implementation changes that are not needed for the compile fix; revert them before handoff so the final diff stays scoped to the reported blocker.
+
+## Improvement: Runtime blocker authorization can expose cascades
+
+Condition:
+- User explicitly opens a correction session for a runtime assertion found after a compile-blocker fix and asks to rerun the focused binary
+
+Action:
+- Continue through later assertions from the same focused binary until it passes or a new blocker needs escalation. Classify each later assertion as stale test setup, test-helper drift, or product behavior before editing; keep the fix report updated with the broader root-cause chain and final pass evidence.
+
+## Improvement: Read-only blocker triage should separate fixture, driver, route, and prompt-shape causes
+
+Condition:
+- User asks for root cause of a benchmark blocker and names several possible causes, while also saying not to edit files
+
+Action:
+- Prove or rule out each named cause with direct evidence from report files, captured driver/server flags, prompt body, fixture/template contents, and the exact production validation branch. Don't stop at the report's verdict text; trace the failure string to code and compare the runtime prompt shape to the metadata contract before classifying as test-framework, fixture, driver, or product bug.
+
+
+
+## Improvement: Multi-config generator junction preserves original .pdb path
+
+Condition:
+- CMake multi-config generator (Visual Studio) reconfigure changes CMAKE_BUILD_TYPE or default config in a build directory that already has outputs from a different config, and the new config has no real directory yet
+
+Action:
+- Verify whether `build-cov/bin/<NewConfig>` is a real directory or a Windows reparse point (junction) to `build-cov/bin/<OldConfig>` before declaring reconfigure successful. Use `fsutil reparsepoint query <path>`. If junction, the linker's .pdb embeds the resolved path (OldConfig), not the requested NewConfig, and OpenCppCoverage / similar PDB readers will skip the module because the script's --modules pattern (NewConfig) does not match the .pdb's embedded path (OldConfig). Verified 2026-06-07: removing the junction with `cmd /c rmdir` and creating a real directory, then re-linking the test binaries (full link, not incremental, since the previous .exe was at the junction target), produces a 12674-byte .cov with the Release pattern vs 37 bytes (header only) with the junction. Don't try to copy the binaries from OldConfig to NewConfig; the .pdb's embedded module path is from the link invocation, not the file location. When the user reconfigure command uses a different config than the original, ask before doing destructive junction removal; junction removal + re-link is in-scope for "fix coverage config" but destructive of the original output layout.

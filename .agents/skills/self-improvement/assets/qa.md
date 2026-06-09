@@ -313,3 +313,29 @@ Action:
 - Don't assume build directory contains all 9 focused test binaries. Check `Get-ChildItem <build>\bin\<Config>\test-*.exe` before running coverage script and classify any missing binary as setup gap, not coverage failure.
 - Record in test report's coverage section exactly which binaries were present and which were SKIPPED by script, and whether HTTP probe was skipped (model missing or `-SkipServerProbe`). Don't hide setup gap behind generic BLOCKED verdict.
 - Separate per-binary coverage gap (missing `.exe` files) from Release-without-`/Zi` coverage gap; they are independent setup defects and each needs own Developer handoff if both are present.
+
+## Improvement: derive in-flight ETA from cap=NNNs in side log, not from hard-coded default
+
+Condition:
+- QA sub-session polls a v3 sequential stress/longrun row that is IN-FLIGHT and the polling block computes ETA cap exit as `start_ts.AddSeconds(<hard-coded default>)` (e.g., 1805) when the side log line for the row already records the authoritative cap, e.g. `start S12-MTP-S01-V1-Jmarked port=8601 cap=2100s`
+
+Action:
+- Don't hard-code the cap seconds. Parse `cap=(\d+)s` from the latest `start <row>` line in the side log and compute `start_ts + cap_sec` for ETA. Hard-coded defaults (1805, 1800, 30*60, 35*60) drift from the actual driver cap and produce wrong ETAs in the report. The side log cap is authoritative.
+- If the regex match fails, fall back to `now + conservative_remaining` and flag the discrepancy in the sub-session, not silently. Cite the source line in the sub-session so the next QA session can verify the cap value matches the driver.
+
+## Improvement: never use PowerShell -replace with backtick-r or backtick-n in replacement string
+
+Condition:
+- QA session needs to remove or add line breaks in a markdown file using PowerShell -replace operator and the replacement string contains `r or `n (or any backtick escape)
+
+Action:
+- Do not put `r or `n in the -replace replacement string. The PowerShell -replace operator processes `r as backslash+CR and `n as backslash+LF in the output, leaving the leading and trailing backtick characters in the file. The result is a markdown file with literal backslash chars mixed with CRLF. Confirmed in session 20260608-V1: file grew by 5 bytes, cr=0 became cr=2, and the section break at the substituted position produced bad text. Use [System.IO.File]::ReadAllBytes + a for loop to find and remove the bad bytes directly, or build the replacement using [char]13 + [char]10 concat with [string]::Replace (literal .NET string method) which does not interpret backticks at all.
+- Sanity check: after any -replace on a markdown file, run [System.IO.File]::ReadAllBytes and count [char]13 and [char]92 (backslash) occurrences; non-zero values for either mean the replacement introduced escape characters. Restore the file from a fresh Get-Content if either value is greater than 0 in a file that should be LF-only with no backslashes.
+
+## Improvement: reconcile verified state with actual file state
+
+Condition:
+- QA sub-session task instruction cites a verified state with specific file values (mtime, counts, line content) and a targeted grep on the actual file shows those values are stale or incorrect
+
+Action:
+- Do not blindly apply edits that would either fail (string not found) or corrupt (overwriting correct values with wrong ones). Use targeted Select-String to verify the current file state, then add a sub-session entry documenting the actual file state, the discrepancy with the verified state, and the reason no edits were applied. Hand off to the next sub-session with the corrected state. The verified state is a hint, not ground truth; the file on disk is authoritative.

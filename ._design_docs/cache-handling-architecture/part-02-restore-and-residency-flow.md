@@ -162,8 +162,9 @@ The alternate mode depends on prompt boundaries created after prompt preparation
 
 Recommended behavior:
 
-- Chat endpoints: extend the prompt-preparation path so template application can return both the flattened prompt and a boundary trace for message/tool/media boundaries.
-- `/completion`: derive only minimal token-span metadata from the already supported prompt shapes. Do not add new request fields in the upstream target; callers that need message-aware caching should use the chat endpoints.
+- OpenAI-compatible and Anthropic-compatible public endpoints must use the enabled hybrid-cache enhancements according to server command-line options. Endpoint compatibility means preserving request and response schemas, not bypassing cache behavior.
+- Chat-style endpoints: extend the prompt-preparation path so template application can return both the flattened prompt and a boundary trace for message/tool/media boundaries.
+- Completion-style endpoints, including `/completion`: derive the richest safe internal metadata available from the already supported prompt shapes. Do not add cache-specific request fields in the upstream target. If message/tool/media boundaries cannot be derived from the request shape, mark the metadata degraded and use token/position fallback rules.
 - Boundary metadata must be normalized into `PreparedPromptMetadata` and attached to `server_task` before the task enters `server_context`.
 - If no prepared metadata exists, the hybrid planner may use token/position fallback rules, but it must log that it is operating without prepared boundaries.
 

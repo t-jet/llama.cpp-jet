@@ -8,8 +8,9 @@ The cache architecture should not change request or response compatibility for e
 
 | Endpoint surface | Compatibility rule |
 | --- | --- |
-| OpenAI-compatible chat, responses, and embeddings routes | No cache-specific request fields in the initial upstream target. Cache behavior is selected by server CLI flags and internal task metadata. |
-| Non-OAI `/completion` and `/embedding` routes | Preserve the documented prompt shapes, including token arrays, mixed token/string prompts, and multimodal prompt objects. Attach only internal metadata derived during parsing/tokenization. |
+| OpenAI-compatible chat, responses, completions, and embeddings routes | No cache-specific request fields in the initial upstream target. Cache behavior is selected by server CLI flags and internal task metadata, and enabled hybrid-cache enhancements apply to these routes. |
+| Anthropic-compatible message/completion routes | Preserve Anthropic-compatible request and response schemas. Cache behavior is selected by server CLI flags and internal task metadata, and enabled hybrid-cache enhancements apply to these routes. |
+| Non-OAI `/completion` and `/embedding` routes | Preserve the documented prompt shapes, including token arrays, mixed token/string prompts, and multimodal prompt objects. Attach the richest safe internal metadata derived during parsing/tokenization; use degraded metadata and token/position fallback when richer boundaries are unavailable. |
 | Multimodal requests | Preserve the existing media marker and base64/file handling rules. Include multimodal projector identity, marker layout, and media token spans in compatibility keys before reusing state. Reject unsupported multimodal restore candidates rather than guessing. |
 | `/slots` | Keep save/restore semantics and gating unchanged. Hybrid cache internals must not leak through `/slots`, and slot save paths remain separate from any cold payload store. |
 | `/metrics` | Use the existing Prometheus endpoint when `--metrics` is enabled. Add hybrid cache counters there instead of adding a new cache stats endpoint. |
@@ -149,7 +150,7 @@ Alternatives considered:
 Consequences:
 
 - Boundary-aware caching becomes consistent with the existing architecture.
-- `/completion` remains API-compatible and gets only minimal token-span metadata unless a separate API proposal is accepted.
+- Public compatible endpoints, including `/completion`, remain API-compatible while still using every enabled hybrid-cache enhancement that can be driven from command-line options and internal metadata. A separate API proposal is needed only for new request fields, not for internal cache metadata.
 - The hybrid mode can still fall back to token/position rules when metadata is absent.
 
 ### ADR-005: Use Byte-Accounted LRU with Protected Roots as the Initial Policy

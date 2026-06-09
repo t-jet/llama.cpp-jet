@@ -253,6 +253,9 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 
 ---
 
+### Stage 13: Endpoint Compatibility Corrections
+See [Part 8](part-08-stage-13-endpoint-compatibility-corrections.md).
+
 ## Implementation Notes
 
 Each stage builds on the previous one and maintains these invariants:
@@ -264,8 +267,9 @@ Each stage builds on the previous one and maintains these invariants:
 - **Isolated testing:** Each stage's new behavior is testable in isolation
 - **Explicit failures:** Unsupported paths fail explicitly, not silently
 - **Upstream-aware:** Stage 11 re-runs the staged plan against the live upstream, since new cache, checkpoint, or speculative decoding work there can invalidate or require rework on any prior stage
+- **Endpoint parity:** Stage 13 keeps compatible public endpoint schemas stable while applying all enabled cache behavior through internal metadata and command-line configuration
 
-The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5). Stage 11 revisits prior stages after an `upstream_master` merge; Stage 12 closes the validation loop with stress and benchmark evidence at production-relevant scales, not just unit-scale tests.
+The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5). Stage 11 revisits prior stages after an `upstream_master` merge; Stage 12 closes the validation loop with stress and benchmark evidence at production-relevant scales, not just unit-scale tests. Stage 13 applies endpoint compatibility corrections found during Stage 12 so public compatible routes get the same command-line-enabled cache behavior without exposing cache-specific request fields.
 
 ## Requirement Traceability Matrix
 
@@ -282,6 +286,7 @@ The staging allows for early feedback, risk reduction, and parallel workstream o
 | Metadata-only branch nodes and payload/pruning lifecycle (R38a-R38c, R71a-R71e, R76a, R79a-R79b, R55a) | Branch Graph Semantics, Residency and Eviction Rules, Cold Layer Contract, ADR-009 |
 | Validation mismatch and mismatch-parent selection (R36a-R36d, R39a-R39c, R71e, R123a) | Restore Strategy Order, Branch Graph Semantics, ADR-009 |
 | Budget accounting and pruning preference (R8a, R8b, R21a, R57a-R57e) | Residency and Eviction Rules, ADR-005 |
+| Endpoint parity and compatible API surfaces | API Endpoint Compatibility, Prepared-Prompt Boundary Model, Stage 13 Endpoint Compatibility Corrections |
 | Eviction policy evolution (R20a, R20b) | Residency and Eviction Rules, ADR-005 |
 | Code quality and best practices (R130, R131) | ADR-008 |
 | Multimodal safety (R87-R89) | Runtime Semantics, Failure and Fallback Rules, Phase 3 |
