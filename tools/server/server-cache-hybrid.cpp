@@ -10,8 +10,7 @@
 #include <utility>
 
 static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
-    const llama_tokens & raw = tokens.get_tokens();
-    return std::vector<llama_token>(raw.begin(), raw.end());
+    return tokens.cache_token_ids();
 }
 
 static const char * cache_workload_profile_name(cache_workload_profile profile) {
@@ -203,7 +202,7 @@ static std::string stage10_diagnostic_shape_key(
 }
 
 static uint64_t cache_token_span_checksum(const server_tokens & tokens, size_t token_start, size_t token_end) {
-    const llama_tokens & token_ids = tokens.get_tokens();
+    const llama_tokens token_ids = tokens.cache_token_ids();
     token_start = std::min(token_start, token_ids.size());
     token_end = std::min(std::max(token_end, token_start), token_ids.size());
 
@@ -1529,7 +1528,7 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_exact_matc
             continue;
         }
         n_namespace_validation_passes++;
-        const llama_tokens & cached_tokens = entry_it->tokens.get_tokens();
+        const llama_tokens cached_tokens = entry_it->tokens.cache_token_ids();
         if (cached_tokens.size() == lookup_tokens.size() &&
             std::equal(lookup_tokens.begin(), lookup_tokens.end(), cached_tokens.begin())) {
             n_branch_lookup_hits++;
@@ -1543,12 +1542,12 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_exact_matc
     }
     
     // Check each candidate for exact match
-    const llama_tokens & query_tokens = tokens.get_tokens();
+    const llama_tokens query_tokens = tokens.cache_token_ids();
     for (auto it : prefix_it->second) {
         if (it->namespace_id != namespace_id) {
             continue;
         }
-        const llama_tokens & cached_tokens = it->tokens.get_tokens();
+        const llama_tokens cached_tokens = it->tokens.cache_token_ids();
         if (cached_tokens.size() == query_tokens.size() && cached_tokens == query_tokens) {
             return it;  // Exact match found
         }
@@ -3517,7 +3516,7 @@ hybrid_cache_controller::token_prefix_t hybrid_cache_controller::get_token_prefi
 hybrid_cache_controller::token_prefix_t hybrid_cache_controller::get_token_prefix(
     const server_tokens & tokens, size_t n_prefix) const
 {
-    const llama_tokens & token_ids = tokens.get_tokens();
+    const llama_tokens token_ids = tokens.cache_token_ids();
     const size_t n = std::min(token_ids.size(), std::min(n_prefix, PREFIX_INDEX_LENGTH));
     return token_prefix_t(token_ids.begin(), token_ids.begin() + n);
 }

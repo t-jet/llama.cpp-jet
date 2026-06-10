@@ -29,10 +29,6 @@ execution, commits, PR text, or reviewer responses.
 - [Part 8: Architect implementation review gate](cache-handling-phase10-implementation/part-08-architect-implementation-review-gate.md)
 - [Part 9: S10-IMPL-01 correction evidence](cache-handling-phase10-implementation/part-09-s10-impl-01-correction-evidence.md)
 - [Part 10: Architect implementation re-review gate](cache-handling-phase10-implementation/part-10-architect-implementation-re-review-gate.md)
-- [Part 11: C1 coverage script fix (test-stage10-policy-lru)](cache-handling-phase10-implementation/part-11-stage10-policy-lru-coverage-followup.md)
-- [Part 12: C2 hybrid controller test functions](cache-handling-phase10-implementation/part-12-stage10-hybrid-controller-coverage-followup.md)
-- [Part 13: A and D QA process guidance](cache-handling-phase10-implementation/part-13-qa-process-guidance.md)
-- [Test plan Part 13: T114 split: combined rate and product-only rate](cache-handling-test-plan/part-13-t114-product-only-coverage.md)
 
 ## Current gate
 
@@ -113,56 +109,6 @@ The earlier `mtp-probe-failure.md` is superseded by the Attempt 1 success; the a
 - Final counts: PASS 9 (ctest) + T121, FAIL 0, BLOCKED 0, SKIP 0
 
 Link to new test report: [test-report-20260603-05.md](.test_reports/test-report-20260603-05.md)
-
-## Stage 10 follow-up 2026-06-04: C1 coverage script fix
-
-Maintenance follow-up on the closed stage. Action C1 from the Architect's
-review in
-[test-report-20260603-architect-review.md](.test_reports/test-report-20260603-architect-review.md)
-was applied: `test-stage10-policy-lru` was added to the `$focusedTests`
-array in `._design_docs/cache-handling-test-scripts/run_coverage.ps1` so
-the next coverage run measures `server-cache-policy-lru.cpp`. No code or
-test changes. See
-[part-11-stage10-policy-lru-coverage-followup.md](cache-handling-phase10-implementation/part-11-stage10-policy-lru-coverage-followup.md)
-for the full record.
-
-## Stage 10 follow-up 2026-06-04: C2 hybrid controller test functions
-
-Action C2 from the Architect's review in
-[test-report-20260603-architect-review.md](.test_reports/test-report-20260603-architect-review.md)
-was applied: six new test functions were added to
-`tests/test-cache-controller.cpp` (lines 2292-2438) to exercise uncovered
-blocks in `server-cache-hybrid.cpp`. The build of the
-`test-cache-controller` target is clean and the rebuilt executable reports
-all 78 tests passing. Full record and compile evidence in
-[part-12-stage10-hybrid-controller-coverage-followup.md](cache-handling-phase10-implementation/part-12-stage10-hybrid-controller-coverage-followup.md).
-
-## Stage 10 follow-up 2026-06-04: A and D QA process guidance
-
-Maintenance follow-up on the closed stage. Actions A and D from the
-Architect's review in
-[test-report-20260603-architect-review.md](.test_reports/test-report-20260603-architect-review.md)
-were applied as QA process guidance: future T114 verdicts must cite
-the `Combined result` block at the bottom of `coverage-report.md` rather
-than the Cobertura XML root attributes, and future T121 public probes
-that need a successful restore must supply a `common_prompt_checkpoint`
-boundary block in the completion request body. No code, test, test
-plan, or script change is in scope. The full record is in
-[part-13-qa-process-guidance.md](cache-handling-phase10-implementation/part-13-qa-process-guidance.md).
-
-## Stage 10 follow-up 2026-06-04: B test-plan enhancement (T114 split)
-
-Action B from the Architect's review in
-[test-report-20260603-architect-review.md](.test_reports/test-report-20260603-architect-review.md)
-was applied as a test-plan enhancement: the T114 row in the test plan
-is split into T114 (combined rate) and T114a (product-only rate) for
-Stage 11 onward. The T114a row carries a 70% floor on the 11 product
-files named in the Architect review. The combined rate and the
-product-only rate are both closure contracts from Stage 11 onward.
-The split rules, product-only denominator, and required
-`run_coverage.ps1` change are recorded in
-[part-13-t114-product-only-coverage.md](cache-handling-test-plan/part-13-t114-product-only-coverage.md)
-in the test plan tree.
 
 ## Stage 10 closure (2026-06-04)
 

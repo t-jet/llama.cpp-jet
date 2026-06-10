@@ -1981,6 +1981,14 @@ private:
         }
 
         slot.prompt_metadata = task.prompt_metadata;
+        if (slot.prompt_metadata.degraded_diagnostic_required()) {
+            SRV_INF("cache metadata: source=%s method=%s degraded=%s tokens=%zu boundaries=%zu\n",
+                    slot.prompt_metadata.diagnostic_source.c_str(),
+                    slot.prompt_metadata.preparation_id.c_str(),
+                    slot.prompt_metadata.degraded_reason.c_str(),
+                    task.tokens.size(),
+                    slot.prompt_metadata.boundaries.size());
+        }
         slot.task = std::make_unique<const server_task>(std::move(task));
 
         slot.state = slot.task->is_child()
@@ -4305,6 +4313,8 @@ static std::string cache_metadata_content_text(const json & content) {
         const std::string type = json_value(part, "type", std::string());
         if (type == "text" || type == "media_marker") {
             result += json_value(part, "text", std::string());
+        } else if (type == "refusal") {
+            result += json_value(part, "refusal", std::string());
         }
     }
     return result;
@@ -4326,7 +4336,7 @@ static uint64_t cache_metadata_checksum(
         const server_tokens & tokens,
         size_t token_start,
         size_t token_end) {
-    const llama_tokens & token_ids = tokens.get_tokens();
+    const llama_tokens token_ids = tokens.cache_token_ids();
     token_start = std::min(token_start, token_ids.size());
     token_end = std::min(std::max(token_end, token_start), token_ids.size());
 
@@ -4338,6 +4348,14 @@ static uint64_t cache_metadata_checksum(
     return hash;
 }
 
+struct cache_metadata_build_input {
+    const llama_vocab * vocab = nullptr;
+    const json * request_data = nullptr;
+    const server_tokens * tokens = nullptr;
+    const json * chat_messages = nullptr;
+    const char * diagnostic_source = nullptr;
+};
+
 static prepared_prompt_metadata cache_metadata_from_chat_messages(
         const llama_vocab * vocab,
         const std::string & prompt,
@@ -4345,17 +4363,17 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
         const server_tokens & tokens,
         size_t n_prompt_tokens) {
     prepared_prompt_metadata metadata;
-    metadata.preparation_id = "chat-template-rendered-text-search";
+    metadata.preparation_id = "rendered-text-boundary-inference";
     metadata.boundaries_native = false;  // Using inferred boundaries from rendered text search
 
     if (!messages.is_array()) {
-        metadata.degraded_reason = "chat metadata source is not an array";
+        metadata.degraded_reason = "structured message metadata unavailable";
         return metadata;
     }
 
     // Mark as degraded if using fallback rendered-text inference
     if (metadata.degraded_reason.empty()) {
-        metadata.degraded_reason = "boundaries inferred from rendered text (not native capture)";
+        metadata.degraded_reason = "rendered text boundary inference";
     }
 
     size_t search_pos = 0;
@@ -4366,22 +4384,38 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
         const std::string content = message.contains("content")
             ? cache_metadata_content_text(message.at("content"))
             : std::string();
+        const std::string reasoning_content = json_value(message, "reasoning_content", std::string());
 
         size_t token_start = fallback_token;
         size_t token_end = fallback_token;
 
-        if (!content.empty()) {
-            const size_t char_start = prompt.find(content, search_pos);
-            if (char_start != std::string::npos) {
-                const size_t char_end = char_start + content.size();
-                token_start = cache_metadata_token_index(vocab, prompt, char_start);
-                token_end = cache_metadata_token_index(vocab, prompt, char_end);
-                search_pos = char_end;
+        if (!content.empty() || !reasoning_content.empty()) {
+            size_t first_char = std::string::npos;
+            size_t last_char = search_pos;
+            size_t local_search = search_pos;
+            bool mapped = true;
+            for (const std::string & needle : {content, reasoning_content}) {
+                if (needle.empty()) {
+                    continue;
+                }
+                const size_t char_start = prompt.find(needle, local_search);
+                if (char_start == std::string::npos) {
+                    mapped = false;
+                    break;
+                }
+                const size_t char_end = char_start + needle.size();
+                first_char = std::min(first_char, char_start);
+                last_char = char_end;
+                local_search = char_end;
+            }
+
+            if (mapped && first_char != std::string::npos) {
+                token_start = cache_metadata_token_index(vocab, prompt, first_char);
+                token_end = cache_metadata_token_index(vocab, prompt, last_char);
+                search_pos = last_char;
             } else {
                 SRV_DBG("cache metadata: could not map chat message role '%s' into rendered prompt\n", role.c_str());
-                if (metadata.degraded_reason.empty()) {
-                    metadata.degraded_reason = "one or more chat messages could not be mapped to the rendered prompt";
-                }
+                metadata.degraded_reason = "message boundary map fallback";
             }
         }
 
@@ -4428,35 +4462,34 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
     return metadata;
 }
 
-static prepared_prompt_metadata cache_metadata_for_request(
-        const llama_vocab * vocab,
-        const json & data,
-        const server_tokens & tokens,
-        const json * chat_messages = nullptr) {
+static prepared_prompt_metadata cache_metadata_for_request(const cache_metadata_build_input & input) {
     prepared_prompt_metadata metadata;
+    const server_tokens & tokens = *input.tokens;
+    const json & data = *input.request_data;
 
-    if (chat_messages != nullptr && data.contains("prompt") && data.at("prompt").is_string()) {
+    if (input.chat_messages != nullptr && data.contains("prompt") && data.at("prompt").is_string()) {
         metadata = cache_metadata_from_chat_messages(
-            vocab,
+            input.vocab,
             data.at("prompt").get<std::string>(),
-            *chat_messages,
+            *input.chat_messages,
             tokens,
             tokens.size());
-        if (metadata.has_boundaries()) {
-            metadata.degraded_reason = "rendered text boundary inference";
-        }
     }
 
     if (!metadata.has_boundaries() && !tokens.empty()) {
         const uint64_t checksum = cache_metadata_checksum(tokens, 0, tokens.size());
-        metadata.preparation_id = "completion-minimal";
-        metadata.degraded_reason = "minimal completion metadata";
+        metadata.preparation_id = "token-position-fallback";
+        metadata.degraded_reason = "minimal token span metadata";
         metadata.add_span(prompt_boundary::MESSAGE_START, 0, tokens.size(), checksum, false, "prompt");
         metadata.add_span(prompt_boundary::MESSAGE_END, 0, tokens.size(), checksum, false, "prompt");
     }
 
     if (metadata.compatibility_key.empty()) {
         metadata.compatibility_key = "server-prepared-prompt-v1";
+    }
+
+    if (input.diagnostic_source != nullptr) {
+        metadata.diagnostic_source = input.diagnostic_source;
     }
 
     return metadata;
@@ -4468,7 +4501,8 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type,
-            const json * chat_messages) {
+            const json * chat_messages,
+            const char * cache_diagnostic_source) {
     GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
@@ -4502,7 +4536,13 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             task.id = rd.get_new_id();
 
             task.tokens = std::move(inputs[i]);
-            task.prompt_metadata = cache_metadata_for_request(ctx_server.vocab, data, task.tokens, chat_messages);
+            task.prompt_metadata = cache_metadata_for_request({
+                ctx_server.vocab,
+                &data,
+                &task.tokens,
+                chat_messages,
+                cache_diagnostic_source,
+            });
             task.params = server_task::params_from_json_cmpl(
                     ctx_server.vocab,
                     params,
@@ -5362,7 +5402,9 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body,
             files,
-            TASK_RESPONSE_TYPE_NONE);
+            TASK_RESPONSE_TYPE_NONE,
+            nullptr,
+            "native-completion");
     };
 
     this->post_completions_oai = [this](const server_http_req & req) {
@@ -5374,7 +5416,9 @@ void server_routes::init_routes() {
             SERVER_TASK_TYPE_COMPLETION,
             body,
             files,
-            TASK_RESPONSE_TYPE_OAI_CMPL);
+            TASK_RESPONSE_TYPE_OAI_CMPL,
+            nullptr,
+            "openai-completion");
     };
 
     this->post_chat_completions = [this](const server_http_req & req) {
@@ -5391,7 +5435,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_OAI_CHAT,
-            body.contains("messages") ? &body.at("messages") : nullptr);
+            body.contains("messages") ? &body.at("messages") : nullptr,
+            "openai-chat");
     };
 
     this->post_control = [this](const server_http_req & req) {
@@ -5484,7 +5529,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_OAI_RESP,
-            body.contains("messages") ? &body.at("messages") : nullptr);
+            body.contains("messages") ? &body.at("messages") : nullptr,
+            "openai-responses");
     };
 
     this->post_transcriptions_oai = [this](const server_http_req & req) {
@@ -5513,7 +5559,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_OAI_ASR,
-            body.contains("messages") ? &body.at("messages") : nullptr);
+            body.contains("messages") ? &body.at("messages") : nullptr,
+            "openai-transcription");
     };
 
     this->post_anthropic_messages = [this](const server_http_req & req) {
@@ -5532,7 +5579,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_ANTHROPIC,
-            body.contains("messages") ? &body.at("messages") : nullptr);
+            body.contains("messages") ? &body.at("messages") : nullptr,
+            "anthropic-messages");
     };
 
     this->post_anthropic_count_tokens = [this](const server_http_req & req) {
@@ -5996,6 +6044,8 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
 
             task.id     = rd.get_new_id();
             task.tokens = std::move(tokenized_prompts[i]);
+            // Embedding tasks are evaluated and released without hybrid cache save/restore.
+            // Leave prompt_metadata empty so diagnostics do not imply cache eligibility.
 
             // OAI-compat
             task.params.res_type = res_type;
@@ -6036,7 +6086,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
 //
 
 static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
-    const llama_tokens & raw = tokens.get_tokens();
+    const llama_tokens raw = tokens.cache_token_ids();
     return std::vector<llama_token>(raw.begin(), raw.end());
 }
 
@@ -6496,10 +6546,8 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
 
     // Update slot state with restored data
-    slot.prompt.tokens.clear();
-    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
-        slot.prompt.tokens.push_back(it_best->tokens[i]);
-    }
+    slot.prompt.tokens = it_best->tokens.clone();
+    slot.prompt.tokens.keep_first(std::min<size_t>(restored_token_count, it_best->tokens.size()));
 
     slot.prompt.checkpoints = it_best->checkpoints;
     slot.n_prompt_tokens_cache = restored_token_count;
@@ -6725,10 +6773,8 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     update_lru_index(it_best, old_key);
     acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
 
-    slot.prompt.tokens.clear();
-    for (int i = 0; i < restored_token_count && i < (int) it_best->tokens.size(); i++) {
-        slot.prompt.tokens.push_back(it_best->tokens[i]);
-    }
+    slot.prompt.tokens = it_best->tokens.clone();
+    slot.prompt.tokens.keep_first(std::min<size_t>(restored_token_count, it_best->tokens.size()));
 
     slot.prompt.checkpoints = it_best->checkpoints;
     slot.n_prompt_tokens_cache = restored_token_count;

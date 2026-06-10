@@ -140,7 +140,8 @@ private:
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type,
-            const json * chat_messages = nullptr);
+            const json * chat_messages = nullptr,
+            const char * cache_diagnostic_source = nullptr);
     std::unique_ptr<server_res_generator> handle_slots_save(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_restore(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_erase(const server_http_req &, int id_slot);

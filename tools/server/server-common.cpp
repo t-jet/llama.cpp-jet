@@ -399,6 +399,10 @@ const llama_tokens & server_tokens::get_tokens() const {
     return tokens;
 }
 
+llama_tokens server_tokens::cache_token_ids() const {
+    return tokens;
+}
+
 llama_tokens server_tokens::get_text_tokens() const {
     llama_tokens res;
     res.reserve(tokens.size());
@@ -713,7 +717,29 @@ static std::string fnv_hash(const uint8_t * data, size_t len) {
     return std::to_string(hash);
 }
 
+static void replace_all(std::string & text, const std::string & from, const std::string & to) {
+    if (from.empty()) {
+        return;
+    }
+    for (size_t pos = 0; (pos = text.find(from, pos)) != std::string::npos; pos += to.size()) {
+        text.replace(pos, from.size(), to);
+    }
+}
+
+static std::string normalize_mtmd_media_marker(std::string prompt) {
+    const std::string runtime_marker = get_media_marker();
+    const std::string default_marker = mtmd_default_marker();
+    if (runtime_marker != default_marker &&
+            prompt.find(runtime_marker) == std::string::npos &&
+            prompt.find(default_marker) != std::string::npos) {
+        replace_all(prompt, default_marker, runtime_marker);
+    }
+    return prompt;
+}
+
 server_tokens process_mtmd_prompt(mtmd_context * mctx, std::string prompt, std::vector<raw_buffer> files) {
+    prompt = normalize_mtmd_media_marker(std::move(prompt));
+
     mtmd::bitmaps bitmaps;
     for (auto & file : files) {
         mtmd::bitmap bmp(mtmd_helper_bitmap_init_from_buf(mctx, file.data(), file.size()));

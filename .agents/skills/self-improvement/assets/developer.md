@@ -62,7 +62,7 @@ Condition:
 - Reviewing QA execution reports for staged gate with FAIL, SKIP, BLOCKED, or misleading runner output
 
 Action:
-- Classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage. For model-backed rows, verify run created required precondition metrics or logs before calling it product bug. Update stage implementation status with exact next gate action.
+- Classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage. For model-backed rows, verify raw artifacts show the required preconditions before calling it product bug: server command, readiness or endpoint status, response shape, metrics when required, and focused log/diagnostic scans. If a leakage scan is clean only because the required diagnostic line is absent, classify the missing diagnostic separately from leakage. Update stage implementation status or review artifact with exact next gate action.
 
 ## Improvement: Cross-reference same-day QA follow-up sessions
 
@@ -184,6 +184,22 @@ Condition:
 Action:
 - Rerun `git diff --check -- <touched paths>` for current task files and report both scoped result and unrelated global failure. Don't fix unrelated whitespace unless user asked for cleanup.
 
+## Improvement: Check staged touched content against HEAD
+
+Condition:
+- Touched files already have staged or added changes before the current task, and the task requires `git diff --check` evidence
+
+Action:
+- Run both scoped `git diff --check -- <touched paths>` for unstaged changes and `git diff --check HEAD -- <touched paths>` for the full staged-plus-unstaged content. Don't treat the first clean check as sufficient when `git status --short` shows `A`, `M` in the index column, or other staged state for touched paths.
+
+## Improvement: File must end with exactly one LF, not zero and not two
+
+Condition:
+- Writing or rewriting a markdown or text file on Windows with PowerShell where the user requires LF or sibling tracked files end with a single hex-0A
+
+Action:
+- End the file with exactly one trailing hex-0A. Don't append a backtick-n to a join without checking the join's tail first; doubling up yields hex-0A hex-0A and `git diff --check` reports "new blank line at EOF" with exit 2. Don't strip the trailing newline just because the source content didn't visibly show one; tracked git blobs in this repo end with a single LF. Verify with `ReadAllBytes` last byte showing hex-0A and not hex-0A hex-0A before running `git diff --check`.
+
 ## Improvement: Preserve blob line structure on Windows
 
 Condition:
@@ -239,6 +255,22 @@ Condition:
 
 Action:
 - Check matching document-index entry and update stale status or handoff wording in same session. Don't leave index pointing to already-corrected blocker or outdated next owner.
+
+## Improvement: Convert plan docs fully when implementation lands
+
+Condition:
+- Updating implementation-planning documents after code work completes
+
+Action:
+- Search touched stage docs for stale phrases such as "plan only", "does not authorize implementation", "Next", "implementation open", and "evidence expected later"; replace them with current implementation-review handoff, real evidence, or explicit not-run scope before final handoff.
+
+## Improvement: Record implementation-plan REWORK corrections in gate docs
+
+Condition:
+- Reworking implementation planning docs after an independent plan review returns REWORK with named blockers
+
+Action:
+- Update both the parent implementation log and the affected part files with the review verdict, the corrected blocker list, the next re-review gate, and any document-index status wording that changed. Don't only patch the technical plan content while leaving the gate or handoff text saying first review is still next.
 
 ## Improvement: Export-ModuleMember errors when dot-sourcing helper scripts
 
@@ -343,6 +375,30 @@ Condition:
 
 Action:
 - Prove or rule out each named cause with direct evidence from report files, captured driver/server flags, prompt body, fixture/template contents, and the exact production validation branch. Don't stop at the report's verdict text; trace the failure string to code and compare the runtime prompt shape to the metadata contract before classifying as test-framework, fixture, driver, or product bug.
+
+## Improvement: PowerShell rg file lists need explicit expansion
+
+Condition:
+- Running `rg` on Windows PowerShell against generated or untracked documentation paths with wildcard arguments such as `dir/*.md`
+
+Action:
+- Build an explicit `$paths` array from `Get-ChildItem` and pass that array to `rg`. Don't rely on mixed literal paths plus wildcard strings inside one command; `rg` can receive the wildcard literally and fail with `The filename, directory name, or volume label syntax is incorrect`.
+
+## Improvement: PowerShell foreach output must be collected before formatting
+
+Condition:
+- Running a PowerShell one-liner that emits objects from `foreach (...) { ... }` and then pipes directly to `Format-Table`, `Select-Object`, or another command, including quick verification scans after implementation work
+
+Action:
+- Collect objects into an array inside the loop, then pipe the array after the loop. For compact scans, start with `$rows=@(); foreach (...) { $rows += [pscustomobject]@{...} }; $rows | Format-Table`. Don't write `foreach (...) { ... } | Format-Table`; PowerShell reports `An empty pipe element is not allowed`, wasting a verification turn.
+
+## Improvement: Use word-boundary scans for forbidden review terms
+
+Condition:
+- Verifying a documentation artifact for forbidden terms such as PR, commit, or source patch, and normal technical words may contain those letters as substrings
+
+Action:
+- Use word-boundary or phrase-specific regex patterns, such as `\bPR\b`, `\bcommit\b`, and `source patch`, instead of broad substring scans. Don't treat matches inside words like product, prompt, prerequisite, or projector as verification findings.
 
 
 

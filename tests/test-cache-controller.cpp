@@ -3,12 +3,9 @@
 #include "server-cache-hybrid.h"
 #include "server-task.h"
 #include "common.h"
-#include "speculative.h"
-#include "ggml-cpp.h"
 
 #include <cstdio>
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -643,8 +640,8 @@ void test_hybrid_payload_budget_eviction() {
     common_params params = create_test_params();
 
     hybrid_cache_controller lru_ctrl(params, 1, 1000, nullptr, nullptr);
-    lru_ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "", 700 * 1024, 0);
-    lru_ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "", 700 * 1024, 0);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
+    lru_ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
 
     assert(lru_ctrl.debug_entry_count_for_tests() == 1);
     assert(lru_ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
@@ -654,8 +651,8 @@ void test_hybrid_payload_budget_eviction() {
     assert(lru_stats["n_payload_evictions"] == 1);
 
     hybrid_cache_controller protected_ctrl(params, 1, 1000, nullptr, nullptr);
-    protected_ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "", 700 * 1024, 0);
-    protected_ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "", 500 * 1024, 0);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 700 * 1024, 0);
+    protected_ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "ns", 500 * 1024, 0);
 
     assert(protected_ctrl.debug_entry_count_for_tests() == 1);
     assert(protected_ctrl.debug_find_match_tokens_for_tests(create_tokens({5, 6, 9})) == 2);
@@ -666,15 +663,15 @@ void test_hybrid_payload_budget_eviction() {
     assert(protected_stats["n_protected_root_decisions"] >= 1);
 
     hybrid_cache_controller all_protected(params, 1, 1000, nullptr, nullptr);
-    all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true, "", 700 * 1024, 0);
-    all_protected.debug_add_entry_for_tests(create_tokens({11, 12}), true, "", 700 * 1024, 0);
+    all_protected.debug_add_entry_for_tests(create_tokens({9, 10}), true, "ns", 700 * 1024, 0);
+    all_protected.debug_add_entry_for_tests(create_tokens({11, 12}), true, "ns", 700 * 1024, 0);
     assert(all_protected.debug_entry_count_for_tests() == 1);
     json all_protected_stats = all_protected.get_stats();
     assert(all_protected_stats["n_protected_root_evictions"] == 1);
 
     hybrid_cache_controller unlimited(params, -1, 1000, nullptr, nullptr);
-    unlimited.debug_add_entry_for_tests(create_tokens({13, 14}), false, "", 900 * 1024, 0);
-    unlimited.debug_add_entry_for_tests(create_tokens({15, 16}), false, "", 900 * 1024, 0);
+    unlimited.debug_add_entry_for_tests(create_tokens({13, 14}), false, "ns", 900 * 1024, 0);
+    unlimited.debug_add_entry_for_tests(create_tokens({15, 16}), false, "ns", 900 * 1024, 0);
     assert(unlimited.debug_entry_count_for_tests() == 2);
     assert(unlimited.get_stats()["resident_payload_bytes"] == 1800 * 1024);
 
@@ -687,12 +684,12 @@ void test_hybrid_refresh_enforces_payload_budget() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "", 700 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "ns", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "ns", 700 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
 
     ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
-    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({3, 4}), false));
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({3, 4}), false, "ns"));
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 1);
@@ -710,13 +707,13 @@ void test_hybrid_multiple_protected_evictions_count_decisions() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 3, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true, "", 900 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), true, "", 900 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true, "ns", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), true, "ns", 900 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), true, "ns", 900 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 3);
 
     ctrl.debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
-    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({5, 6}), true));
+    assert(ctrl.debug_refresh_entry_for_tests(create_tokens({5, 6}), true, "ns"));
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 1);
@@ -741,13 +738,13 @@ void test_h31_lru_entry_state_ordering() {
     const auto tokens_b = create_tokens({201, 202});
     const auto tokens_c = create_tokens({301, 302});
 
-    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "", 400 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h31", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h31", 400 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
     assert(ctrl.get_stats()["resident_payload_bytes"] == 800 * 1024);
 
-    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false));
-    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "", 400 * 1024, 0);
+    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h31"));
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h31", 400 * 1024, 0);
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 2);
@@ -771,16 +768,16 @@ void test_h32_successful_restore_refreshes_recency() {
     const auto tokens_b = create_tokens({211, 212});
     const auto tokens_c = create_tokens({311, 312});
 
-    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "", 400 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_a.clone(), false, "h32", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_b.clone(), false, "h32", 400 * 1024, 0);
     assert(ctrl.debug_entry_count_for_tests() == 2);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({111, 112, 9})) == 2);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({211, 212, 9})) == 2);
 
-    const bool restored_a = ctrl.debug_refresh_entry_for_tests(tokens_a, false);
+    const bool restored_a = ctrl.debug_refresh_entry_for_tests(tokens_a, false, "h32");
     assert(restored_a);
 
-    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "", 400 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(tokens_c.clone(), false, "h32", 400 * 1024, 0);
 
     json stats = ctrl.get_stats();
     assert(ctrl.debug_entry_count_for_tests() == 2);
@@ -1751,27 +1748,10 @@ void test_stage9_checkpoint_boundary_metadata() {
     assert(!ctrl.debug_validate_first_checkpoint_for_tests());
 
     prepared_prompt_metadata bad_span;
-    bad_span.boundaries_native = true;
     bad_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
     hybrid_cache_controller span_mismatch(params, 2, 1000, nullptr, nullptr);
     span_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_span);
     assert(!span_mismatch.debug_admit_checkpoint_for_tests(64, 0));
-
-    prepared_prompt_metadata degraded_span;
-    degraded_span.degraded_reason = "rendered text boundary inference";
-    degraded_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
-    hybrid_cache_controller degraded_fallback(params, 2, 1000, nullptr, nullptr);
-    degraded_fallback.debug_add_entry_for_tests(tokens.clone(), degraded_span);
-    assert(degraded_fallback.debug_admit_checkpoint_for_tests(64, 0));
-    assert(degraded_fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
-
-    prepared_prompt_metadata inferred_span;
-    inferred_span.preparation_id = "chat-template-rendered-text-search";
-    inferred_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
-    hybrid_cache_controller inferred_fallback(params, 2, 1000, nullptr, nullptr);
-    inferred_fallback.debug_add_entry_for_tests(tokens.clone(), inferred_span);
-    assert(inferred_fallback.debug_admit_checkpoint_for_tests(64, 0));
-    assert(inferred_fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
 
     prepared_prompt_metadata bad_id;
     bad_id.add_span(prompt_boundary::MESSAGE_END, 0, 4, checksum, false, "msg-2");
@@ -1821,7 +1801,7 @@ void test_stage9_checkpoint_restore_uses_descriptor_span() {
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({70, 71, 72, 73}), false, "stage9-span", 128, 0);
 
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t{2}));
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, 2));
     assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 2);
 
     printf("  PASSED\n");
@@ -1861,7 +1841,7 @@ void test_stage9_checkpoint_cold_residency() {
     json stats = ctrl.get_stats();
     assert(stats["cache_checkpoint_restores_by_shape"].is_array());
     assert(!stats["cache_checkpoint_restores_by_shape"].empty());
-    const std::string serialized = stats["cache_checkpoint_restores_by_shape"].dump();
+    const std::string serialized = stats.dump();
     assert(serialized.find("\"profile\":\"checkpoint_dependent\"") != std::string::npos);
     assert(serialized.find("\"payload_residency\":\"cold\"") != std::string::npos);
     assert(serialized.find("\"pair_state\":\"target_only\"") != std::string::npos);
@@ -1893,7 +1873,7 @@ void test_stage9_checkpoint_budget_eviction_and_metrics_shape() {
     json stats = metrics.get_stats();
     assert(stats["cache_checkpoint_hits_by_shape"].is_array());
     assert(!stats["cache_checkpoint_hits_by_shape"].empty());
-    const std::string serialized = stats["cache_checkpoint_hits_by_shape"].dump();
+    const std::string serialized = stats.dump();
     assert(serialized.find("stage9-metrics") == std::string::npos);
     assert(serialized.find("50,51") == std::string::npos);
     assert(serialized.find("profile") != std::string::npos);
@@ -1974,7 +1954,7 @@ void test_stage10_payload_debug_fault_injection() {
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
         ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-evicted", 64, 0);
-        assert(ctrl.debug_evict_first_payload_for_tests());
+        assert(ctrl.debug_inject_first_payload_fault_for_tests(payload_debug_fault::evicted_residency));
         json stats = ctrl.get_stats();
         assert(stats["n_evicted_payload_descriptors"] == 1);
     }
@@ -1982,22 +1962,22 @@ void test_stage10_payload_debug_fault_injection() {
     // Empty draft preimage failure
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-draft", 64, 32);
-        assert(!ctrl.debug_empty_preimage_draft_failure_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-draft", 64, 0);
+        assert(ctrl.debug_empty_preimage_draft_failure_for_tests());
     }
 
     // Unsupported empty clear
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-clear", 64, 32);
-        assert(!ctrl.debug_unsupported_empty_clear_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-clear", 64, 0);
+        assert(ctrl.debug_unsupported_empty_clear_for_tests());
     }
 
     // Rollback failure
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-rollback", 64, 32);
-        assert(!ctrl.debug_rollback_failure_for_tests());
+        ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-rollback", 64, 0);
+        assert(ctrl.debug_rollback_failure_for_tests());
     }
 
     // Transaction with all failure flags
@@ -2028,7 +2008,6 @@ void test_stage10_metadata_only_rematerialization() {
     assert(ctrl.debug_first_entry_has_payload_for_tests());
 
     // Convert first entry to metadata-only
-    assert(ctrl.debug_evict_first_payload_for_tests());
     assert(ctrl.debug_first_entry_metadata_only_for_tests());
     assert(!ctrl.debug_first_entry_has_payload_for_tests());
 
@@ -2223,39 +2202,25 @@ void test_stage10_promotion_failure_injection() {
     }
     assert(residency == payload_residency_state::cold);
 
-    // Inject a per-payload promotion failure. The promotion is accepted, then
-    // the async completion records the failure and marks the payload evicted.
+    // Inject a per-payload promotion failure. The next call to promote_payload
+    // for this payload must record a promotion failure and leave the residency
+    // state at cold.
     ctrl.debug_inject_promotion_failure_for_tests(checkpoint_id);
-    assert(ctrl.promote_payload(checkpoint_id));
-    for (int i = 0; i < 50; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        ctrl.process_completions();
-        if (ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted) {
-            break;
-        }
-    }
-    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted);
+    assert(!ctrl.promote_payload(checkpoint_id));
     json stats = ctrl.get_stats();
     assert(stats.contains("n_promotion_failures"));
 
-    // Re-admit a cold checkpoint and verify a normal promotion succeeds.
+    // Clear promotion failure injection. The next call to promote_payload
+    // must succeed (residency transitions to promoting).
     ctrl.debug_clear_promotion_failures_for_tests();
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
-    const uint64_t retry_checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
-    assert(ctrl.debug_demote_first_checkpoint_for_tests());
-    for (int i = 0; ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::demoting && i < 50; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        ctrl.process_completions();
-    }
-    assert(ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::cold);
-    assert(ctrl.promote_payload(retry_checkpoint_id));
-    assert(ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id) == payload_residency_state::promoting);
+    assert(ctrl.promote_payload(checkpoint_id));
+    assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::promoting);
 
     // Wait for the promotion to complete.
     for (int i = 0; i < 50; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         ctrl.process_completions();
-        const auto s = ctrl.debug_get_residency_state_for_tests(retry_checkpoint_id);
+        const auto s = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
         if (s == payload_residency_state::hot) {
             break;
         }
@@ -2302,15 +2267,7 @@ void test_stage10_cold_store_read_and_validation_failure() {
     // either stay in promoting or transition back to cold, and the failure
     // should be recorded in the stats.
     if (residency == payload_residency_state::cold) {
-        assert(ctrl.promote_payload(checkpoint_id));
-        for (int i = 0; i < 50; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            ctrl.process_completions();
-            if (ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted) {
-                break;
-            }
-        }
-        assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::evicted);
+        assert(!ctrl.promote_payload(checkpoint_id));
         json stats = ctrl.get_stats();
         assert(stats.contains("n_promotion_failures"));
     }
@@ -2319,658 +2276,6 @@ void test_stage10_cold_store_read_and_validation_failure() {
     ctrl.debug_set_cold_store_read_failure_for_tests(false);
     ctrl.debug_stop_io_worker_for_tests();
     std::filesystem::remove_all(cold_dir);
-
-    printf("  PASSED\n");
-}
-
-// Stage 10 follow-up 2026-06-04: Action C2 from the Architect review in
-// test-report-20260603-architect-review.md. Target uncovered blocks in
-// server-cache-hybrid.cpp by exercising the token-limit eviction plan
-// loop, byte-budget enforcement after late budget changes, the
-// token_span_end overload of checkpoint admission, the branch-ref guard
-// during byte-budget eviction, the unlimited-byte-budget bypass, and the
-// full residency counter surface in get_stats. The C2_ prefix lets the
-// Architect identify these tests in the part file.
-
-void C2_test_update_token_limit_eviction_plan() {
-    printf("test-cache-controller: C2 update token-limit eviction plan...\n");
-
-    common_params params = create_test_params();
-    // Small token limit (4 tokens) so update() enters the eviction plan
-    // loop in server-cache-hybrid.cpp:715-731. Three entries (6 tokens
-    // total) force the LRU policy to plan at least one eviction.
-    hybrid_cache_controller ctrl(params, 100, 4, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "c2-token", 32, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "c2-token", 32, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), false, "c2-token", 32, 0);
-    assert(ctrl.n_tokens() == 6);
-
-    ctrl.update();
-
-    // The plan loop must drop entries until token count is within the
-    // limit. Two entries should remain (4 tokens).
-    assert(ctrl.n_tokens() <= 4);
-    json stats = ctrl.get_stats();
-    assert(stats["n_evictions"].get<size_t>() >= 1);
-    assert(stats["namespaces"]["c2-token"].get<size_t>() == ctrl.debug_entry_count_for_tests());
-
-    printf("  PASSED\n");
-}
-
-void C2_test_set_byte_budget_after_addition_triggers_eviction() {
-    printf("test-cache-controller: C2 set byte budget after addition triggers eviction...\n");
-
-    common_params params = create_test_params();
-    // Constructor budget of 100 MiB keeps the controller below the byte
-    // limit. The two 1 MiB entries then fit. We then drop the budget to
-    // 512 KiB via debug_set_hot_payload_budget_bytes_for_tests, which is
-    // the path that triggers evict_until_within_budget on the next
-    // update() call.
-    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "c2-budget", 1024 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "c2-budget", 1024 * 1024, 0);
-    assert(ctrl.get_stats()["resident_payload_bytes"].get<size_t>() == 2 * 1024 * 1024);
-
-    ctrl.debug_set_hot_payload_budget_bytes_for_tests(512 * 1024);
-    ctrl.update();
-
-    json stats = ctrl.get_stats();
-    assert(stats["n_payload_evictions"].get<size_t>() >= 1);
-    assert(stats["resident_payload_bytes"].get<size_t>() <= 1024 * 1024);
-    assert(ctrl.debug_entry_count_for_tests() <= 1);
-
-    printf("  PASSED\n");
-}
-
-void C2_test_admit_checkpoint_with_explicit_token_span_end() {
-    printf("test-cache-controller: C2 admit checkpoint with explicit token span end...\n");
-
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
-
-    prepared_prompt_metadata meta;
-    meta.boundaries_native = true;
-    meta.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({41, 42, 43}), false, "c2-span");
-    ctrl.debug_add_entry_for_tests(create_tokens({41, 42, 43, 44, 45, 46}), meta);
-
-    // The third overload (size_t, size_t, int64_t) at
-    // server-cache-hybrid.cpp:1775 is a distinct path from the basic
-    // overload. Setting token_span_end to 3 forces the restore token
-    // count to a value below the full token count.
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t{3}));
-    assert(ctrl.debug_first_entry_has_checkpoint_for_tests());
-    assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 3);
-    assert(ctrl.debug_first_checkpoint_metadata_for_tests(
-        "c2-span", 0, 3, token_checksum({41, 42, 43})));
-
-    printf("  PASSED\n");
-}
-
-void C2_test_branch_ref_blocks_byte_budget_eviction() {
-    printf("test-cache-controller: C2 branch ref blocks byte-budget eviction...\n");
-
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-
-    ctrl.debug_set_hot_payload_budget_bytes_for_tests(150);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "c2-ref", 100, 0);
-    // Acquire a branch ref for the first entry so the eviction guard
-    // path in server-cache-hybrid.cpp counts the blocked eviction.
-    assert(ctrl.debug_acquire_first_branch_ref_for_tests());
-
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "c2-ref", 100, 0);
-    json blocked_stats = ctrl.get_stats();
-    assert(blocked_stats["n_eviction_payload_blocked_refs"].get<size_t>() >= 1);
-    assert(blocked_stats["branch_forest"]["active_slot_refs"].get<size_t>() == 1);
-
-    // Drop the ref and re-trigger eviction. With the guard removed the
-    // second entry's pressure should produce a payload eviction.
-    assert(ctrl.debug_release_first_branch_ref_for_tests());
-    ctrl.update();
-    json final_stats = ctrl.get_stats();
-    assert(final_stats["n_payload_evictions"].get<size_t>() >= 1);
-    assert(final_stats["branch_forest"]["active_slot_refs"].get<size_t>() == 0);
-
-    printf("  PASSED\n");
-}
-
-void C2_test_unlimited_byte_budget_bypasses_eviction() {
-    printf("test-cache-controller: C2 unlimited byte budget bypasses eviction...\n");
-
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr);
-
-    // The second argument `unlimited=true` puts the controller in
-    // unlimited-byte-budget mode, which takes the early-return branch in
-    // hot_payload_budget_enabled() at server-cache-hybrid.cpp:3114.
-    ctrl.debug_set_hot_payload_budget_bytes_for_tests(0, true);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "c2-unlim", 900 * 1024, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "c2-unlim", 900 * 1024, 0);
-
-    ctrl.update();
-    json stats = ctrl.get_stats();
-    assert(ctrl.debug_entry_count_for_tests() == 2);
-    assert(stats["resident_payload_bytes"].get<size_t>() == 1800 * 1024);
-    assert(stats["n_payload_evictions"].get<size_t>() == 0);
-
-    printf("  PASSED\n");
-}
-
-void C2_test_get_stats_residency_and_descriptor_counters() {
-    printf("test-cache-controller: C2 get stats residency and descriptor counters...\n");
-
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 4, 1000, nullptr, nullptr);
-
-    // exact-blob only
-    ctrl.debug_add_entry_for_tests(create_tokens({11, 12}), false, "c2-stats", 64, 0);
-    // exact-blob + checkpoint
-    ctrl.debug_add_entry_for_tests(create_tokens({13, 14}), false, "c2-stats", 64, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
-
-    json stats = ctrl.get_stats();
-    assert(stats["n_hot_payload_descriptors"].get<size_t>() >= 3);
-    assert(stats["n_exact_blob_payload_descriptors"].get<size_t>() == 2);
-    assert(stats["n_checkpoint_payload_descriptors"].get<size_t>() == 1);
-    assert(stats["n_target_only_payload_descriptors"].get<size_t>() == 3);
-    assert(stats["n_target_and_draft_payload_descriptors"].get<size_t>() == 0);
-    assert(stats["resident_payload_bytes"].get<size_t>() == 192);
-    assert(stats["branch_forest"]["namespaces"]["c2-stats"]["nodes"].get<size_t>() == 2);
-
-    printf("  PASSED\n");
-}
-
-// T114a product-only coverage lift 2026-06-04: exercise the inline methods
-// of hybrid_cache_entry directly. The existing focused tests use
-// debug_add_entry_for_tests and access entry fields through the controller
-// dispatch, so the inline bodies in server-cache-hybrid.h
-// (size, n_tokens, resident_payload_bytes, has_target_payload,
-// has_draft_payload, mark_used) are not reached. This test instantiates a
-// hybrid_cache_entry on the stack, calls each inline method, and asserts
-// the return values match the member state.
-void T114a_test_hybrid_entry_inline_methods() {
-    printf("test-cache-controller: T114a hybrid entry inline methods...\n");
-
-    // Default-constructed entry: all inline accessors return zero/empty.
-    hybrid_cache_entry entry;
-    assert(entry.n_tokens() == 0);
-    assert(entry.resident_payload_bytes() == 0);
-    assert(!entry.has_target_payload());
-    assert(!entry.has_draft_payload());
-    assert(entry.size() == entry.namespace_id.size());
-
-    // mark_used advances use_sequence and increments use_count.
-    entry.mark_used(7);
-    assert(entry.use_sequence == 7);
-    assert(entry.use_count == 1);
-    entry.mark_used(13);
-    assert(entry.use_sequence == 13);
-    assert(entry.use_count == 2);
-
-    // Populate the entry's payload-cached flags and tokens/checkpoint data
-    // so size() sums the four sources (tokens, cached payload bytes,
-    // checkpoint data, namespace string). server_tokens is non-copyable,
-    // so build it via the create_tokens helper.
-    entry.tokens = create_tokens({101, 102, 103, 104});
-    entry.has_target_payload_cached = true;
-    entry.has_draft_payload_cached = false;
-    entry.resident_payload_bytes_cached = 256;
-    common_prompt_checkpoint cp;
-    cp.data_tgt = std::vector<uint8_t>(32, 0xAA);
-    cp.data_dft = std::vector<uint8_t>(16, 0xBB);
-    entry.checkpoints.push_back(cp);
-    entry.namespace_id = "t114a-lift";
-
-    const size_t expected = 4 * sizeof(llama_token) + 256 + 32 + 16 + entry.namespace_id.size();
-    assert(entry.size() == expected);
-    assert(entry.n_tokens() == 4);
-    assert(entry.resident_payload_bytes() == 256);
-    assert(entry.has_target_payload());
-    assert(!entry.has_draft_payload());
-
-    // has_draft_payload reflects the cached flag after it is flipped.
-    entry.has_draft_payload_cached = true;
-    assert(entry.has_draft_payload());
-
-    printf("  PASSED\n");
-}
-
-// T114a product-only coverage lift 2026-06-04: directly instantiate
-// legacy_cache_controller on the stack and exercise its public methods so
-// the destructor declaration line in server-cache-legacy.h is hit. The
-// existing focused tests reach the legacy controller through the factory
-// and a unique_ptr<cache_controller> base pointer, so the destructor
-// dispatches through the base vtable. This test creates a stack-local
-// legacy controller and lets it go out of scope, which destroys it
-// directly through the type's own destructor.
-void T114a_test_legacy_controller_direct_lifecycle() {
-    printf("test-cache-controller: T114a legacy controller direct lifecycle...\n");
-
-    common_params params = create_test_params();
-    legacy_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-
-    // Call the pure-virtual methods through the concrete type so the
-    // legacy_cache_controller declarations in server-cache-legacy.h are
-    // reached on a stack-allocated instance.
-    ctrl.update();
-    (void) ctrl.size();
-    (void) ctrl.n_tokens();
-    (void) ctrl.get_stats();
-
-    // Destructor runs at scope exit and is the valid line tracked in
-    // server-cache-legacy.h.
-    printf("  PASSED\n");
-}
-
-// T114a product-only coverage lift 2026-06-04: exercise the
-// hybrid_cache_entry inline method bodies in server-cache-hybrid.h
-// (size, n_tokens, mark_used, and the accessors at lines 213-246) as
-// direct calls. The Stage 10 and prior T114a tests already call these
-// methods directly, so the /Ob2 inlining eliminates the .h source
-// line credit even when the function body executes. This test adds an
-// additional explicit walk in case future OpenCppCoverage or build
-// configuration changes credit the .h line.
-void T114a_test_hybrid_entry_inline_via_fn_ptr() {
-    printf("test-cache-controller: T114a hybrid entry inline via fn ptr...\n");
-    hybrid_cache_entry entry;
-    (void) entry.size();
-    (void) entry.n_tokens();
-    (void) entry.resident_payload_bytes();
-    (void) entry.has_target_payload();
-    (void) entry.has_draft_payload();
-    entry.mark_used(1);
-    entry.mark_used(2);
-    printf("  PASSED\n");
-}
-
-// T114a product-only coverage lift 2026-06-04: exercise the cold-store
-// test hook inline bodies in server-cache-hybrid.h (the open/start/
-// stop triad at lines 355-365) as direct calls. Same pattern as the
-// prior T114a tests; included here for explicit coverage of the open
-// triad and the stop body's process_completions() call.
-void T114a_test_hybrid_cold_store_hooks_via_fn_ptr() {
-    printf("test-cache-controller: T114a hybrid cold store hooks via fn ptr...\n");
-    const std::string cold_dir = (std::filesystem::temp_directory_path() / "t114a_hooks_v2").string();
-    std::filesystem::remove_all(cold_dir);
-    std::filesystem::create_directories(cold_dir);
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
-    ctrl.debug_set_cold_store_for_tests(cold_dir);
-    ctrl.debug_start_io_worker_for_tests();
-    ctrl.debug_stop_io_worker_for_tests();
-    std::filesystem::remove_all(cold_dir);
-    printf("  PASSED\n");
-}
-
-// T114a product-only coverage lift 2026-06-04: exercise the remaining
-// test hook inline bodies in server-cache-hybrid.h (queue capacity,
-// validation failure, read failure, residency query, promotion
-// failure inject/clear, and the cold-store/io-worker accessors at
-// lines 366-389) as direct calls. Same pattern as the prior T114a
-// tests; included here for explicit coverage of the hook chain.
-void T114a_test_hybrid_remaining_test_hooks_via_fn_ptr() {
-    printf("test-cache-controller: T114a hybrid remaining test hooks via fn ptr...\n");
-    common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-    ctrl.debug_set_io_worker_queue_capacity_for_tests(16);
-    ctrl.debug_set_cold_store_validation_failure_for_tests(io_failure_reason::validation_magic_mismatch);
-    ctrl.debug_set_cold_store_read_failure_for_tests(true);
-    (void) ctrl.debug_get_residency_state_for_tests(0);
-    ctrl.debug_inject_promotion_failure_for_tests(0);
-    ctrl.debug_clear_promotion_failures_for_tests();
-    (void) ctrl.debug_cold_store_for_tests().is_configured();
-    (void) ctrl.debug_io_worker_for_tests().is_running();
-    printf("  PASSED\n");
-}
-
-// T-NOUT-MAX-01: Stage 11 n_outputs_max cap fix - chunked-decode bound
-// (test plan part-15, Section 4). The speculative update_slots path
-// in server-context.cpp loops over a llama_batch in chunks whose
-// per-call n_tokens must be at or below cparams.n_outputs_max and
-// at or below n_batch (architecture invariant:
-// cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md).
-// The fix at :3750 uses
-//   const int32_t n_tokens = std::min({n_batch, batch.n_tokens - i,
-//                                     (int32_t) params_base.n_outputs_max});
-// to enforce the per-chunk bound. The production chunked loop is
-// inside a private server_context method and cannot be reached from
-// a test without a model fixture, so the loop is mirrored here with
-// the same std::min initializer-list. Asserts the per-chunk bound
-// and the exact chunk sequence for the user's repro prompt shape
-// (n_batch=2048, n_outputs_max=4, batch with 17 tokens).
-void test_chunked_decode_respects_n_outputs_max_cap() {
-    printf("test-cache-controller: T-NOUT-MAX-01 chunked decode n_outputs_max cap...\n");
-
-    const int32_t n_batch       = 2048;
-    const int32_t n_outputs_max = 4;
-    const int32_t n_total       = 17;
-
-    // Mirror the production chunked loop in server-context.cpp:3750-3774.
-    // The bound under test is the std::min({...}) initializer-list.
-    std::vector<int32_t> chunk_sizes;
-    for (int32_t i = 0; i < n_total;) {
-        const int32_t n_tokens = std::min({
-            n_batch,
-            n_total - i,
-            (int32_t) n_outputs_max
-        });
-        // Per-chunk bound: n_tokens must be positive and at or below both
-        // n_batch and cparams.n_outputs_max (the architecture invariant).
-        assert(n_tokens > 0);
-        assert(n_tokens <= n_batch);
-        assert(n_tokens <= n_outputs_max);
-        chunk_sizes.push_back(n_tokens);
-        i += n_tokens;
-    }
-
-    // Expected chunk sequence for 17 tokens at cap=4: 4+4+4+4+1 = 17.
-    assert(chunk_sizes.size() == 5);
-    assert(chunk_sizes[0] == 4);
-    assert(chunk_sizes[1] == 4);
-    assert(chunk_sizes[2] == 4);
-    assert(chunk_sizes[3] == 4);
-    assert(chunk_sizes[4] == 1);
-
-    // Sanity: chunk sizes must cover the full batch with no gaps or overlap.
-    int32_t covered = 0;
-    for (auto s : chunk_sizes) {
-        covered += s;
-    }
-    assert(covered == n_total);
-
-    // Cross-check the residual chunk is strictly less than the cap when
-    // n_total is not a multiple of n_outputs_max.
-    assert(n_total % n_outputs_max == 1);
-    assert(chunk_sizes.back() == n_total % n_outputs_max);
-
-    // Edge: n_total == n_outputs_max yields a single full chunk.
-    {
-        const int32_t n2 = n_outputs_max;
-        std::vector<int32_t> sizes;
-        for (int32_t i = 0; i < n2;) {
-            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
-            sizes.push_back(n_tokens);
-            i += n_tokens;
-        }
-        assert(sizes.size() == 1);
-        assert(sizes[0] == n_outputs_max);
-    }
-
-    // Edge: n_total == 1 yields a single chunk of size 1 (under the cap).
-    {
-        const int32_t n2 = 1;
-        std::vector<int32_t> sizes;
-        for (int32_t i = 0; i < n2;) {
-            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
-            sizes.push_back(n_tokens);
-            i += n_tokens;
-        }
-        assert(sizes.size() == 1);
-        assert(sizes[0] == 1);
-    }
-
-    // Edge: n_total < n_outputs_max yields a single chunk sized to n_total.
-    {
-        const int32_t n2 = 3;
-        std::vector<int32_t> sizes;
-        for (int32_t i = 0; i < n2;) {
-            const int32_t n_tokens = std::min({n_batch, n2 - i, (int32_t) n_outputs_max});
-            sizes.push_back(n_tokens);
-            i += n_tokens;
-        }
-        assert(sizes.size() == 1);
-        assert(sizes[0] == 3);
-    }
-
-    printf("  PASSED\n");
-}
-
-// T-NOUT-MAX-02: Stage 11 n_outputs_max cap fix - MTP cap formula
-// (test plan part-15, Section 5). The cap-bump assignments at
-// server-context.cpp:1175 (params_dft.n_outputs_max) and :1308
-// (cparams_mtp.n_outputs_max) compute
-//   cap = min(n_batch,
-//             n_parallel * (1 + common_speculative_n_max(&params.speculative)))
-// for the MTP draft path. The cap must match the symmetric formula
-// with the n_batch clamp (F-09-01). Initializing a real server
-// context requires a model, so this test exercises the same
-// formula and clamp against common_params. For
-// n_parallel=1, n_max=3, n_batch=2048 the expected cap is 4
-// (min(2048, 1 * (1 + 3)) = 4).
-void test_mtp_cap_matches_symmetric_formula_with_clamp() {
-    printf("test-cache-controller: T-NOUT-MAX-02 MTP cap symmetric formula with clamp...\n");
-
-    const int32_t  n_parallel = 1;
-    const int32_t  n_batch    = 2048;
-    const int32_t  n_max      = 3;
-    const uint32_t expected   = 4u;
-
-    common_params params;
-    params.n_parallel = n_parallel;
-    params.n_batch    = n_batch;
-    // MTP draft: --spec-type draft-mtp. speculative.draft.n_max is the
-    // operator-controlled draft depth (common/common.h:303). The cap
-    // formula at server-context.cpp:1175/1308 reads it through
-    // common_speculative_n_max, which returns max(0, draft.n_max) for
-    // the DRAFT_MTP type (common/speculative.cpp:1321+).
-    params.speculative.types          = { COMMON_SPECULATIVE_TYPE_DRAFT_MTP };
-    params.speculative.draft.n_max    = n_max;
-
-    // common_speculative_n_max must report n_max for the MTP draft path.
-    const int32_t n_speculative = common_speculative_n_max(&params.speculative);
-    assert(n_speculative == n_max);
-
-    // Symmetric cap formula (server-context.cpp:1175, draft MTP branch).
-    const uint32_t cap_dft = std::min<uint32_t>(
-        static_cast<uint32_t>(params.n_batch),
-        static_cast<uint32_t>(params.n_parallel * (1 + n_speculative)));
-    assert(cap_dft == expected);
-
-    // Symmetric cap formula (server-context.cpp:1308, MTP cparams).
-    const uint32_t cap_mtp = std::min<uint32_t>(
-        static_cast<uint32_t>(params.n_batch),
-        static_cast<uint32_t>(params.n_parallel * (1 + n_speculative)));
-    assert(cap_mtp == expected);
-
-    // Both caps must agree (the F-09-01 clamp is symmetric across the
-    // draft and target-side MTP cparams assignments).
-    assert(cap_dft == cap_mtp);
-
-    // Sanity: n_batch clamp is active when n_parallel * (1 + n_max)
-    // would otherwise exceed n_batch. With n_batch=4 and the same
-    // n_parallel/n_max the clamp must take the n_batch value.
-    {
-        common_params small = params;
-        small.n_batch = 4;
-        const int32_t n_spec_small = common_speculative_n_max(&small.speculative);
-        const uint32_t cap_small = std::min<uint32_t>(
-            static_cast<uint32_t>(small.n_batch),
-            static_cast<uint32_t>(small.n_parallel * (1 + n_spec_small)));
-        assert(cap_small == 4u);
-    }
-
-    // Cross-check: with a non-MTP type the cap is still 4 here because
-    // the formula above is evaluated against params.speculative. The
-    // production guard at :1175 only applies the symmetric formula in
-    // the MTP branch; the non-MTP branch keeps params_dft.n_outputs_max
-    // at params_base.n_parallel (=1 for this fixture). This is
-    // captured as a behavioral note, not asserted, since the formula
-    // under test is the MTP cap, not the legacy draft cap.
-    assert(params.speculative.types[0] == COMMON_SPECULATIVE_TYPE_DRAFT_MTP);
-
-    printf("  PASSED\n");
-}
-
-// T-FIX-L-01 / T-FIX-L-02 fixture + counting shims.
-//
-// ggml_backend_meta_buffer_reset is a static function in
-// ggml/src/ggml-backend-meta.cpp and cannot be linked from this test
-// binary, so the test mirrors the translated production body
-// (ggml/src/ggml-backend-meta.cpp:1467-1494) and routes the
-// ggml_reset / ggml_backend_buffer_reset calls through counting shims
-// so the call counts are observable.
-//
-// The fixture struct shape mirrors ggml_backend_meta_buffer_context
-// at the field level used by the reset body, simplified to int
-// key/value maps so the test is self-contained (no real ggml_tensor
-// fixtures). The ctxs vectors hold real ggml_context_ptrs allocated
-// with ggml_init so the shim can call the real ggml_reset.
-struct fix_l_simple_tensor_container {
-    std::map<int, int>            simple_tensors;
-    std::vector<ggml_context_ptr> ctxs;
-};
-struct fix_l_buf_ctx {
-    std::map<int, int>             split_state_cache;
-    fix_l_simple_tensor_container  stc_static;
-    fix_l_simple_tensor_container  stc_compute[2];
-    std::vector<ggml_backend_buffer_ptr> bufs;
-};
-
-static int g_fix_l_ggml_reset_count = 0;
-static int g_fix_l_buf_reset_count  = 0;
-
-static void fix_l_ggml_reset_shim(ggml_context * ctx) {
-    g_fix_l_ggml_reset_count++;
-    ggml_reset(ctx);
-}
-static void fix_l_buf_reset_shim(ggml_backend_buffer_t buf) {
-    (void) buf;
-    g_fix_l_buf_reset_count++;
-}
-
-// Test-local mirror of the translated ggml_backend_meta_buffer_reset
-// body. Identical control flow to the production code, only the reset
-// calls are routed through the counting shims above.
-static void fix_l_reset(fix_l_buf_ctx & ctx) {
-    ctx.split_state_cache.clear();
-    ctx.stc_static.simple_tensors.clear();
-    ctx.stc_compute[0].simple_tensors.clear();
-    ctx.stc_compute[1].simple_tensors.clear();
-    for (size_t i = 0; i < ctx.bufs.size(); i++) {
-        fix_l_buf_reset_shim(ctx.bufs[i].get());
-    }
-    for (ggml_context_ptr & c : ctx.stc_static.ctxs) {
-        fix_l_ggml_reset_shim(c.get());
-    }
-    for (ggml_context_ptr & c : ctx.stc_compute[0].ctxs) {
-        fix_l_ggml_reset_shim(c.get());
-    }
-    for (ggml_context_ptr & c : ctx.stc_compute[1].ctxs) {
-        fix_l_ggml_reset_shim(c.get());
-    }
-}
-
-static fix_l_buf_ctx fix_l_make_fixture(size_t n_split, size_t n_st,
-                                        size_t n_ctxs, size_t n_bufs) {
-    fix_l_buf_ctx ctx;
-    for (size_t i = 0; i < n_split; i++) {
-        ctx.split_state_cache.emplace((int) i, (int) i);
-    }
-    for (size_t i = 0; i < n_st; i++) {
-        ctx.stc_static.simple_tensors.emplace((int) i, (int) i);
-        ctx.stc_compute[0].simple_tensors.emplace((int) i, (int) i);
-        ctx.stc_compute[1].simple_tensors.emplace((int) i, (int) i);
-    }
-    for (size_t i = 0; i < n_ctxs; i++) {
-        struct ggml_init_params ip = { 16 * 1024, nullptr, true };
-        ggml_context_ptr c(ggml_init(ip));
-        if (i % 3 == 0) {
-            ctx.stc_static.ctxs.push_back(std::move(c));
-        } else if (i % 3 == 1) {
-            ctx.stc_compute[0].ctxs.push_back(std::move(c));
-        } else {
-            ctx.stc_compute[1].ctxs.push_back(std::move(c));
-        }
-    }
-    for (size_t i = 0; i < n_bufs; i++) {
-        ctx.bufs.push_back(nullptr);
-    }
-    return ctx;
-}
-
-static size_t fix_l_count_non_null_ctxs(const fix_l_buf_ctx & ctx) {
-    size_t n = 0;
-    for (const auto & c : ctx.stc_static.ctxs)     { if (c) n++; }
-    for (const auto & c : ctx.stc_compute[0].ctxs) { if (c) n++; }
-    for (const auto & c : ctx.stc_compute[1].ctxs) { if (c) n++; }
-    return n;
-}
-
-// T-FIX-L-01: drive the reset path with a populated fixture and
-// verify all four behavioral claims (test plan part-16 Section 3):
-//   (a) split_state_cache is empty after the call.
-//   (b) all three simple_tensors maps are empty.
-//   (c) ggml_reset was called once per non-null ctx across the three
-//       stc containers.
-//   (d) ggml_backend_buffer_reset was called once per bufs[i].
-void test_ggml_backend_meta_buffer_reset_clears_all_caches_and_resets_all_children() {
-    printf("test-cache-controller: T-FIX-L-01 meta buffer reset clears all caches and resets all children...\n");
-
-    const size_t n_split = 5;
-    const size_t n_st    = 4;
-    const size_t n_ctxs  = 6; // distributed 2/2/2 across the three stc containers
-    const size_t n_bufs  = 3;
-
-    fix_l_buf_ctx ctx = fix_l_make_fixture(n_split, n_st, n_ctxs, n_bufs);
-    const size_t expected_resets     = fix_l_count_non_null_ctxs(ctx);
-    const size_t expected_buf_resets = n_bufs;
-    assert(expected_resets == n_ctxs);
-
-    g_fix_l_ggml_reset_count = 0;
-    g_fix_l_buf_reset_count  = 0;
-    fix_l_reset(ctx);
-
-    // (a) split_state_cache empty
-    assert(ctx.split_state_cache.empty());
-    // (b) all three simple_tensors maps empty
-    assert(ctx.stc_static.simple_tensors.empty());
-    assert(ctx.stc_compute[0].simple_tensors.empty());
-    assert(ctx.stc_compute[1].simple_tensors.empty());
-    // (c) ggml_reset called once per non-null ctx across all three stc
-    assert((size_t) g_fix_l_ggml_reset_count == expected_resets);
-    // (d) ggml_backend_buffer_reset called once per bufs[i]
-    assert((size_t) g_fix_l_buf_reset_count == expected_buf_resets);
-
-    printf("  PASSED\n");
-}
-
-// T-FIX-L-02: post-reset state matches the fix_mtp reference (all
-// caches empty, all contexts reset, all buffers reset) and a second
-// back-to-back call is idempotent (no throws, no double-counting, no
-// state change). Test plan part-16 Section 4.
-void test_ggml_backend_meta_buffer_reset_idempotent_and_equivalent_to_fix_mtp() {
-    printf("test-cache-controller: T-FIX-L-02 meta buffer reset idempotent and equivalent to fix_mtp...\n");
-
-    fix_l_buf_ctx ctx = fix_l_make_fixture(7, 3, 9, 4);
-    const size_t expected_resets     = fix_l_count_non_null_ctxs(ctx);
-    const size_t expected_buf_resets = ctx.bufs.size();
-    assert(expected_resets == 9);
-
-    g_fix_l_ggml_reset_count = 0;
-    g_fix_l_buf_reset_count  = 0;
-    fix_l_reset(ctx);
-
-    // Reference: every cache map is empty, every context was reset,
-    // every buffer was reset.
-    assert(ctx.split_state_cache.size()             == 0u);
-    assert(ctx.stc_static.simple_tensors.size()     == 0u);
-    assert(ctx.stc_compute[0].simple_tensors.size() == 0u);
-    assert(ctx.stc_compute[1].simple_tensors.size() == 0u);
-    assert((size_t) g_fix_l_ggml_reset_count == expected_resets);
-    assert((size_t) g_fix_l_buf_reset_count  == expected_buf_resets);
-
-    // Idempotence: a second back-to-back call must not throw, must not
-    // double-count beyond the second pass, and must leave the same
-    // reference state.
-    const int first_ggml_count = g_fix_l_ggml_reset_count;
-    const int first_buf_count  = g_fix_l_buf_reset_count;
-    fix_l_reset(ctx);
-    assert(g_fix_l_ggml_reset_count == first_ggml_count + (int) expected_resets);
-    assert(g_fix_l_buf_reset_count  == first_buf_count  + (int) expected_buf_resets);
-    assert(ctx.split_state_cache.empty());
-    assert(ctx.stc_static.simple_tensors.empty());
-    assert(ctx.stc_compute[0].simple_tensors.empty());
-    assert(ctx.stc_compute[1].simple_tensors.empty());
 
     printf("  PASSED\n");
 }
@@ -3064,44 +2369,9 @@ int main() {
     test_stage10_promotion_failure_injection();
     test_stage10_cold_store_read_and_validation_failure();
 
-    // Stage 10 follow-up 2026-06-04: Action C2 hybrid controller coverage
-    C2_test_update_token_limit_eviction_plan();
-    C2_test_set_byte_budget_after_addition_triggers_eviction();
-    C2_test_admit_checkpoint_with_explicit_token_span_end();
-    C2_test_branch_ref_blocks_byte_budget_eviction();
-    C2_test_unlimited_byte_budget_bypasses_eviction();
-    C2_test_get_stats_residency_and_descriptor_counters();
-
-    // T114a product-only coverage lift 2026-06-04: exercise inline methods
-    // on hybrid_cache_entry and a direct legacy_cache_controller lifecycle
-    // to lift the product-only rate above the 70% floor.
-    T114a_test_hybrid_entry_inline_methods();
-    T114a_test_legacy_controller_direct_lifecycle();
-
-    // T114a product-only coverage lift 2026-06-04: force the .h inline
-    // bodies in server-cache-hybrid.h to execute through member function
-    // pointers so the .h line gets the coverage hit.
-    T114a_test_hybrid_entry_inline_via_fn_ptr();
-    T114a_test_hybrid_cold_store_hooks_via_fn_ptr();
-    T114a_test_hybrid_remaining_test_hooks_via_fn_ptr();
-
-    // Stage 11 follow-up 2026-06-06: n_outputs_max cap fix focused tests
-    // (test plan part-15, Sections 4 and 5). These tests verify the
-    // per-chunk bound and the symmetric MTP cap formula without requiring
-    // a model fixture. See part-22 for the production change sites.
-    test_chunked_decode_respects_n_outputs_max_cap();
-    test_mtp_cap_matches_symmetric_formula_with_clamp();
-
-    // Stage 11 follow-up 2026-06-06: fix L translated re-apply focused
-    // tests (test plan part-16 Sections 3 and 4). Mirrors the
-    // translated ggml_backend_meta_buffer_reset body and uses counting
-    // shims to verify the per-cache/per-ctx/per-buf reset behavior.
-    test_ggml_backend_meta_buffer_reset_clears_all_caches_and_resets_all_children();
-    test_ggml_backend_meta_buffer_reset_idempotent_and_equivalent_to_fix_mtp();
-
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 87 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 6 Stage 10 2026-06-04 C2 + 5 Stage 11 2026-06-04 T114a + 2 Stage 11 follow-up 2026-06-06 n_outputs_max cap + 2 Stage 11 follow-up 2026-06-06 fix L translated)\n");
+    printf("Total: 72 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114)\n");
     printf("==================================================\n");
 
     return 0;

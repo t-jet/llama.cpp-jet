@@ -180,6 +180,10 @@ public:
 
     const mtmd::input_chunk_ptr & find_chunk(size_t idx) const;
 
+    // Returns token ids including MTMD placeholders. Cache code uses this for
+    // identity checks; inference paths should keep using get_tokens().
+    llama_tokens cache_token_ids() const;
+
     void push_back(llama_token tok);
 
     // will create a copy of the chunk if it contains non-text data

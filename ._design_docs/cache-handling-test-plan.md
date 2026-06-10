@@ -1,8 +1,8 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-06-02
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 10
+Last updated: 2026-06-09
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 13
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -52,7 +52,9 @@ This plan covers server integration tests for the cache behavior implemented now
 
 ## Finding current implementation status
 
-Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 6, Stage 7, Stage 8, Stage 9, and Stage 10, read:
+Use [document-index.md](./document-index.md) first. For Stage 4 through Stage 13, read the active stage design, implementation log, review gate, and plan part linked from the index and this plan.
+
+For Stage 4 through Stage 10, read:
 
 - [cache-handling-phase4-design.md](./cache-handling-phase4-design.md)
 - [cache-handling-phase4-implementation.md](./cache-handling-phase4-implementation.md)
@@ -97,6 +99,13 @@ Use [document-index.md](./document-index.md) first. For Stage 4, Stage 5, Stage 
 - [cache-handling-phase10-implementation/part-09-s10-impl-01-correction-evidence.md](./cache-handling-phase10-implementation/part-09-s10-impl-01-correction-evidence.md)
 - [cache-handling-phase10-implementation/part-10-architect-implementation-re-review-gate.md](./cache-handling-phase10-implementation/part-10-architect-implementation-re-review-gate.md)
 
+For Stage 13 endpoint compatibility planning and execution, read:
+
+- [cache-handling-phase13-design.md](./cache-handling-phase13-design.md)
+- [cache-handling-phase13-implementation.md](./cache-handling-phase13-implementation.md)
+- [cache-handling-phase13-implementation/part-09-architect-implementation-review.md](./cache-handling-phase13-implementation/part-09-architect-implementation-review.md)
+- [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
+
 ## Test coverage summary
 
 The integration plan covers:
@@ -111,6 +120,7 @@ The integration plan covers:
 - Stage 8 metadata-only retention, safe re-materialization planning, mismatch-parent handling, equivalent-branch deduplication, branch-metadata admission rejection, cold cleanup ownership, Stage 8 Prometheus metrics labels, and Stage 4-7 regression with metadata-only behavior enabled.
 - Stage 9 workload profile detection, checkpoint descriptor admission, checkpoint-first restore for checkpoint-dependent profiles, exact-first restore for plain transformers, target/draft checkpoint pair validation, checkpoint hot/cold residency, metrics labels, public boundary propagation, public `/metrics` evidence where possible, model-backed fixture rules, and Stage 4-8 regression after checkpoint integration.
 - Stage 10 observability metric shapes and escaping, bounded structured diagnostics, cold-store root and path hardening, startup validation, pressure and abuse handling, deterministic stress, 80% hybrid-path coverage evidence, benchmark evidence, operator documentation checks, security evidence, no marker-surface note, and Stage 4-9 regression after hardening.
+- Stage 13 endpoint compatibility after implementation review PASS: native completion, OpenAI completion/chat/responses/embeddings, Anthropic availability and completion-state handling, transcription availability or fixture blocking evidence, embeddings cache-exclusion evidence, slots regression, marker/public-schema stability, route-neutral preparation identity, degraded diagnostics, response schema stability, and clean-build/report gates.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 
 ## Current testable scope
@@ -168,6 +178,7 @@ Implemented behavior that must be covered:
 - Stage 10 pressure and abuse coverage includes tiny hot budgets, protected-root pressure, branch metadata pressure, large branch forests, queue pressure, shutdown with pending work, and repeated integrity failures.
 - No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
 - Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
+- Stage 13 keeps endpoint cache behavior selected by server flags and internal metadata. Public request and response schemas, `/slots`, and fork-only marker behavior must remain stable. Embedding routes are metadata-excluded unless a future implementation adds a real embedding cache save/restore path.
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -191,6 +202,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 18: Stage 12 stress and benchmarks](./cache-handling-test-plan/part-18-stage12-stress-benchmarks.md)
 - [Part 18a: Stage 12 operational details](./cache-handling-test-plan/part-18a-stage12-operational.md)
 - [Part 19: Stage 12 test automation](./cache-handling-test-plan/part-19-stage12-test-automation.md)
+- [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -222,6 +234,9 @@ cites the T114 row only and is not affected by the split.
 - [Stage 9 manager test-plan gate: 2026-06-01](./cache-handling-test-plan/stage-9-manager-test-plan-gate-20260601.md)
 - [Stage 10 test-plan review: 2026-06-02](./cache-handling-test-plan/stage-10-test-plan-review-20260602.md)
 - [Stage 10 manager test-plan gate: 2026-06-02](./cache-handling-test-plan/stage-10-manager-test-plan-gate-20260602.md)
+- [Stage 13 test-plan review: 2026-06-09](./cache-handling-test-plan/stage-13-test-plan-review-20260609.md)
+- [Stage 13 test-plan re-review: 2026-06-09](./cache-handling-test-plan/stage-13-test-plan-re-review-20260609.md)
+- [Stage 13 manager test-plan gate: 2026-06-09](./cache-handling-test-plan/stage-13-manager-test-plan-gate-20260609.md)
 
 ## Test scripts
 

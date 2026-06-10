@@ -179,6 +179,7 @@ struct prepared_prompt_metadata {
     std::string compatibility_key;
     std::string preparation_id;
     std::string degraded_reason;
+    std::string diagnostic_source;
     bool protect_system = false;
     bool protect_messages = false;
     bool boundaries_native = false;  // true if boundaries captured natively, false if inferred
@@ -222,11 +223,16 @@ struct prepared_prompt_metadata {
         return !degraded_reason.empty();
     }
 
+    bool degraded_diagnostic_required() const {
+        return degraded() && !diagnostic_source.empty();
+    }
+
     void clear() {
         boundaries.clear();
         compatibility_key.clear();
         preparation_id.clear();
         degraded_reason.clear();
+        diagnostic_source.clear();
         protect_system = false;
         protect_messages = false;
     }

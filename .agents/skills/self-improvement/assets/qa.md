@@ -91,10 +91,10 @@ Action:
 ## Improvement: avoid automatic-variable names in PowerShell harnesses
 
 Condition:
-- Writing or running inline PowerShell QA helpers that pass CLI arguments to server process
+- Writing or running inline PowerShell QA helpers, artifact helpers, or one-off rerun blocks that pass CLI arguments to server process
 
 Action:
-- Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`. Use explicit names like `ServerArgs`. Preserve discarded harness logs if collision starts wrong mode. Rerun before classifying product behavior.
+- Don't use parameter or variable names that collide with PowerShell automatic variables such as `Args`, including lowercase `$args`. Use explicit names like `ServerArgs`. Preserve discarded harness logs if collision starts wrong mode or router mode. Rerun before classifying product behavior.
 
 ## Improvement: verify Release-mode assertions in focused C++ tests
 
@@ -170,13 +170,21 @@ Condition:
 Action:
 - Carry those blockers forward as setup and evidence requirements for future execution report. Don't convert missing tools, dependencies, model fixtures, coverage output, or benchmark output into accepted skips in long-lived test plan.
 
+## Improvement: block unavailable mandatory endpoint rows
+
+Condition:
+- Reviewing QA plans for endpoint compatibility where design names route families, aliases, fixtures, or build features as part of the acceptance contract
+
+Action:
+- Treat missing in-scope routes, route registration, build support, tools, or fixtures as `BLOCKED` with exact prerequisite evidence. Don't allow `SKIP` unless the row is explicitly out of current scope by design or Manager decision.
+
 ## Improvement: reconcile gate status across reviewed docs
 
 Condition:
-- QA test-plan review includes doc hygiene checks and one of reviewed gate documents has stale stage status
+- QA planning or test-plan review includes doc hygiene checks and one of reviewed gate documents has stale stage status
 
 Action:
-- Update stale gate status when within requested documentation scope. Cite source gate that proves current state. Record hygiene correction in review report instead of leaving conflicting readiness signals for next owner.
+- Update stale gate status when within requested documentation scope. Cite source gate that proves current state. Record hygiene correction in the plan/review handoff instead of leaving conflicting readiness signals for next owner.
 
 ## Improvement: verify create_file path against near-duplicate dir names
 
@@ -283,6 +291,14 @@ Action:
 - Prepend CUDA toolkit `bin\x64\` directory to `PATH` (e.g. `$env:PATH = 'D:\app\cuda_13_2\bin\x64;' + $env:PATH`) before invoking test binary; same fix that makes `llama-server.exe` start in CUDA build.
 - Record PATH prefix in test report's environment section so next session does not waste time on same DLL diagnostic.
 
+## Improvement: enforce CUDA-only verdict evidence when requested
+
+Condition:
+- User or gate states all tests must run on CUDA, never CPU
+
+Action:
+- Verify `GGML_CUDA:BOOL=ON` in the active build directory before build, helper, or endpoint probes. If any CPU build or probe already ran in the same session, mark those artifacts discarded setup evidence and do not use them for verdicts. Require fresh CUDA binary timestamps for every row before recording PASS or FAIL; otherwise mark rows BLOCKED with exact CUDA build/process evidence.
+
 ## Improvement: distinguish Release-build coverage gap from Start-Process bug
 
 Condition:
@@ -332,6 +348,14 @@ Action:
 - Do not put `r or `n in the -replace replacement string. The PowerShell -replace operator processes `r as backslash+CR and `n as backslash+LF in the output, leaving the leading and trailing backtick characters in the file. The result is a markdown file with literal backslash chars mixed with CRLF. Confirmed in session 20260608-V1: file grew by 5 bytes, cr=0 became cr=2, and the section break at the substituted position produced bad text. Use [System.IO.File]::ReadAllBytes + a for loop to find and remove the bad bytes directly, or build the replacement using [char]13 + [char]10 concat with [string]::Replace (literal .NET string method) which does not interpret backticks at all.
 - Sanity check: after any -replace on a markdown file, run [System.IO.File]::ReadAllBytes and count [char]13 and [char]92 (backslash) occurrences; non-zero values for either mean the replacement introduced escape characters. Restore the file from a fresh Get-Content if either value is greater than 0 in a file that should be LF-only with no backslashes.
 
+## Improvement: avoid piping PowerShell control blocks
+
+Condition:
+- Writing inline PowerShell QA commands that collect conditional, foreach, or if/else output before saving evidence
+
+Action:
+- Don't pipe a closing `}` from an `if` or `foreach` block directly into `Tee-Object` or `Set-Content`; PowerShell can parse it as an empty pipe element and skip the evidence step. Assign output to an array or list first, then write the variable to disk.
+
 ## Improvement: reconcile verified state with actual file state
 
 Condition:
@@ -339,3 +363,62 @@ Condition:
 
 Action:
 - Do not blindly apply edits that would either fail (string not found) or corrupt (overwriting correct values with wrong ones). Use targeted Select-String to verify the current file state, then add a sub-session entry documenting the actual file state, the discrepancy with the verified state, and the reason no edits were applied. Hand off to the next sub-session with the corrected state. The verified state is a hint, not ground truth; the file on disk is authoritative.
+
+## Improvement: re-evaluate stale review reports
+
+Condition:
+- QA planning review finds an existing untracked or pre-existing review report for the same gate
+
+Action:
+- Re-evaluate each prior finding against the current user acceptance checklist and current source docs before preserving it. Rewrite stale report content, blocker IDs, and required-change text so they reflect the active gate, not an earlier reviewer's stricter or different handoff criteria. Remove stale allowances such as `BLOCKED or SKIP` when the current correction requires one exact verdict. If a re-review changes the verdict to PASS, mark prior blockers as `RESOLVED` or historical so the report cannot be read as still blocking.
+- When adding a separate re-review report, keep the original REWORK record and the new PASS re-review record distinct in parent lists and `document-index.md`; don't let one index entry conflate original findings with current readiness.
+
+
+## Improvement: /slots save needs filename in body, not just ?action=save
+
+Condition:
+- Probing E13-10 /slots save with `POST /slots/0?action=save` and empty `{}` body
+
+Action:
+- Send `{"filename":"<name>.slot"}` in the body. Without `filename`, server returns 500 with `key 'filename' not found`. With filename, save returns `id_slot,filename,n_saved,n_written,timings`. Use the same filename in the restore body. Don't classify 500-with-empty-body as a product schema bug.
+
+## Improvement: scope E13-14 leak scan to SRV_DBG line, not all log lines
+
+Condition:
+- E13-14 degraded-fallback probe must verify no prompt/marker/tool-arg leak, and server is started with `--log-verbosity 5`
+
+Action:
+- Scope the leak scan to the SRV_DBG `cache metadata: source=... method=... degraded=... tokens=... boundaries=...` line family. The pre-existing `log_server_r: request:` and `log_server_r: response:` lines at verbosity 5 echo the full request and response bodies (including any secret/marker/tool-arg inserted in the probe). That is a pre-existing debug log, not a Stage 13 regression. Mark the diagnostic line clean and note the pre-existing log behavior in the report so the next session does not misclassify the request log as a Stage 13 leak.
+
+## Improvement: do not call GetResponseStream on PowerShell HttpRequestException
+
+Condition:
+- Writing PowerShell probe script that captures `Invoke-RestMethod` failure details
+
+Action:
+- Don't call `$_.Exception.Response.GetResponseStream()` to read the error body. PowerShell wraps the response in a different exception type that does not expose `GetResponseStream`. Just store `$_.Exception.Message` into separate log artifacts via `Out-File` after the call. The error body line is also already visible at the end of `$_.ToString()`. If the response body is needed, send a follow-up request or use a different approach. Classify any 4xx/5xx by status code only when message body is not needed.
+
+## Improvement: rerun aliases after crash-contaminated endpoint probes
+
+Condition:
+- Endpoint execution runs multiple route aliases or related media routes through one server process, and an earlier request crashes or aborts the server before later aliases complete
+
+Action:
+- Do not classify later aliases from connection-refused or connection-reset artifacts caused by the earlier crash. Start a fresh server and run each alias first in isolation. Mark alias verdicts only from independent process evidence, while preserving the contaminated sequence as setup or crash lineage.
+
+## Improvement: resize audio context before endpoint verdict
+
+Condition:
+- Audio transcription endpoint rerun has a valid CUDA audio fixture and server reaches readiness, but the response is `exceed_context_size_error` before the old abort/reset behavior can be judged
+
+Action:
+- Treat the small-context attempt as harness setup evidence. Increase `--ctx-size` enough for the reported `n_prompt_tokens`, rerun each route in a fresh process, and base PASS/FAIL on the larger-context route evidence while preserving the undersized attempt.
+
+
+## Improvement: \/quit\ does not exist on this build, fall back gracefully
+
+Condition:
+- QA probe assumes a public POST \/quit\ endpoint exists on \llama-server\ for graceful shutdown before reading \stderr\ log file (to avoid Windows log flush loss from abrupt kill)
+
+Action:
+- Don't trust \/quit\ is registered on the current \llama-server\ build. Send the request and capture status first. If 404, fall back to \	askkill /pid\ (no \/F\). If the process was started with \-NoNewWindow\ and is detached, \	askkill /pid\ may not exit the process within 5-10s; record the fallback and use \Stop-Process -Id <pid> -Force\ only after confirming the log file already contains the full request phase (line count, last line content, or both diagnostic lines present for E13-14). The kill mechanism does not lose evidence when the log was complete before the kill. Cite \/quit\ 404 response and force fallback in the test report's process inventory so the next session knows the endpoint is not available and the kill chain.

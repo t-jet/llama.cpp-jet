@@ -102,7 +102,15 @@ Condition:
 - Fresh subagent delegation in runSubagent returns client error "Response too long" (or equivalent provider-side token or output length error) and subagent did not produce usable return message
 
 Action:
-- Don't treat error as subagent failure. Re-delegate to fresh subagent session with tighter prompt naming explicit return-message cap (e.g. "MAX 500 words" or "under 600 words") and listing exact fields return must include in that order. Shorten source-document list to essential 4-6 files and explicitly tell agent to skip reading large source files unless absolutely required. Keep work instructions specific (exact commands, exact paths, exact commit SHAs) so subagent can execute without inventing structure. Don't ask subagent to summarize files it has not read.
+- Don't treat error as subagent failure. Re-delegate to fresh subagent session with tighter prompt naming explicit return-message cap (e.g. "MAX 500 words" or "under 600 words") and listing exact fields return must include in that order. Shorten source-document list to essential 4-6 files and explicitly tell agent to skip reading large source files unless absolutely required. Keep work instructions specific (exact commands, exact paths, exact commit SHAs) so subagent can execute without inventing structure. Don't ask subagent to summarize files it has not read. When the delegated task is to review or read code in a large file (>= 1000 lines, e.g. server-context.cpp at 5667 lines), do NOT inline the file content or a long diff in the prompt; instead instruct the subagent to run `git diff <files>` or `git show <sha>:<path>` itself so the prompt stays small and the subagent's context does not overflow before it can produce a return. A prompt that includes a 100+ line inline diff is itself a likely cause of the "Response too long" error on the next delegation.
+
+## Improvement: stop gated workflow on subagent usage-limit failure
+
+Condition:
+- Required fresh subagent delegation fails before producing a gate artifact because `codex exec` returns a usage-limit or credit-limit error with a retry time
+
+Action:
+- Don't perform the delegated Architect, Developer, or QA gate yourself. Record the active gate, missing artifact, exact usage-limit retry time, and next owner in the final response. Verify no child subagent process remains running and stop only the timed-out delegated child if needed before ending.
 
 ## Improvement: verify merge commit shape before accepting merge claims
 
@@ -135,6 +143,34 @@ Action:
 - Do trust the most recent sub-session's per-row verdict over the Section 3 table state if they disagree; sub-session reclassifications can lag the table during long-running test execution
 - Don't edit the test report yourself; the QA sub-session is the sole writer of the report file
 - Don't re-do the polling work; the sub-session owns the v3 driver state and side log parse
+
+## Improvement: single-edit subagent delegations to avoid Response too long
+
+Condition:
+
+- Stage 13 closure doc sweep needed multiple edits across two durable docs (entry doc + document-index) and Architect subagent sessions repeatedly failed with `Response too long` model output limit on any prompt longer than ~3 paragraphs or any multi-edit delegation.
+
+Action:
+
+- Do split closure doc sweep into one focused single-edit subagent delegation per edit: status line, current gate paragraph, stage gate table, handoff section, new closure section, document-index row 1, document-index row 2.
+- Do forbid the subagent from loading skills, reading other files, or creating todo lists in each per-edit prompt.
+- Do include the exact OLD and NEW text in each per-edit prompt (no summarization, no interpretation).
+- Do verify the edit on disk between delegations.
+- Don't delegate a closure doc sweep as one Architect session with multiple edits and doc interpretation; even an `## Handoff`-sized block triggers the model output limit.
+- Don't trust subagent `Edit applied` return without verifying the actual file state on disk via `Select-String` or `git diff --check`.
+
+## Improvement: check document-index M state at closure sweep start
+
+Condition:
+
+- Stage closure doc sweep needs to update `._design_docs/document-index.md` and the file shows `M` (modified) status in `git status --short` at session start, suggesting a prior session may have applied partial edits.
+
+Action:
+
+- Do run `git diff HEAD -- ._design_docs/document-index.md | Measure-Object -Line` and `git diff --stat` before any closure edit, and read the M diff to detect regressions such as removed rows.
+- Do treat the M state as potentially pre-existing regression from a prior session, not a fresh worktree change.
+- Do restore any rows the M state removed before adding new closure rows, otherwise closure updates will land in an already-broken index.
+- Don't assume a clean worktree; do verify against HEAD on every closure sweep.
 
 ## Improvement: longrun 1000 threshold does not apply structurally
 
