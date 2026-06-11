@@ -562,10 +562,10 @@ void test_hybrid_rejects_partial_blob_match() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}));
-
+    // Stage 14 line 571 fix: use metadata form so entry namespace matches lookup.
     prepared_prompt_metadata meta;
-    GGML_UNUSED(meta);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta);
+
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 9})) == -1);
 
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 3, 4, 5})) == 4);
