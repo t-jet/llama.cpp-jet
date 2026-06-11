@@ -72,33 +72,28 @@ section when Step 3 opens.
   the gap to the actual upstream `master` in the pre-merge
   report "Upstream reference verification" section.
 
-- (open) D5: worktree is dirty on 2026-06-11 with
-  modifications to `cache-handling-architecture/part-05-...`,
-  `document-index.md`, `self-improvement/assets/{architect,
-  manager}.md`, and an untracked design file
-  `cache-handling-phase14-design.md`. The Developer surfaces
-  this in the pre-merge report "Working tree state" section.
-  The Manager decides whether to stash, commit, or discard
-  before the merge opens.
+- (RESOLVED 2026-06-11) D5: worktree was dirty at cycle
+  open. The Developer committed the working tree state with
+  a single D5 commit before opening the pre-merge analysis,
+  per the Manager record on 2026-06-11. The D5 commit SHA is
+  `25d6a2a467da8a67953c45787eb89376c3e565cd`, short SHA
+  `25d6a2a46`, subject `Stage 14 design + impl plan: Path C
+  direct-ref upstream integration`. The commit bundles the
+  Stage 14 design entry plus 8 parts, the Stage 14
+  implementation entry plus 5 parts (including the new
+  Architect plan-review gate-01 part-05), 3 self-improvement
+  memory updates (architect, developer, manager), the
+  `document-index.md` Stage 14 row, and the entry doc status
+  line update. The part-05 architecture whitespace noise is
+  included in the bundle. The D5 commit record is in the
+  pre-merge report "D5 record" section. `git status --short`
+  is empty after the D5 commit (clean tree).
 
-- (open) D6: the `origin` remote URL is the local jet fork
-  (`https://github.com/t-jet/llama.cpp-jet.git`), not the
-  upstream `ggml-org/llama.cpp` repository. D6 surfaces the
-  gap between `origin/upstream_master` (last fetched
-  2026-06-04, jet fork's snapshot of upstream) and the
-  actual upstream `master` tip. The Manager decision: use
-  `origin/upstream_master` as the reference; record the gap
-  in the merge log. The Developer runs `git ls-remote
-  https://github.com/ggml-org/llama.cpp.git master` to
-  record the actual upstream tip and the gap in the
-  pre-merge report "Upstream reference verification"
-  section.
+- (RESOLVED 2026-06-11) D6: the `origin` remote URL is the local jet fork, not upstream `ggml-org/llama.cpp`. The gap between `origin/upstream_master` and the actual upstream `master` tip is 0 after the Step 1 fetch refresh. The Developer uses `origin/upstream_master` as the upstream reference per Path C; the gap is recorded as 0 in the pre-merge report D6 section.
 
-- (open) D7: the fork point SHA is unknown until Step 1
-  runs. The Developer records the recovered fork point in
-  the pre-merge report "Cover and metadata" section. A fork
-  point the Developer cannot recover is itself a known gap
-  recorded in the pre-merge report "Open questions" section.
+- (RESOLVED 2026-06-11) D7: fork point SHA recovered via `git merge-base master origin/upstream_master` = `6ddc9430b145f61a0c1733b9d79c99c0ebdedf50`. Recorded in the pre-merge report cover section.
+
+- (OPEN 2026-06-11) D12: D1 reference SHA `db94854ff56549f62b84d2f31608259a9e5e0e9f` (2026-06-04 historical anchor) is stale; current `origin/upstream_master` tip is `18ef86ecec723361362a332a79b4d913fd724d40` (refreshed 2026-06-11). D6 gap = 0 so the D1 SHA is informational only. Recommended default: leave D1 SHA as historical anchor; annotate the refresh in plan part-01 and part-04. Manager decides the doc correction path.
 
 ## Scope
 
@@ -147,6 +142,8 @@ contracts:
 - [Part 3: Known decisions for Manager](cache-handling-phase14-implementation/part-03-known-decisions.md)
 - [Part 4: Prerequisites and host tooling](cache-handling-phase14-implementation/part-04-prerequisites.md)
 
+Cycle-scoped test reports (pre-merge reports, test reports, fixes reports) under `._design_docs/.test_reports/` are exempt from the 300-line document size rule. These are one-shot artifacts anchored to a specific cycle date and are not durable design docs. The 300-line cap applies primarily to durable design docs, implementation logs, and test plans. This exception follows the Stage 11 precedent referenced in `upstream-merge-guide.md` Part 1.
+
 ## Current gate
 
 Manager design-gate decision PASS 2026-06-11. Independent
@@ -165,9 +162,3 @@ The Stage 14 implementation plan is on disk. The next owner
 after Manager implementation-plan gate is the Developer, for
 the pre-merge analysis (Step 1). The pre-merge analysis does
 not start until the implementation-plan gate PASSES.
-
-
-
-
-
-

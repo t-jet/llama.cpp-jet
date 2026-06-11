@@ -116,6 +116,8 @@ Part 1 section 2.
 | 7 | `GET .../compare/<local-tip>...master` | The ahead or behind count and the status. |
 | 8 | `git remote -v` | The remote URL. Returns `https://github.com/t-jet/llama.cpp-jet.git` on 2026-06-11. |
 
+D1 historical anchor SHA: `db94854ff56549f62b84d2f31608259a9e5e0e9f` (2026-06-04). Current tip may differ; refresh at Step 1 open. D12 records the live tip.
+
 ### Staleness check
 
 The local `upstream_master` tracking branch is not used in

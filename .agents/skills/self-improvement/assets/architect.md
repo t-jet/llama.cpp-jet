@@ -361,6 +361,15 @@ Condition:
 
 Action:
 - Plan part-06 split up front: keep merge log + constraints + observability + testability + risks in part-06, move exclusions + traceability + handoff to a part-06a overflow file, and link part-06a from part-06 and the entry-doc contents list. The Stage 11 part-06 was 207 lines; adding Stage 12 (stress S01..S08, L01..L03, B01..B08, config matrix, public metric shape) and Stage 13 (E13-01..E13-16, MTMD placeholder, diagnostic-source namespace isolation, bounded cache metadata: format, transcript route coverage, embedding cache exclusion) contract rows pushes part-06 to ~325 lines, over the 300-line cap. Verify with Get-Content | Measure-Object -Line after writing and split immediately when the count exceeds 300. Don't try to trim the constraint or traceability table to fit; the new contracts are mandatory and the cap is a hard rule.
+
+## Improvement: Cycle-scoped test reports under .test_reports/ and the 300-line split rule
+
+Condition:
+- Reviewing a cycle-scoped artifact (pre-merge report, merge log, test report) under `._design_docs/.test_reports/` that exceeds the 300-line cap
+
+Action:
+- Record file size as non-blocking N-class observation with two options: (a) document an exception in the implementation entry doc "Contents" section for cycle-scoped reports under `.test_reports/`, citing Stage 11 precedent (upstream-merge-guide Part 1 procedure-at-a-glance and Stage 11 plan), or (b) split the report into a main file (cover, verification, decision records, handoff) plus a part file (commit range, top-N subjects, range composition, triage table, open questions). Recommend option (a) for cycle-scoped reports anchored to a specific cycle date (`pre-merge-report-YYYYMMDD-NN.md`, `test-report-YYYYMMDD-NN.md`); recommend option (b) only when the Manager prefers strict adherence. Don't flag as blocking finding; the index rule's split mandate applies primarily to durable design docs, and the pre-merge report is a one-shot artifact that will not be referenced after the cycle closes. Verify line count with `(Get-Content).Count` or raw LF byte count, not just `Measure-Object -Line`, and convert new file to LF-only UTF-8 (no BOM) before running `git diff --check`. Don't accept the cycle report as "too long to review" or "split later"; surface the rule and the two-option recommendation in the review's Required corrections or Handoff section.
+
 ## Improvement: Architecture deliverable bullet vs design named-callout
 
 Condition:

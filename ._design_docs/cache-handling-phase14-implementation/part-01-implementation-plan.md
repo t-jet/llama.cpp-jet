@@ -40,6 +40,8 @@ and does not duplicate it.
 | Architect implementation-plan review of this plan | Architect | NOT STARTED | Next gate |
 | Manager implementation-plan gate decision | Manager | NOT STARTED | Follows Architect review |
 
+Note: the upstream ref tip SHA is `origin/upstream_master` tip at Step 1 open. The D1 historical anchor SHA `db94854ff56549f62b84d2f31608259a9e5e0e9f` is the 2026-06-04 fetch. The current tip may differ; the Step 1 pre-merge report records the live tip and any D12 annotation.
+
 ## Ordered steps
 
 The merge activity follows the six steps below. Steps 1 through
