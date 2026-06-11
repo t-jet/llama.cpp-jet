@@ -304,6 +304,11 @@ public:
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    // Stage 14 test 21 fix: 2-arg form that uses a literal namespace string
+    // instead of compute_namespace_id(metadata). The 2-arg metadata form
+    // computes a hash from empty metadata which differs from the literal
+    // namespace used by 5-arg debug_add_entry_for_tests calls.
+    int debug_find_match_tokens_for_tests(const server_tokens & tokens, const std::string & namespace_id);
     bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
     bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");
@@ -400,6 +405,9 @@ private:
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
+    // Stage 14 test 21 fix: 2-arg form that uses a literal namespace string
+    // (test-only path; gated by LLAMA_SERVER_CACHE_TESTS).
+    int debug_find_match_tokens_for_tests(const server_tokens & tokens, const std::string & namespace_id);
     bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     bool debug_try_admit_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, size_t target_bytes, size_t draft_bytes);
     bool debug_refresh_entry_for_tests(const server_tokens & tokens, bool protected_root = false, const std::string & namespace_id = "");

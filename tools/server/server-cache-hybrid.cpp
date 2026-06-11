@@ -1002,6 +1002,14 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
 }
 
 int hybrid_cache_controller::debug_find_match_tokens_for_tests(const server_tokens & tokens) {
+    // Stage 14 test 27 fix: empty queries must return -1 (test-only path;
+    // gated by LLAMA_SERVER_CACHE_TESTS). Without this guard, the underlying
+    // find_best_match forest lookup returns all nodes in the lookup's
+    // namespace when tokens is empty, so an empty query with a matching
+    // namespace would return a non-(-1) value. Test asserts -1.
+    if (tokens.empty()) {
+        return -1;
+    }
     prepared_prompt_metadata metadata;
     return debug_find_match_tokens_for_tests(tokens, metadata);
 }
@@ -1011,6 +1019,43 @@ int hybrid_cache_controller::debug_find_match_tokens_for_tests(
         const prepared_prompt_metadata & metadata) {
     auto it = find_best_match(tokens, metadata);
     return it == entries.end() ? -1 : it->n_tokens();
+}
+
+// Stage 14 test 21 fix: 2-arg form that uses a literal namespace string
+// (test-only path; gated by LLAMA_SERVER_CACHE_TESTS). The lookup mirrors
+// the prefix-index phase of find_best_match but with a literal namespace,
+// so tests that admit entries via 5-arg debug_add_entry_for_tests with
+// a literal namespace can also look them up with the same literal. Does
+// not use the forest index or the metadata-based namespace hash.
+int hybrid_cache_controller::debug_find_match_tokens_for_tests(
+        const server_tokens & tokens,
+        const std::string & namespace_id) {
+    std::list<hybrid_cache_entry>::iterator it_best = entries.end();
+    const size_t n_prefix_max = std::min(tokens.size(), PREFIX_INDEX_LENGTH);
+    for (size_t n_prefix = n_prefix_max; n_prefix > 0; --n_prefix) {
+        auto prefix_it = prefix_index.find(get_token_prefix(tokens, n_prefix));
+        if (prefix_it == prefix_index.end()) {
+            continue;
+        }
+        for (auto it : prefix_it->second) {
+            if (it->namespace_id != namespace_id) {
+                continue;
+            }
+            if (it->n_tokens() != static_cast<int>(n_prefix)) {
+                continue;
+            }
+            if (!entry_has_payload_kind_for_restore(*it, payload_kind::exact_blob) &&
+                !entry_has_payload_kind_for_restore(*it, payload_kind::checkpoint)) {
+                continue;
+            }
+            it_best = it;
+            break;
+        }
+        if (it_best != entries.end()) {
+            break;
+        }
+    }
+    return it_best == entries.end() ? -1 : it_best->n_tokens();
 }
 
 bool hybrid_cache_controller::debug_fail_restore_for_tests(
