@@ -352,3 +352,61 @@ Condition:
 
 Action:
 - Verify the row exists with a targeted search (`Select-String` or `Get-Content` line scan) before applying the append. If the row is missing, do not silently invent a new row from template; do not silently skip the index update. Do the appends on the entry docs that do exist, update the rows that do exist, and flag the missing row in the handoff so Manager or follow-up agent can author the index row separately. Verify the pattern in nearby rows (column count, cell content scope, description style) so the follow-up author has concrete template. Don't claim all instructed edits are complete when one of the cells is missing its row.
+
+
+## Improvement: Stage-12/13 contract growth pushes part-06 over 300 lines
+
+Condition:
+- Authoring Stage 14 design (or any later operational stage) that mirrors the Stage 11 part-06 structure (merge log + constraints + observability + testability + risks + exclusions + traceability + handoff) and adds Stage 12/13 contract rows to the constraints and traceability tables
+
+Action:
+- Plan part-06 split up front: keep merge log + constraints + observability + testability + risks in part-06, move exclusions + traceability + handoff to a part-06a overflow file, and link part-06a from part-06 and the entry-doc contents list. The Stage 11 part-06 was 207 lines; adding Stage 12 (stress S01..S08, L01..L03, B01..B08, config matrix, public metric shape) and Stage 13 (E13-01..E13-16, MTMD placeholder, diagnostic-source namespace isolation, bounded cache metadata: format, transcript route coverage, embedding cache exclusion) contract rows pushes part-06 to ~325 lines, over the 300-line cap. Verify with Get-Content | Measure-Object -Line after writing and split immediately when the count exceeds 300. Don't try to trim the constraint or traceability table to fit; the new contracts are mandatory and the cap is a hard rule.
+## Improvement: Architecture deliverable bullet vs design named-callout
+
+Condition:
+- Reviewing operational stage design (upstream merge, stress validation, etc.) where architecture lists a specific deliverable or test-coverage bullet by name (e.g., "semantic-duplicate and divergent-fix-path handling", "CUDA fallback behavior under stress") and the design implements the bullet only by reference to a procedure document (e.g., upstream-merge-guide Part 2) rather than naming the bullet in the design section
+
+Action:
+- Verify each architecture bullet is named in the corresponding design section, not only referenced. Record as non-blocking observation with concrete section reference when the design's procedural consistency holds (it points to the right guide section) but the design does not call the architecture bullet by name. Recommend explicit naming for traceability. Don't flag as blocking when the underlying procedure is correct and the design's reference resolves to the named bullet's section in the referenced document. Verify architecture bullet is satisfied before recording PASS.
+
+## Improvement: General-rule "apply consistently" beyond listed line numbers
+
+Condition:
+- Manager decision revises a procedure or guide to add a path alternative to the documented primary path (e.g., add a direct remote-tracking ref alternative to a local tracking branch), and the task lists explicit line-level changes plus a general rule to "apply consistently" or "wherever the guide says..."
+
+Action:
+- After applying the listed line changes, scan each modified file with `Select-String` for the same construct (variable name, paragraph phrase, or table column) and apply the same alternative-wording rule to the remaining sites the explicit list did not name. The general rule's "consistently" wording covers more sites than the explicit change list. Don't stop at the listed lines and leave inconsistent references in the same file. Confirm with a final pass that the construct appears only in forms that name both the primary and the alternative, or only in a sub-section dedicated to the primary path with a parallel sub-section for the alternative. Update `document-index.md` only if a part file's name, role, or split changes.
+
+## Improvement: Post-review Manager decision revision
+
+Condition:
+- Manager revises a recorded design decision (D1, D2, etc.) after the design review doc for the stage has already closed and recorded the original decision as accepted
+
+Action:
+- Update the design review doc finding rows and checklist items that reference the revised decision with the revision date, the new decision wording summary, and a pointer to where the new text lives (entry doc Manager decisions section, part-XX Upstream reference strategy section, or equivalent). Mark the row as ACCEPT (post-revision) rather than re-running the design review. Apply the same wording change to every other part file and entry doc that quotes the old decision so a single search for the old phrasing returns no remaining hits. Don't fold the revision into a follow-up Manager gate or implementation plan step. Don't re-open the design review gate. Don't leave the design review reading as if the original decision is still in force.
+
+
+
+## Improvement: Plan-review bare upstream ref vs explicit remote-tracking ref
+
+Condition:
+- Reviewing implementation plan whose Manager decision selects a direct remote-tracking ref (e.g., `origin/upstream_master`) over a local tracking branch (e.g., `upstream_master`), and the plan uses the bare ref name in conceptual or procedure-rule sections while the explicit remote-tracking ref name is used at all decision points and verification commands
+
+Action:
+- Flag the bare ref name in conceptual references and procedure rules (e.g., commit range rule, decision D7 reasoning) as a non-blocking observation, not a blocking finding. The bare form is a conceptual reference, not a stale "local tracking branch" instruction, but in the explicit-ref context it could be misread as the old local branch. Record as N-class finding with concrete line numbers and suggested wording. Don't flag as blocking when all decision points and verification commands use the explicit ref name consistently. Verify by scanning each modified file with `Select-String` for both the bare and the explicit form, and confirm the explicit form appears at every decision and verification site.
+
+## Improvement: Plan-review resolved-decision in open-decision range
+
+Condition:
+- Reviewing implementation plan whose Step activity names a range of Manager decisions to surface (e.g., "D4-D11"), and one of the decisions in the range is already RESOLVED in the same plan's Manager decisions log
+
+Action:
+- Flag the inclusion of a resolved decision in a still-open range as a non-blocking observation (N-class), not a blocking finding. The plan material is correct on the resolution status; the wording is the only issue. Record the line number, the resolved decision, and suggested wording (e.g., "D5-D11" instead of "D4-D11" when D4 is RESOLVED). Don't flag as blocking when the plan's Manager decisions log already records the correct RESOLVED status for that decision. Don't require the plan to remove the resolved decision from the activity list entirely; the activity can still name the decision for traceability as long as the wording marks it resolved.
+
+## Improvement: PowerShell line count undercount on multi-line markdown
+
+Condition:
+- Verifying file line counts for the 300-line split rule on Windows using `Get-Content | Measure-Object -Line`, and the reported count is lower than the actual line count (e.g., reports 230 for a 286-line file)
+
+Action:
+- Use `(Get-Content $file).Count` or `(Get-Content -Raw $file).Split([char]10).Count` to get the authoritative line count. Confirm with raw byte LF count via `[System.IO.File]::ReadAllBytes` and `foreach` over bytes checking for `0x0A`. `Measure-Object -Line` can undercount on multi-line markdown with trailing newlines, embedded blank lines, or specific encoding handling. Don't trust the `Measure-Object` count alone when the file is near the 300-line cap. Re-run line count verification after any conversion or normalization step.

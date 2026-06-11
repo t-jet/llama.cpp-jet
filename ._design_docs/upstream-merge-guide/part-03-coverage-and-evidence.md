@@ -72,7 +72,7 @@ The Developer does not start the cycle regression rerun until every open rework 
 
 ## 6. Staleness check at regression time
 
-The cycle's regression rerun includes a fresh staleness check. The Developer runs the verification commands in part 1 section 2 and records the tracking branch tip, the upstream remote tip, and the gap (if any). A gap that grew between the cycle's pre-merge analysis and the regression rerun is a known gap. The Manager decides whether the gap invalidates the regression evidence or is a follow-up for the next cycle.
+The cycle's regression rerun includes a fresh staleness check. The Developer runs the verification commands in part 1 section 2 and records the upstream reference tip (local tracking branch or remote-tracking ref), the actual upstream remote tip, and the gap (if any). A gap that grew between the cycle's pre-merge analysis and the regression rerun is a known gap. The Manager decides whether the gap invalidates the regression evidence or is a follow-up for the next cycle.
 
 ## 7. Coverage evidence interpretation
 
@@ -104,7 +104,7 @@ A build that failed on a prior commit and passed on the follow-up commit is reco
 
 The cycle's test report follows the test plan convention. The exact report file name is `test-report-YYYYMMDD-NN.md`. The report sections are:
 
-- Cover and metadata: cycle number, design baseline link, date opened, date closed, owner, reviewer, approver, integration branch tip SHA, fork point SHA, tracking branch tip SHA, upstream remote tip SHA.
+- Cover and metadata: cycle number, design baseline link, date opened, date closed, owner, reviewer, approver, integration branch tip SHA, fork point SHA, upstream reference tip SHA (local tracking branch or remote-tracking ref), actual upstream remote tip SHA.
 - Build evidence: build directory, build target set, build configuration, build command, build result, build timestamp.
 - ctest result: focused test binaries, per-test pass or fail count, total count, ctest log path.
 - Public HTTP probe: probe artifacts, per-row verdict, probe log path.

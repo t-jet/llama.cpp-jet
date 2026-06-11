@@ -100,9 +100,9 @@ Examples of architecture-level invariants:
 
 A new architecture-level invariant is added to the architecture's invariants section, not to a stage's design. The Architect opens a new part file in the architecture directory for the invariant. The invariant is reviewed by the Architect. The Manager approves.
 
-## 7. Stale upstream tracking branch
+## 7. Stale upstream reference (local tracking branch or remote-tracking ref)
 
-The local tracking branch (e.g., `upstream_master`) can lag behind the upstream remote. The lag is a known gap. The Manager decides whether to fast-forward the tracking branch first or merge with the gap and re-sync after.
+The local tracking branch (e.g., `upstream_master`) can lag behind the upstream remote. The remote-tracking ref (e.g., `origin/upstream_master`) can also lag behind the actual upstream `master`. Either lag is a known gap. The Manager decides whether to fast-forward the local tracking branch first, fast-forward the remote-tracking ref first, or merge with the gap and re-sync after.
 
 The fast-forward path:
 
@@ -118,6 +118,12 @@ The gap path:
 4. The follow-up for the re-sync is recorded in the merge log "Follow-up items" section. The follow-up owner is the Developer. The target cycle is the next cycle.
 
 A gap that grows between the cycle's pre-merge analysis and the regression rerun is a known gap. The Manager decides whether the gap invalidates the regression evidence or is a follow-up for the next cycle.
+
+### 7b. Direct remote-tracking ref path
+
+When the cycle uses `origin/upstream_master` directly (the Manager decision recorded in the pre-merge report "Manager decisions requested" section), staleness is checked by comparing the remote-tracking ref tip to the actual upstream `master` tip via `git ls-remote`. The fast-forward path is to run `git fetch <remote> <ref>` (e.g., `git fetch origin master:origin/master` or `git fetch origin upstream_master`) to refresh the remote-tracking ref itself. The remote-tracking ref cannot be fast-forwarded locally with `git push`; the fetch refreshes the ref in the local repo's object store.
+
+The gap path under the direct remote-tracking ref uses the same merge log "Decisions" section. The Developer records the missing upstream SHAs, the upstream commit subjects, and the file-glob group matches, and continues with the gap. After the cycle closes, the Developer re-fetches the remote-tracking ref to refresh it. The follow-up owner is the Developer and the target cycle is the next cycle. The cycle does not re-derive the procedure; the procedures in section 7 apply to both paths, with the local-tracking-branch name substituted by the remote-tracking ref name throughout.
 
 ## 8. Upstream CI matrix adoption (not done)
 
@@ -191,7 +197,7 @@ This guide is reusable across stages. A new stage that adds a new feature to the
 
 A new stage that the prior stages did not address (a cross-cutting concern, a new feature, a new layer) opens a new stage design through the standard stage intake. The new stage's design is reviewed by the Architect. The Manager approves. The new stage's implementation follows the standard stage workflow. The cycle that includes the new stage in the pre-merge range cites the new stage's design for the prior-stage contract list.
 
-A new cycle that re-opens the upstream merge activity (because the tracking branch is stale, because a new upstream release shipped, because a new bug surfaced) points to this guide for procedure and to the affected stage's design for the prior-stage contract list. The cycle does not re-derive the procedure.
+A new cycle that re-opens the upstream merge activity (because the upstream reference is stale (local tracking branch or remote-tracking ref), because a new upstream release shipped, because a new bug surfaced) points to this guide for procedure and to the affected stage's design for the prior-stage contract list. The cycle does not re-derive the procedure.
 
 ## 15. Open questions and follow-up pointers
 

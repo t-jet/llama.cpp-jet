@@ -10,7 +10,7 @@ The merge activity is gated on the prerequisites below. A prerequisite that is n
 | --- | --- | --- | --- |
 | Prior stage closure on disk with no open product bug, QA harness blocker, environment blocker, or accepted public-evidence limit | Manager | must be PASS at cycle open | The closure record is in the prior stage's implementation log. A prior stage that closed with a known gap remains closed; the known gap is a follow-up owner in the merge log, not a rework trigger. |
 | Affected stage's design on disk and indexed in `document-index.md` | Architect | must exist | The affected stage's design names the prior-stage contracts the merge must preserve. A new feature added in this fork that has no design is opened through the standard stage intake before the merge cycle. |
-| Upstream tracking branch current against the upstream remote | Developer | must be PASS at cycle open | The Developer runs the staleness check in section 2. A stale tracking branch is either fast-forwarded first, or merged with the gap and re-synced after. The choice is a Manager decision recorded in the merge log. |
+| Upstream reference current against the upstream remote (either a local tracking branch or the remote-tracking ref `origin/upstream_master`) | Developer | must be PASS at cycle open | The Developer runs the staleness check in section 2. A stale local tracking branch is either fast-forwarded first, or merged with the gap and re-synced after. A stale remote-tracking ref is refreshed by fetching the upstream remote. The choice is a Manager decision recorded in the merge log. The pre-merge report names which path (local tracking branch or remote-tracking ref) the cycle uses. |
 | Host tooling and credentials | Developer | must be PASS at cycle open | Git on `PATH` with merge support, the upstream remote configured with read access, the local default branch at a clean tree, push access to the local default branch, and the local build/test/coverage/benchmark scripts available. |
 | Any test plan or coverage script change required by the cycle's closure contracts | Developer | must be PASS at cycle open | The closure contracts are listed in part 3. A coverage script that does not emit the row the closure contract requires is a blocker, not a fallback. The Developer makes the change as a separate Developer gate before step 1 opens. |
 
@@ -20,15 +20,17 @@ The Developer runs the verification commands below before opening the commit ran
 
 | Check | Command | Expected result |
 | --- | --- | --- |
-| Tracking branch tip | `git rev-parse TRACK` | A 40-char SHA. |
-| Tracking branch tip subject and date | `git log -1 --format='%H %ai %s' TRACK` | Subject and date match the upstream remote's tip. |
-| Merge base | `git merge-base LOCAL TRACK` | A 40-char SHA. The merge base is the fork point the commit range starts from. |
-| Commit count in range | `git log --oneline LOCAL..TRACK` followed by `wc -l` | A non-negative integer. The cycle's range size. |
-| Upstream remote tip | The upstream remote REST API or `git ls-remote REMOTE_URL REF` | A SHA the tracking branch is compared against. |
-| Staleness | compare tracking tip to upstream remote tip | `ahead` (tracking ahead, no gap), `behind` (tracking behind, gap exists), or `diverged` (both have unique commits). |
+| Upstream reference tip (local tracking branch or remote-tracking ref) | `git rev-parse UPSTREAM_REF` (e.g., `git rev-parse upstream_master` for the local tracking branch, or `git rev-parse origin/upstream_master` for the direct remote-tracking ref) | A 40-char SHA. |
+| Upstream reference tip subject and date | `git log -1 --format='%H %ai %s' UPSTREAM_REF` (e.g., `git log -1 --format='%H %ai %s' upstream_master` or `git log -1 --format='%H %ai %s' origin/upstream_master`) | Subject and date match the upstream remote's tip. |
+| Merge base | `git merge-base LOCAL UPSTREAM_REF` (e.g., `git merge-base local upstream_master` for the local tracking branch, or `git merge-base local origin/upstream_master` for the direct remote-tracking ref) | A 40-char SHA. The merge base is the fork point the commit range starts from. |
+| Commit count in range | `git log --oneline LOCAL..UPSTREAM_REF` followed by `wc -l` (e.g., `git log --oneline local..upstream_master` or `git log --oneline local..origin/upstream_master`) | A non-negative integer. The cycle's range size. |
+| Upstream remote tip | The upstream remote REST API or `git ls-remote REMOTE_URL REF` | A SHA the upstream reference (local tracking branch or remote-tracking ref) is compared against. |
+| Staleness | compare upstream reference tip to actual upstream remote tip | `ahead` (upstream reference ahead, no gap), `behind` (upstream reference behind, gap exists), or `diverged` (both have unique commits). |
 | Remote configuration | `git remote -v` | The upstream remote is configured with read access. The fork's local credentials allow push to the local default branch. |
 
 A tracking branch that lags behind the upstream remote by more commits than the local convention tolerates is a known gap. The Manager decides whether to fast-forward the tracking branch first or merge with the gap and re-sync after. The choice is recorded in the merge log "Decisions" section.
+
+A remote-tracking ref that lags behind the actual upstream `master` by more commits than the local convention tolerates is the same known gap. The Developer runs `git ls-remote https://github.com/ggml-org/llama.cpp.git master` (or the GitHub REST API) to fetch the actual upstream tip. The choice of fast-forwarding the remote ref first or merging with the gap is the same Manager decision.
 
 A change to the fork point after the pre-merge analysis closes reopens the pre-merge analysis. The Developer does not start the merge with a stale fork point.
 
@@ -36,7 +38,7 @@ A change to the fork point after the pre-merge analysis closes reopens the pre-m
 
 The pre-merge analysis covers a defined subset of upstream commits. The selection rule is deterministic so the same upstream state always produces the same commit set.
 
-1. Start with the upstream commits reachable from the tracking branch tip but not from the local fork point. This is the natural commit range for the merge.
+1. Start with the upstream commits reachable from the chosen upstream reference (local tracking branch tip or remote-tracking ref tip) but not from the local fork point. This is the natural commit range for the merge. The `UPSTREAM_REF` variable in the verification commands above is substituted with the chosen path (e.g., `upstream_master` or `origin/upstream_master`).
 2. Filter the range to commits whose change set touches at least one of the file-glob groups in the affected stage's design, or whose commit message references a relevant subsystem even when the path filter does not match.
 3. Exclude commits that touch only tests, documentation, build, or CI configuration for the affected file-glob groups, unless the commit also changes a runtime path any prior-stage contract governs.
 4. Exclude merge commits and pure version bumps unless they affect a runtime path any prior-stage contract governs.
@@ -66,7 +68,7 @@ The pre-merge analysis is a durable artifact. The Developer owns the artifact. T
 
 Required sections:
 
-- Cover and metadata: upstream remote name, upstream tracking ref, fork point SHA, integration branch name, date the analysis opened, date the analysis closed, owner, reviewer, approver.
+- Cover and metadata: upstream remote name, upstream reference (local tracking branch or remote-tracking ref), fork point SHA, integration branch name, date the analysis opened, date the analysis closed, owner, reviewer, approver.
 - Upstream reference verification: the commands and outputs from section 2.
 - Commit range: the range expression, the total commit count, the filtered commit count after applying the file-glob filter, the date range.
 - Per-commit triage table: upstream SHA, upstream commit subject, file-glob groups matched, affected prior-stage contracts, triage decision, one-line reason, follow-up owner for REWORK-REQUIRED, DEFER, or REVERT.
@@ -128,7 +130,7 @@ The closure confirms the integration branch satisfies the architecture exit crit
 
 The Architect and the Manager make the decision points below. The Developer records the decisions in the merge log.
 
-- Stale tracking branch: fast-forward first, or merge with the gap and re-sync after. Manager.
+- Stale upstream reference (local tracking branch or remote-tracking ref): fast-forward the chosen ref first, or merge with the gap and re-sync after. Manager.
 - Rework trigger: change a NO-OP, INTEGRATE, or DEFER into REWORK-REQUIRED. Manager.
 - Known gap with follow-up plan: a DEFER decision is acceptable when the gap does not weaken a prior-stage contract. Manager.
 - Metric or field rename: rework, known gap with a documented mapping, or silent integration. Manager.

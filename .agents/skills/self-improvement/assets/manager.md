@@ -172,6 +172,19 @@ Action:
 - Do restore any rows the M state removed before adding new closure rows, otherwise closure updates will land in an already-broken index.
 - Don't assume a clean worktree; do verify against HEAD on every closure sweep.
 
+## Improvement: stop on consecutive subagent model failures
+
+Condition:
+- Delegating to fresh Architect, Developer, or QA subagent via `runSubagent` returns client error "Response too long" 2 or more times in a row on any prompt length, including minimal verification prompts (e.g. "read 3 files, return 100 words")
+
+Action:
+- Do treat repeated "Response too long" client errors from the same agent as a subagent-model failure, not a prompt or task issue. Do not re-delegate to the same agent for the same gate. Do not attempt to author the gate artifact yourself (Manager is coordinator only, not author).
+- Do record the active gate, missing artifact, exact error pattern (count of consecutive failures, agent name, prompt sizes tried), and next owner in the final response.
+- Do check for and stop any orphan child subagent processes (e.g. `codex` PIDs from prior timed-out runs) before ending the turn so they don't consume resources.
+- Do surface the failure to the user with a clear handoff: user can wait for model cooldown, switch to a different subagent agent name (Architect → Developer for design-class work, or vice versa), or restart session.
+- Don't keep retrying the same subagent with shorter or sharper prompts once the model is in a failure loop; token cap is on the subagent's model output, not the prompt.
+- Don't fall through to do the gate work yourself; the Manager role is coordinator and gatekeeper, not author of design, implementation, or test artifacts.
+
 ## Improvement: longrun 1000 threshold does not apply structurally
 
 Condition:

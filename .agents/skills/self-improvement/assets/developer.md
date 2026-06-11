@@ -200,6 +200,14 @@ Condition:
 Action:
 - End the file with exactly one trailing hex-0A. Don't append a backtick-n to a join without checking the join's tail first; doubling up yields hex-0A hex-0A and `git diff --check` reports "new blank line at EOF" with exit 2. Don't strip the trailing newline just because the source content didn't visibly show one; tracked git blobs in this repo end with a single LF. Verify with `ReadAllBytes` last byte showing hex-0A and not hex-0A hex-0A before running `git diff --check`.
 
+## Improvement: Scan for residual old-wording phrases after multi-file correction
+
+Condition:
+- Applying a textual correction rule across multiple documentation files, and the user provides a list of specific edits (e.g. "in file A change line X", "in file B change row Y"), AND the user also states a global rule (e.g. "every reference to 'old phrase' becomes 'new phrase'")
+
+Action:
+- After applying the specific instructed edits, scan each touched file for residual occurrences of the old wording. Use `Select-String -Pattern '<exact old phrase>'` on each file. The user's instruction list may not be exhaustive; the global rule dictates all replacements. For each residual match, classify as either (a) valid historical/contextual reference (e.g. "no local branch is required" when old phrase is in negated form) or (b) required update per the global rule, and apply the second category. Report the residual count and the classification in the handoff. Don't rely on the user's instruction list alone when a global rule is stated; the rule is the source of truth.
+
 ## Improvement: Preserve blob line structure on Windows
 
 Condition:
@@ -409,3 +417,25 @@ Condition:
 
 Action:
 - Verify whether `build-cov/bin/<NewConfig>` is a real directory or a Windows reparse point (junction) to `build-cov/bin/<OldConfig>` before declaring reconfigure successful. Use `fsutil reparsepoint query <path>`. If junction, the linker's .pdb embeds the resolved path (OldConfig), not the requested NewConfig, and OpenCppCoverage / similar PDB readers will skip the module because the script's --modules pattern (NewConfig) does not match the .pdb's embedded path (OldConfig). Verified 2026-06-07: removing the junction with `cmd /c rmdir` and creating a real directory, then re-linking the test binaries (full link, not incremental, since the previous .exe was at the junction target), produces a 12674-byte .cov with the Release pattern vs 37 bytes (header only) with the junction. Don't try to copy the binaries from OldConfig to NewConfig; the .pdb's embedded module path is from the link invocation, not the file location. When the user reconfigure command uses a different config than the original, ask before doing destructive junction removal; junction removal + re-link is in-scope for "fix coverage config" but destructive of the original output layout.
+
+## Improvement: StringBuilder.AppendLine adds CRLF on Windows and undoes LF conversion
+
+Condition:
+- PowerShell script reads a CRLF text file, runs -replace "
+", "
+" to strip CR, then rebuilds the file content with StringBuilder.AppendLine() per line, and writes back with [System.IO.File]::WriteAllText(D:\source\llama.cpp-jet\.agents\skills\self-improvement\assets\developer.md, , [UTF8Encoding]::new(False))
+
+Action:
+- Don't use StringBuilder.AppendLine after a CRLF->LF conversion. AppendLine calls Environment.NewLine which is \\
+ on Windows, so the conversion is undone and cr count remains equal to the line count after writing. Use explicit [void].Append(); [void].Append([char]10) or [void].Append( + "
+") for each line. Verify with ReadAllBytes byte-level CR count, not just Get-Content line count which is invariant to line endings. Pattern verified 2026-06-11: converting 5 markdown files from CRLF to LF, first attempt kept CR=line count despite -replace "
+", "
+"; switching from AppendLine to Append() cleared CR to 0 in all 5 files. Don't rely on [System.IO.File]::ReadAllText to normalize line endings; it returns whatever bytes were in the file.
+
+## Improvement: Multi-line array literal in interactive PowerShell hangs waiting for closing paren
+
+Condition:
+- Authoring or running a multi-line PowerShell command in an interactive PowerShell or pwsh terminal where the first line is $var = @( followed by a newline, even with proper comma-separated string values on subsequent lines
+
+Action:
+- Write the multi-line command to a temporary .ps1 file and invoke with pwsh -NoProfile -File <path>.ps1. Don't paste the array literal directly into the interactive terminal; the parser treats the open paren as the start of an expression that requires the matching close paren on the same logical input, and the terminal sits idle without a continuation prompt until the close paren is typed. Pattern observed 2026-06-11: $paths = @( "._design_docs\foo.md", "._design_docs\bar.md" ) with a newline after @( left the terminal in >> continuation state and never executed the loop. Even one-line $paths = @("a", "b"); foreach ( in ) {...} works in -Command mode but not when the user is typing into the integrated terminal. Don't try to escape with backtick-n or semicolon-join; the structural issue is the open paren at end of input, not escape parsing. Use a script file for any multi-statement PowerShell that declares arrays or uses open parens.

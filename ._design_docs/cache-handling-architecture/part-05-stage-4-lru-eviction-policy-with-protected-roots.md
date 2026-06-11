@@ -256,6 +256,39 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 ### Stage 13: Endpoint Compatibility Corrections
 See [Part 8](part-08-stage-13-endpoint-compatibility-corrections.md).
 
+### Stage 14: Post-Stage-12/13 Upstream Integration
+
+**Objective:** Re-sync the fork with `upstream_master` after Stage 12 stress validation and Stage 13 endpoint compatibility corrections are merged, and rework any prior stage when upstream changes invalidate it. The cycle follows the procedure in [../../upstream-merge-guide.md](../../upstream-merge-guide.md); the new implementation log points to the guide for procedure and to the affected stage's design for the prior-stage contract list.
+
+**Deliverables:**
+
+- Pre-merge analysis of upstream commits since the Stage 11 merge that touch cache, checkpoint, speculative decoding, server context, slot, HTTP layer, endpoint adapters, hybrid diagnostics, MTMD placeholder path, and CUDA kernels
+- Real two-parent merge per upstream-merge-guide Part 1, with the local default branch as the integration branch and a current `upstream_master` tracking branch verified against the upstream remote
+- Per-commit triage table (NO-OP, INTEGRATE, DEFER, REWORK-REQUIRED) with the file-glob filter
+- Manager review of the pre-merge analysis; NO-OP, INTEGRATE, and DEFER entries can be changed to REWORK-REQUIRED with a recorded date and the prior-stage contract they protect
+- Conflict resolution per the local-first-for-hybrid / upstream-first-for-legacy policy from upstream-merge-guide Part 2
+- Semantic-duplicate and divergent-fix-path handling per upstream-merge-guide Part 2
+- Rework assessment mapping upstream changes to affected Stages 1-13, including new Stage 12 stress harness and Stage 13 endpoint adapter regressions
+- For every REWORK-REQUIRED entry, the Architect opens a rework part file in the affected stage's design tree following the standard stage workflow scoped to the contract gap
+- Regression test reruns for any behavior the upstream change touches, including public endpoint parity rows E13-01 through E13-16
+- Coverage, evidence, and citation rules per upstream-merge-guide Part 3
+- Edge case and post-closure follow-up handling per upstream-merge-guide Part 4
+- Merge log: decisions, deferred upstream commits, known gaps, and rework cross-references
+- Implementation log pointing to upstream-merge-guide for procedure and to affected stage designs for prior-stage contract list
+
+**Exit criteria:**
+
+- Merge complete with no unresolved conflicts and recorded merge log
+- All prior-stage tests pass on the merged tree (Stages 1-13)
+- Hybrid mode invariants from earlier stages hold, including diagnostic-source namespace isolation (Stage 13) and bounded metadata diagnostic at task launch (Stage 13)
+- Upstream cache, endpoint, MTMD, CUDA, and speculative-decoding changes are integrated or recorded as known gaps with a follow-up plan
+- Legacy mode behavior is unchanged
+- Public endpoint parity rows E13-01 through E13-16 continue to PASS on the merged tree
+- Coverage closure contracts (T114, T114a) re-verified per upstream-merge-guide Part 3
+- Manager approval of the merge cycle recorded in the implementation log
+
+**Test coverage:** Prior-stage regression reruns, focused conflict resolution tests, compatibility namespace preservation, CLI flag preservation, public endpoint parity reruns, MTMD placeholder path preservation, CUDA fallback behavior under stress, hybrid cache invariant regression.
+
 ## Implementation Notes
 
 Each stage builds on the previous one and maintains these invariants:
@@ -267,9 +300,10 @@ Each stage builds on the previous one and maintains these invariants:
 - **Isolated testing:** Each stage's new behavior is testable in isolation
 - **Explicit failures:** Unsupported paths fail explicitly, not silently
 - **Upstream-aware:** Stage 11 re-runs the staged plan against the live upstream, since new cache, checkpoint, or speculative decoding work there can invalidate or require rework on any prior stage
+- **Upstream-recurrent:** Stage 14 runs a second upstream merge cycle after Stage 12 and Stage 13 land; new cache, endpoint, MTMD, or speculative decoding work in upstream can invalidate Stage 12 stress harness outputs or Stage 13 endpoint corrections, so the rework assessment must cover Stages 1-13, not just 1-10
 - **Endpoint parity:** Stage 13 keeps compatible public endpoint schemas stable while applying all enabled cache behavior through internal metadata and command-line configuration
 
-The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5). Stage 11 revisits prior stages after an `upstream_master` merge; Stage 12 closes the validation loop with stress and benchmark evidence at production-relevant scales, not just unit-scale tests. Stage 13 applies endpoint compatibility corrections found during Stage 12 so public compatible routes get the same command-line-enabled cache behavior without exposing cache-specific request fields.
+The staging allows for early feedback, risk reduction, and parallel workstream opportunities (e.g., cold store implementation can proceed independently once interfaces are defined in Stage 5). Stage 11 revisits prior stages after an `upstream_master` merge; Stage 12 closes the validation loop with stress and benchmark evidence at production-relevant scales, not just unit-scale tests. Stage 13 applies endpoint compatibility corrections found during Stage 12 so public compatible routes get the same command-line-enabled cache behavior without exposing cache-specific request fields. Stage 14 runs a second `upstream_master` merge cycle, applying the upstream-merge-guide procedure so the post-Stage-12/13 contracts (stress harness outputs, public endpoint parity, MTMD placeholder path, diagnostic-source namespace isolation) are preserved across the merge.
 
 ## Requirement Traceability Matrix
 
@@ -287,6 +321,7 @@ The staging allows for early feedback, risk reduction, and parallel workstream o
 | Validation mismatch and mismatch-parent selection (R36a-R36d, R39a-R39c, R71e, R123a) | Restore Strategy Order, Branch Graph Semantics, ADR-009 |
 | Budget accounting and pruning preference (R8a, R8b, R21a, R57a-R57e) | Residency and Eviction Rules, ADR-005 |
 | Endpoint parity and compatible API surfaces | API Endpoint Compatibility, Prepared-Prompt Boundary Model, Stage 13 Endpoint Compatibility Corrections |
+| Upstream integration cycles (Stage 11, Stage 14) | [upstream-merge-guide.md](../../upstream-merge-guide.md), Implementation Notes |
 | Eviction policy evolution (R20a, R20b) | Residency and Eviction Rules, ADR-005 |
 | Code quality and best practices (R130, R131) | ADR-008 |
 | Multimodal safety (R87-R89) | Runtime Semantics, Failure and Fallback Rules, Phase 3 |
