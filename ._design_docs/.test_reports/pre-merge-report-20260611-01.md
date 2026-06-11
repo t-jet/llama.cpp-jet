@@ -244,6 +244,21 @@ anchor and add a "refreshed on 2026-06-11, current tip
 18ef86ece" annotation in plan part-04. The Manager records
 the chosen path with a one-line rationale.
 
+## Manager decisions (Step 2 record, 2026-06-11)
+
+The Manager reviewed the Step 1 triage table on 2026-06-11 and recorded the following decisions:
+
+| Triage | Count | Manager decision | Reason |
+| --- | ---: | --- | --- |
+| NO-OP | 4 | ACCEPT | No prior-stage contract impact. |
+| INTEGRATE | 16 | ACCEPT | Merge will absorb. Architect reviews conflict resolution during merge. |
+| DEFER (out-of-file-glob) | 67 | ACCEPT | CI / docs / build / tests / webui / model-layer / pure backend only. No prior-stage contract impact. |
+| DEFER (in-scope, deferred) | 7 | ACCEPT | 6 CUDA-group (cycle primary build is `build-cov` CPU; CUDA out of scope). 1 Gemma4 MTP (`04eb4c446d`): Architect analyzes post-merge per Step 4 rework planning. |
+| REWORK-REQUIRED | 0 | n/a | None. |
+| **Total** | **94** | | All categories accepted. No commit blocks the merge. |
+
+The merge brings in all 94 commits. The triage informs the merge log "Decisions" and the post-merge rework planning per D8.
+
 ## Commit range
 
 Per plan part-03 "Pre-merge analysis commit range rule" and
