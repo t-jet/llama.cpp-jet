@@ -541,3 +541,133 @@ be applied) before T114/T114a can be re-run.
      descriptor validation contract.
 - After the broader 1-arg form defect is resolved: cycle
   ready for Step 6 merge log + closure.
+
+## Part 02 batch fix (2026-06-11)
+
+### Verdict
+
+PRE-EXISTING_TEST_BUG (Architect). 4 strict 1-arg call sites
+fixed with 2-arg metadata form. build PASS. ctest 67/69
+(test 20 line 609 crash; pre-existing test-stage10-policy-lru
+crash). T114/T114a remain BLOCKED on a broader substantive
+issue: test 20's 2-arg with bool form cannot be fixed with
+the 2-arg metadata form because the metadata form loses
+`protected_root`.
+
+### Call sites fixed
+
+Commit c390a271e. Diff
+(`tests/test-cache-controller.cpp:579-633, 1084-1091`):
+
+```text
+@@ tests/test-cache-controller.cpp line 582 (test 18: test_hybrid_prefix_index_short_entry):
+-    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}));
+-
++    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
++    // rejected by Stage 5 admission validation (missing target payload). Use the
++    // 2-arg metadata form so the entry namespace matches the lookup namespace
++    // (compute_namespace_id(metadata)) and the entry is admitted.
+     prepared_prompt_metadata meta;
+-    GGML_UNUSED(meta);
++    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), meta);
+
+@@ tests/test-cache-controller.cpp line 597 (test 19: test_hybrid_lru_eviction_by_token_limit):
+-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}));
+-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}));
++    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
++    // rejected by Stage 5 admission validation. Use the 2-arg metadata form so
++    // both entries share the same default-namespace and are admitted.
++    prepared_prompt_metadata meta;
++    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), meta);
++    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), meta);
+
+@@ tests/test-cache-controller.cpp line 1074 (test 23: test_hybrid_lookup_edge_paths):
+-    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}));
++    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
++    // rejected by Stage 5 admission validation. Use the 2-arg metadata form so
++    // the entry namespace matches the lookup namespace and is admitted.
++    prepared_prompt_metadata meta;
++    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}), meta);
+```
+
+Test 20 (line 618, 619, 627, 628) was NOT fixed with the
+2-arg metadata form because the metadata form does not set
+`entry.protected_root` (always defaults to false), so the
+test's `protected_root`-based eviction assertions would
+fail at a different point. A comment was added to test 20
+documenting the substantive issue. Test 23 line 1071
+(3-arg form) was NOT fixed because it is out of scope for
+the strict 1-arg batch and the binary never reaches it
+(crashes at test 20 first).
+
+### Build result
+
+Command: `cmake --build build-cov --config Release`. Log:
+`build-cov-rebuild-stage14-batch-20260611-01.log` (in
+test_reports).
+
+- Result: PASS. MSBuild exit code 0.
+- 106 executables built (no MSVC errors).
+- `git diff --check` clean on the modified test file.
+- LF-only ASCII, no BOM, no non-ASCII.
+
+### ctest result
+
+Command: `ctest --test-dir build-cov -C Release
+--output-on-failure`. Log:
+`ctest-buildcov-stage14-batch-20260611-02.log` (in
+test_reports).
+
+- 67 of 69 tests passed.
+- 2 tests failed (both STATUS_STACK_BUFFER_OVERRUN):
+  - 37 - test-cache-controller line 609 (test 20
+    `test_hybrid_protected_eviction_paths`): 2-arg with
+    bool form delegates to 5-arg with target_bytes=0,
+    rejected by Stage 5 admission validation. The 2-arg
+    metadata form cannot fix this test because the
+    metadata form does not set `entry.protected_root`,
+    so the test's `protected_root`-based eviction
+    assertions would fail at a different point. This is
+    a SUBSTANTIVE ISSUE requiring Manager decision.
+  - 48 - test-stage10-policy-lru: pre-existing, unchanged.
+
+The test binary aborts at test 20 line 609, so tests 21-74
+in the binary never run. Test 23 (line 1074 fix) is
+expected to pass when test 20 is resolved.
+
+### T114 and T114a result
+
+BLOCKED. Coverage run not executed. The test binary still
+crashes at test 20 line 609. The 2-arg with bool form
+defect must be resolved (either via a production code
+change to add a new debug helper that accepts
+`(tokens, metadata, protected_root)`, or via a test
+rewrite that does not depend on `protected_root`) before
+T114/T114a can be re-run.
+
+### Handoff
+
+- 4 strict 1-arg call sites fixed: lines 582, 597, 598,
+  1074. Commit c390a271e. 23 insertions and 6 deletions.
+  LF-only ASCII, no BOM, `git diff --check` clean.
+- build-cov rebuild: PASS (106 executables, no errors).
+- ctest build-cov: 67/69 (test 20 line 609 + pre-existing
+  test-stage10-policy-lru).
+- T114 / T114a: BLOCKED on test 20 substantive issue
+  (2-arg with bool form cannot be fixed with 2-arg
+  metadata form because metadata form loses
+  `protected_root`).
+- Next gate: Manager decision on test 20 substantive
+  issue. Options:
+  1. Add a new debug helper `(tokens, metadata,
+     protected_root)` to `server-cache-hybrid.h` -
+     PRODUCTION code change. This is the only way to
+     preserve `protected_root` while matching the
+     lookup's namespace.
+  2. Rewrite test 20 to not depend on `protected_root`
+     - significant test rewrite. The test would need to
+     test pure LRU eviction without the
+     `protected_root` distinction.
+  3. Defer to a Stage 11/13 corrections cycle.
+- After the test 20 defect is resolved: cycle ready for
+  Step 6 merge log + closure.
