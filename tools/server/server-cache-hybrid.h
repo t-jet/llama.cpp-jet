@@ -297,6 +297,11 @@ public:
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata);
+    // Stage 14 test 20 fix: 3-arg form that preserves protected_root while
+    // matching the lookup's namespace computed from metadata. The 2-arg
+    // metadata form does not expose protected_root, so protected_root-based
+    // eviction assertions in test 20 require this overload.
+    void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
@@ -390,6 +395,9 @@ private:
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata);
+    // Stage 14 test 20 fix: 3-arg form that preserves protected_root while
+    // matching the lookup's namespace computed from metadata.
+    void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens);
     int debug_find_match_tokens_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);
     bool debug_fail_restore_for_tests(const server_tokens & tokens, const prepared_prompt_metadata & metadata);

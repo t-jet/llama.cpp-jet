@@ -974,6 +974,33 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
     evict_until_within_budget();
 }
 
+// Stage 14 test 20 fix: 3-arg form that preserves protected_root while
+// matching the lookup's namespace computed from metadata. The 2-arg
+// metadata form does not set entry.protected_root (always defaults to
+// false), so protected_root-based eviction assertions require this
+// overload to preserve the protected_root value. Test-only path; gated
+// by LLAMA_SERVER_CACHE_TESTS in the header.
+void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root) {
+    hybrid_cache_entry entry;
+    entry.tokens = std::move(tokens);
+    entry.namespace_id = compute_namespace_id(metadata);
+    entry.metadata = metadata;
+    entry.protected_root = protected_root;
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
+    std::vector<uint8_t> target(1, 0x11);
+    if (!attach_payload(entry, std::move(target), {}, false)) {
+        return;
+    }
+
+    entries.push_back(std::move(entry));
+    auto it = std::prev(entries.end());
+    create_branch_node_for_entry(*it);
+    add_to_lru_index(it);
+    add_to_prefix_index(it);
+    evict_until_within_budget();
+}
+
 int hybrid_cache_controller::debug_find_match_tokens_for_tests(const server_tokens & tokens) {
     prepared_prompt_metadata metadata;
     return debug_find_match_tokens_for_tests(tokens, metadata);
