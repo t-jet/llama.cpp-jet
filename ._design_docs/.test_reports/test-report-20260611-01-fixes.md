@@ -1,7 +1,10 @@
 # Test report 20260611-01 fixes: Stage 14 merge semantic conflict in server-context get_meta()
 
 Source: [test-report-20260611-01.md](test-report-20260611-01.md)
-Status: PARTIAL FIX (Developer applied; new build defect discovered)
+Part 01 status: PARTIAL FIX (Developer applied; new build defect discovered)
+Part 02 status: TEST FIX APPLIED; build PASS; ctest 67/69 with 1 new
+pre-existing runtime defect at line 571; T114/T114a BLOCKED on new defect.
+See [test-report-20260611-01-fixes-part02-testfix.md](test-report-20260611-01-fixes-part02-testfix.md).
 
 ## Build defect
 
@@ -393,3 +396,28 @@ build was using a different enum at compile time.
   resolved. The current coverage configuration uses
   `build-cov/bin/Release/test-cache-controller.exe` and friends,
   which do not link.
+
+## Part 02 follow-up (Developer, 2026-06-11)
+
+The Manager's Path A decision (2026-06-11) authorized a minimal test
+fix to address the test-cache-controller.cpp compile defects. See
+[test-report-20260611-01-fixes-part02-testfix.md](test-report-20260611-01-fixes-part02-testfix.md)
+for the full record. Summary:
+
+- Defects 1 and 2 in part 02: FIXED. Test file diff is 13 insertions
+  and 3 deletions across three locations (lines 1804, 1953-1965, 2357).
+  LF-only ASCII, no BOM, `git diff --check` clean.
+- build-cov rebuild: PASS. 106 executables built, no MSVC errors.
+- ctest build-cov: 67 of 69 PASS, 2 failures:
+  - test-stage10-policy-lru: pre-existing, unchanged.
+  - test-cache-controller line 571 (`test_hybrid_rejects_partial_blob_match`):
+    NEW pre-existing runtime defect exposed by the merge. The
+    admission code path in the merged `server-cache-hybrid.cpp`
+    rejects the entry that the test adds; the assertion at line
+    571 fails. Not caused by the test fix; the test function
+    itself was not modified.
+- T114 / T114a: BLOCKED on the new line 571 defect. Coverage run
+  was not executed.
+- Next gate: Manager decision on the new pre-existing defect at
+  test-cache-controller.cpp line 571. See part 02 "Handoff" for
+  the three options.
