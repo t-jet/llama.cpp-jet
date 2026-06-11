@@ -276,3 +276,268 @@ with each amend.
      flaky test.
 - After the new defect is resolved: cycle ready for Step 6 merge
   log + closure.
+
+## Part 02 follow-up: line 571 defect investigation (2026-06-11)
+
+### Verdict
+
+Verdict: PRE-EXISTING_TEST_BUG
+
+### Evidence
+
+- Test function (line 571):
+  `test_hybrid_rejects_partial_blob_match()` at
+  `tests/test-cache-controller.cpp:560-575`. The function body is
+  byte-for-byte identical between the local parent `02db7a768` and
+  `HEAD` (verified via
+  `git diff 02db7a768 HEAD -- tests/test-cache-controller.cpp`,
+  which returns empty diff for the function body at line 560-575).
+- Input shape (debug_add_entry_for_tests call): The test calls
+  `ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}))`
+  (1-argument form) at line 565. This delegates to the 5-argument
+  form with defaults `target_bytes=0, draft_bytes=0`
+  (`tools/server/server-cache-hybrid.cpp:937-939`). The constructed
+  target vector is empty (size 0) and the draft vector is empty
+  (size 0).
+- Admission code path that rejects:
+  `hybrid_cache_controller::validate_descriptor_against_record` at
+  `tools/server/server-cache-hybrid.cpp:2609-2682`. The check
+  `if (record.target.empty() || descriptor.target_size_bytes == 0)
+  { return fail("missing target payload"); }` at line 2638-2640
+  rejects the entry. `attach_payload` at
+  `tools/server/server-cache-hybrid.cpp:2697-2736` calls
+  `validate_descriptor_against_record` and on failure logs
+  "descriptor validation failed (admission validation failed)" via
+  `record_payload_validation_failure` (line 3053) and returns false.
+  `debug_add_entry_for_tests` (line 950) checks the return value
+  and returns without adding the entry to the cache.
+- Upstream commits that touched the admission path: NONE. The
+  merge range `6ddc9430..18ef86ece` did not touch
+  `tools/server/server-cache-hybrid.cpp`,
+  `tools/server/server-cache-hybrid.h`, or
+  `tests/test-cache-controller.cpp` (verified via
+  `git log --oneline 6ddc9430..18ef86ece -- <file>` and
+  `git diff 6ddc9430 18ef86ece -- <file>`, both returning empty).
+- Pre-merge behavior (from 02db7a768): The
+  `validate_descriptor_against_record` function at
+  `02db7a768:tools/server/server-cache-hybrid.cpp` is byte-for-byte
+  identical to the merged function (verified via
+  `git diff 02db7a768 HEAD -- tools/server/server-cache-hybrid.cpp`,
+  which returns empty for this function). The "missing target
+  payload" check was introduced in Stage 5 complete
+  (commit `e8297cafe`, 2026-05-28), which predates the local
+  parent `02db7a768` (2026-06-05). The test was authored in
+  Stage 3 (commit `db93bb030`) against a contract where empty
+  target/draft was allowed. Stage 5 added the "missing target
+  payload" validation rule without updating the test.
+- Merged behavior: IDENTICAL to pre-merge behavior. The code in
+  `tools/server/server-cache-hybrid.cpp`,
+  `tools/server/server-cache-hybrid.h`, and
+  `tests/test-cache-controller.cpp` is byte-for-byte identical
+  between `02db7a768` and `HEAD` (with the exception of the test
+  fix at lines 1804, 1953-1965, 2361, which do not touch line 565
+  or the `test_hybrid_rejects_partial_blob_match` function).
+
+### Affected prior-stage contract
+
+Contract: Stage 5 descriptor validation (the
+`validate_descriptor_against_record` function and its
+"missing target payload" check).
+Owner: Stage 5 complete (commit `e8297cafe`, 2026-05-28).
+What changed: Stage 5 introduced the descriptor validation
+contract that requires `record.target` to be non-empty and
+`descriptor.target_size_bytes > 0` for admission to succeed.
+The test `test_hybrid_rejects_partial_blob_match` was authored
+in Stage 3 before this contract was established and was not
+updated when Stage 5 added the validation rule. The test
+violates the Stage 5 contract by using the 1-argument
+`debug_add_entry_for_tests` which defaults to
+`target_bytes=0`.
+
+### Recommended fix
+
+Minimal test fix (1 line change at line 565). Change the
+`debug_add_entry_for_tests` call from the 1-argument form
+(defaults to `target_bytes=0, draft_bytes=0`) to the
+5-argument form with `target_bytes=64, draft_bytes=0`. This
+matches the pattern used by other tests in the same file
+(e.g., line 172, 202, 833). The entry will then be admitted
+with a valid target payload, and the subsequent
+`debug_find_match_tokens_for_tests` assertions will succeed
+as originally intended.
+
+Diff (full):
+
+```text
+@@ tests/test-cache-controller.cpp line 565 (test_hybrid_rejects_partial_blob_match):
+-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}));
++    // Stage 14 line 571 fix: use 5-arg form with non-zero target_bytes
++    // so the Stage 5 descriptor validation contract (missing target
++    // payload check in validate_descriptor_against_record) admits the
++    // entry. The 1-arg form defaults to target_bytes=0 which the
++    // validation rejects, causing the lookup to return -1 and the
++    // assertion at line 571 to fail.
++    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), false, "", 64, 0);
+```
+
+Note: The 2026-06-07 test log
+(`test-cache-controller-static-20260607-01.log`) shows this
+test passing, which is inconsistent with the code-level
+analysis. The most likely explanation is that the 2026-06-07
+test binary was built from a version of the source tree
+where the test was passing (e.g., uncommitted changes that
+were not preserved, or a cached static lib from an earlier
+build with different source). The current code is
+byte-for-byte identical to `02db7a768`, and the validation
+rule rejects the test's input. The fix above updates the
+test to match the Stage 5 contract.
+
+### Files to modify
+
+- tests/test-cache-controller.cpp (test fix, 1 line at 565)
+
+### Next gate
+
+- Developer applies the test fix at line 565 in a fresh
+  session: replace the 1-arg `debug_add_entry_for_tests`
+  call with the 5-arg form `(create_tokens({1, 2, 3, 4}), false, "", 64, 0)`.
+- Developer rebuilds build-cov (cmake --build build-cov --config Release).
+- Developer reruns ctest (ctest --test-dir build-cov -C Release --output-on-failure).
+- Expected: 68/69 PASS (test-cache-controller passes; test-stage10-policy-lru
+  remains pre-existing failure unchanged).
+- Developer runs T114/T114a coverage on the post-fix tree.
+- If T114/T114a meets the 80% hybrid-path coverage threshold:
+  cycle proceeds to Step 6 merge log + closure.
+- If T114/T114a does not meet threshold: bug-fix loop per the
+  coverage rule.
+
+## Part 02 line 571 fix (2026-06-11)
+
+### Fix Verdict
+
+Verdict: PRE-EXISTING_TEST_BUG (Architect)
+
+### Fix Applied
+
+Commit 998ae00fa (HEAD +1). Diff
+(`tests/test-cache-controller.cpp:560-585`):
+
+```text
+@@ tests/test-cache-controller.cpp line 565 (test_hybrid_rejects_partial_blob_match):
+-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}));
+-
++    // Stage 14 line 571 fix: use metadata form so entry namespace matches lookup.
+     prepared_prompt_metadata meta;
+-    GGML_UNUSED(meta);
++    ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta);
++
+```
+
+The Architect's recommended diff used the 5-arg form
+`(tokens, false, "", 64, 0)`. Verification showed that
+5-arg form with the `""` namespace falls back to
+`compute_namespace_id()` (no metadata), which produces a
+different namespace string from what
+`debug_find_match_tokens_for_tests` computes via
+`compute_namespace_id(metadata)`. The strict namespace
+compatibility check in `find_best_match` would skip the
+entry even when admitted. The metadata form
+(`debug_add_entry_for_tests(tokens, meta)`) uses
+`compute_namespace_id(metadata)` directly, matching the
+lookup namespace, and admits a 1-byte target payload that
+passes the Stage 5 "missing target payload" check.
+
+### Build result
+
+Command: `cmake --build build-cov --config Release`. Log:
+[build-cov-rebuild-stage14-line571-20260611-03.log](build-cov-rebuild-stage14-line571-20260611-03.log).
+
+- Result: PASS. MSBuild exit code 0.
+- 106 executables built (all `*.exe` targets in build-cov/bin/Release).
+- No MSVC errors. test-cache-controller.cpp compiled successfully.
+- Files: `git diff --check` clean on the modified test file.
+- Encoding: LF-only (LF=2711, CRLF=0, no BOM, no non-ASCII)
+  verified with byte scan.
+
+### ctest result (post line 571 fix, on build-cov)
+
+Command: `ctest --test-dir build-cov -C Release --output-on-failure`.
+Log: [ctest-buildcov-stage14-line571-20260611-03.log](ctest-buildcov-stage14-line571-20260611-03.log).
+
+- 67 of 69 tests passed.
+- 2 tests failed (both `***Exception: Exit code 0xc0000409` /
+  `STATUS_STACK_BUFFER_OVERRUN` from a failed `assert()`):
+  - 37 - test-cache-controller (line 586: `test_hybrid_prefix_index_short_entry`).
+    The line 571 fix passes test 17 (line 571 assertion is no
+    longer the failure point). The test binary now aborts at
+    test 18 because test 18 has the same 1-arg form
+    `debug_add_entry_for_tests(create_tokens({7, 8}))` issue
+    (1-arg form delegates to 5-arg with target_bytes=0, which
+    Stage 5 validation rejects). Other tests with the same
+    1-arg form pattern: lines 608, 609, 629, 630, 638, 639, 1085
+    in `tests/test-cache-controller.cpp`. These are out of
+    scope for the line 571 fix (would require 7+ additional
+    call-site changes, exceeding the 5-line change budget
+    without Manager decision).
+  - 48 - test-stage10-policy-lru (pre-existing, unchanged from
+    the pre-fix ctest, no new failure).
+
+The expected 68/69 result documented in this fixes file's
+"Next gate" section was based on the assumption that only
+line 571 had the 1-arg form defect. The actual scope of
+the 1-arg form defect spans 7+ call sites across multiple
+test functions; fixing only line 571 moves the test binary
+abort point from test 17 to test 18, leaving the ctest
+result at 67/69.
+
+### Coverage result
+
+BLOCKED. The coverage run was not executed. The closure
+contract target is `build-cov/bin/Release/ctest-runner.exe`
+which links `test-cache-controller.exe` and friends. The
+coverage run would include the failing test 18 (currently
+crashes the test binary) and cannot produce a valid rate.
+
+The 1-arg form defect must be fixed across all affected
+test sites (or a single targeted production-side fix must
+be applied) before T114/T114a can be re-run.
+
+### Line 571 Handoff
+
+- Line 571 test fix: APPLIED. Commit 998ae00fa. 3 insertions
+  and 3 deletions. LF-only ASCII, no BOM, `git diff --check`
+  clean. Test 17 now passes.
+- build-cov rebuild: PASS (MSBuild exit code 0, 106 executables
+  built, no MSVC errors).
+- ctest build-cov: 67 of 69 PASS. Two failures, both
+  STATUS_STACK_BUFFER_OVERRUN (assertion failure) with exit
+  code 0xc0000409:
+  - test-cache-controller line 586 (test 18,
+    `test_hybrid_prefix_index_short_entry`): same 1-arg form
+    defect as line 571, now exposed because the test 17 abort
+    point moved. NOT a regression; same root cause.
+  - test-stage10-policy-lru: pre-existing, unchanged.
+- T114 / T114a: BLOCKED. The line 571 fix is necessary but
+  not sufficient; the 1-arg form defect spans 7+ call sites
+  in `tests/test-cache-controller.cpp` (lines 593, 608, 609,
+  629, 630, 638, 639, 1085) and one of them is exercised by
+  the test binary before coverage can complete.
+- Next gate: Manager decision on the broader 1-arg form
+  defect. Options:
+  1. Apply a Step 3 developer-side fix now: switch the 7+
+     affected test call sites to either the 5-arg form with
+     matching namespace (or use the metadata form), then
+     run QA T114/T114a on the resulting tree. Requires
+     Manager authorization beyond the line 571 fix scope
+     (more than 5 lines of test file changes).
+  2. Defer to a Stage 11/13 corrections cycle: open a
+     Developer task to fix the 1-arg form pattern in a
+     follow-up session.
+  3. Adjust the production code to make the 1-arg form
+     work as the original Stage 3 contract intended:
+     remove the "missing target payload" check for the
+     legacy 1-arg form path. This would restore the
+     pre-merge-merge behavior but contradicts the Stage 5
+     descriptor validation contract.
+- After the broader 1-arg form defect is resolved: cycle
+  ready for Step 6 merge log + closure.
