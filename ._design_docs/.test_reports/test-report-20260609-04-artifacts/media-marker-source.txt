@@ -1,0 +1,7 @@
+tools/server/server-common.h:98:const char * get_media_marker();
+tools/server/README.md:438:Note for `multimodal_data` in JSON object prompts. This should be an array of strings, containing base64 encoded multimodal data such as images and audio. There must be an identical number of MTMD media markers in the string prompt element which act as placeholders for the data provided to this parameter. The multimodal data files will be substituted in order. The marker string (e.g. `<__media__>`) can be found by calling `mtmd_default_marker()` defined in [the MTMD C API](https://github.com/ggml-org/llama.cpp/blob/5fd160bbd9d70b94b5b11b0001fd7f477005e4a0/tools/mtmd/mtmd.h#L87). A client *must not* specify this field unless the server has the multimodal capability. Clients should check `/models` or `/v1/models` for the `multimodal` capability before a multimodal request.
+tools/server/README.md:839:  "media_marker": "<__media_YoNhud46VdDqbuFmKYEO9PY7A4ARzRfg__>",
+tools/server/server-common.cpp:87:const char * get_media_marker() {
+tools/server/server-common.cpp:94:        return std::string("<__media_") + random_string() + "__>";
+tools/server/server-common.cpp:1002:                p["text"] = get_media_marker();
+tools/server/server-common.cpp:1023:                p["text"] = get_media_marker();

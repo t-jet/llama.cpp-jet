@@ -1,0 +1,10 @@
+{
+  "system": "sys",
+  "messages": [
+    {
+      "content": "count these tokens",
+      "role": "user"
+    }
+  ],
+  "model": "local"
+}

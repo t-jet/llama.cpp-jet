@@ -1,0 +1,2 @@
+cmake --build build-cuda --config Release --target clean
+cmake --build build-cuda --config Release --target llama-server test-cache-controller

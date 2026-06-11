@@ -1,0 +1,45 @@
+=== E13-14 LOG LEAKAGE SCAN ===
+Searching for: SECRET-MARKER-12345, prompt text, paths, checksums, payload bytes, raw media, base64 chunks
+---
+  Marker 'SECRET-MARKER-12345': 2 hit(s)
+  Marker 'AAAAA': 32 hit(s)
+  Marker 'huge': 0 hit(s)
+  Marker 'method=': 24 hit(s)
+  Marker 'rendered-text-boundary-inference': 1 hit(s)
+  Marker 'token-position-fallback': 23 hit(s)
+  Marker 'preparation_id': 0 hit(s)
+  Marker '<__media': 0 hit(s)
+  Marker 'task=0': 0 hit(s)
+  Marker 'id_slot=0': 0 hit(s)
+---
+Tasks/operations in stderr:
+0.21.764.436 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=625 boundaries=2
+0.21.764.631 I slot      release: id  1 | task 0 | stop processing: n_tokens = 0, truncated = 0
+0.21.819.426 D srv  cache_metada: cache metadata: source=openai-chat method=rendered-text-boundary-inference degraded=rendered text boundary inference tokens=8 boundaries=2
+0.21.872.437 D slot update_batch: id  0 | task 3 | slot decode token, id=151667, n_ctx = 512, n_tokens = 8, truncated = 0
+0.21.894.542 D slot update_batch: id  0 | task 3 | slot decode token, id=198, n_ctx = 512, n_tokens = 9, truncated = 0
+0.21.915.631 D slot update_batch: id  0 | task 3 | slot decode token, id=32313, n_ctx = 512, n_tokens = 10, truncated = 0
+0.21.929.143 D slot update_batch: id  0 | task 3 | slot decode token, id=11, n_ctx = 512, n_tokens = 11, truncated = 0
+0.21.941.740 D slot update_batch: id  0 | task 3 | slot decode token, id=279, n_ctx = 512, n_tokens = 12, truncated = 0
+0.21.956.894 D slot update_batch: id  0 | task 3 | slot decode token, id=1196, n_ctx = 512, n_tokens = 13, truncated = 0
+0.21.970.239 D slot update_batch: id  0 | task 3 | slot decode token, id=1101, n_ctx = 512, n_tokens = 14, truncated = 0
+0.21.986.261 I slot      release: id  0 | task 3 | stop processing: n_tokens = 15, truncated = 0
+0.22.040.899 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.921 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.932 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.941 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.952 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.961 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.969 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.981 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.989 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.040.998 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.012 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.020 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.027 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.035 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.050 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.057 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.066 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.074 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2
+0.22.041.081 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=128 boundaries=2

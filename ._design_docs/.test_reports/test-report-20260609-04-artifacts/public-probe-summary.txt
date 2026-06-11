@@ -1,0 +1,9 @@
+E13-01a ok1=True ok2=True cache_n2=11
+E13-01b tokens=8 ok1=True ok2=True cache_n2=7
+E13-01d ok1=True ok2=True cache_n2=9
+E13-02 ok1=True ok2=True
+E13-03 v1ok1=True v1ok2=True aliasok=True
+E13-04 v1string=True aliasitems=True
+E13-05 messages=True E13-06 count=True
+E13-07 probe_ok=False status=501 E13-08 probe_ok=False status=501
+E13-10 slots_get=True

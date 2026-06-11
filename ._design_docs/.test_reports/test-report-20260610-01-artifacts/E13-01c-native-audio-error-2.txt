@@ -1,0 +1,8 @@
+
+{
+  "error": {
+    "code": 400,
+    "message": "Failed to tokenize prompt",
+    "type": "invalid_request_error"
+  }
+}

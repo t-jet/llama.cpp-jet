@@ -1,0 +1,2 @@
+time="2026-06-08T02:48:21+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8323/completion\": dial tcp 127.0.0.1:8323: connectex: No connection could be made because the target machine actively refused it."
+time="2026-06-08T02:48:21+03:00" level=error msg="thresholds on metrics 'http_req_failed' have been crossed"

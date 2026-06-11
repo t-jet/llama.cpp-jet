@@ -1,0 +1,1 @@
+diagnostic-line leak scan clean for checked secrets; no diagnostic line present

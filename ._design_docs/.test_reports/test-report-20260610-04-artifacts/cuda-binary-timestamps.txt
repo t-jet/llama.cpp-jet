@@ -1,0 +1,8 @@
+
+FullName                                                                         LastWriteTime         Length
+--------                                                                         -------------         ------
+D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\llama-server.exe          2026-06-10 16:04:23    10752
+D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\test-cache-controller.exe 2026-06-10 16:04:28   898048
+D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\ggml-cuda.dll             2026-06-10 16:03:37 34843136
+
+

@@ -1,0 +1,113 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: D:\source\llama.cpp-jet\tools\server\tests\bench-cache-correctness.js
+        output: json (D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260609-V2\S12-MTP-B01-V2-Joriginal\hybrid\k6-results.json)
+
+     scenarios: (100.00%) 2 scenarios, 2 max VUs, 5m30s max duration (incl. graceful stop):
+              * hit_probe: 11 iterations shared among 1 VUs (maxDuration: 5m0s, exec: doProbe, gracefulStop: 30s)
+              * warmup: 1 iterations shared among 1 VUs (maxDuration: 2m0s, exec: doWarmup, gracefulStop: 30s)
+
+
+running (0m01.0s), 2/2 VUs, 0 complete and 0 interrupted iterations
+hit_probe   [   0% ] 1 VUs  0m01.0s/5m0s  00/11 shared iters
+warmup      [   0% ] 1 VUs  0m01.0s/2m0s  0/1 shared iters
+
+running (0m02.0s), 1/2 VUs, 1 complete and 0 interrupted iterations
+hit_probe   [   0% ] 1 VUs  0m02.0s/5m0s  00/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m03.0s), 1/2 VUs, 2 complete and 0 interrupted iterations
+hit_probe   [   9% ] 1 VUs  0m03.0s/5m0s  01/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m04.0s), 1/2 VUs, 3 complete and 0 interrupted iterations
+hit_probe   [  18% ] 1 VUs  0m04.0s/5m0s  02/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m05.0s), 1/2 VUs, 5 complete and 0 interrupted iterations
+hit_probe   [  36% ] 1 VUs  0m05.0s/5m0s  04/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m06.0s), 1/2 VUs, 6 complete and 0 interrupted iterations
+hit_probe   [  45% ] 1 VUs  0m06.0s/5m0s  05/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m07.0s), 1/2 VUs, 7 complete and 0 interrupted iterations
+hit_probe   [  55% ] 1 VUs  0m07.0s/5m0s  06/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m08.0s), 1/2 VUs, 8 complete and 0 interrupted iterations
+hit_probe   [  64% ] 1 VUs  0m08.0s/5m0s  07/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m09.0s), 1/2 VUs, 9 complete and 0 interrupted iterations
+hit_probe   [  73% ] 1 VUs  0m09.0s/5m0s  08/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m10.0s), 1/2 VUs, 10 complete and 0 interrupted iterations
+hit_probe   [  82% ] 1 VUs  0m10.0s/5m0s  09/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+running (0m11.0s), 1/2 VUs, 11 complete and 0 interrupted iterations
+hit_probe   [  91% ] 1 VUs  0m11.0s/5m0s  10/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters
+
+
+  █ THRESHOLDS 
+
+    cache_hit_rate
+    ✓ 'rate>=0.0' rate=100.00%
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+
+    prefix_match_rate
+    ✓ 'rate>=0.95' rate=100.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 12      1.0617/s
+    checks_succeeded...: 100.00% 12 out of 12
+    checks_failed......: 0.00%   0 out of 12
+
+    ✓ warmup 200
+    ✓ probe 200
+
+    CUSTOM
+    cache_hit_prompt_ms............: avg=101.42ms min=98.32ms  med=100.62ms p(95)=104.96ms max=106.1ms 
+    cache_hit_rate.................: 100.00% 11 out of 11
+    cache_miss_prompt_ms...........: avg=485.48ms min=485.48ms med=485.48ms p(95)=485.48ms max=485.48ms
+    cache_n_tokens.................: avg=3.666667 min=0        med=4        p(95)=4        max=4       
+    prefix_match_rate..............: 100.00% 11 out of 11
+    requests_ok....................: 12      1.0617/s
+
+    HTTP
+    http_req_duration..............: avg=951.57ms min=797.73ms med=809.51ms p(95)=1.59s    max=2.05s   
+      { expected_response:true }...: avg=951.57ms min=797.73ms med=809.51ms p(95)=1.59s    max=2.05s   
+    http_req_failed................: 0.00%   0 out of 12
+    http_reqs......................: 12      1.0617/s
+
+    EXECUTION
+    iteration_duration.............: avg=1.06s    min=897.77ms med=909.92ms p(95)=1.75s    max=2.15s   
+    iterations.....................: 12      1.0617/s
+    vus............................: 1       min=1        max=2
+    vus_max........................: 2       min=2        max=2
+
+    NETWORK
+    data_received..................: 22 kB   1.9 kB/s
+    data_sent......................: 3.1 kB  272 B/s
+
+
+
+
+running (0m11.3s), 0/2 VUs, 12 complete and 0 interrupted iterations
+hit_probe ✓ [ 100% ] 1 VUs  0m11.3s/5m0s  11/11 shared iters
+warmup    ✓ [ 100% ] 1 VUs  0m01.4s/2m0s  1/1 shared iters

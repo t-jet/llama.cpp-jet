@@ -1,0 +1,9 @@
+{
+    "id_slot":  0,
+    "filename":  "stage13-e13-10.slot",
+    "n_restored":  14,
+    "n_read":  1606556,
+    "timings":  {
+                    "restore_ms":  2.913
+                }
+}

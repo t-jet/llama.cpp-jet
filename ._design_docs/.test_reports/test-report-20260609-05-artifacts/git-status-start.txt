@@ -1,0 +1,27 @@
+ A ._design_docs/cache-handling-phase13-implementation.md
+ A ._design_docs/cache-handling-phase13-implementation/part-01-status-gates-and-route-inventory.md
+ A ._design_docs/cache-handling-phase13-implementation/part-02-metadata-and-adapter-plan.md
+ A ._design_docs/cache-handling-phase13-implementation/part-03-diagnostics-and-qa-handoff.md
+ A ._design_docs/cache-handling-phase13-implementation/part-04-risks-nongoals-and-review-handoff.md
+ M ._design_docs/cache-handling-test-plan.md
+ M ._design_docs/document-index.md
+ M .agents/skills/self-improvement/assets/architect.md
+ M .agents/skills/self-improvement/assets/developer.md
+ M .agents/skills/self-improvement/assets/manager.md
+ M .agents/skills/self-improvement/assets/qa.md
+ M tests/test-cache-controller.cpp
+ M tools/server/server-context.cpp
+ M tools/server/server-context.h
+?? ._design_docs/.test_reports/test-report-20260609-04-fixes.md
+?? ._design_docs/.test_reports/test-report-20260609-04.md
+?? ._design_docs/cache-handling-phase13-design.md
+?? ._design_docs/cache-handling-phase13-design/
+?? ._design_docs/cache-handling-phase13-implementation/part-05-implementation-plan-review.md
+?? ._design_docs/cache-handling-phase13-implementation/part-06-implementation-plan-re-review.md
+?? ._design_docs/cache-handling-phase13-implementation/part-07-manager-implementation-plan-gate.md
+?? ._design_docs/cache-handling-phase13-implementation/part-08-implementation-evidence.md
+?? ._design_docs/cache-handling-phase13-implementation/part-09-architect-implementation-review.md
+?? ._design_docs/cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md
+?? ._design_docs/cache-handling-test-plan/stage-13-manager-test-plan-gate-20260609.md
+?? ._design_docs/cache-handling-test-plan/stage-13-test-plan-re-review-20260609.md
+?? ._design_docs/cache-handling-test-plan/stage-13-test-plan-review-20260609.md

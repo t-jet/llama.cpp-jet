@@ -1,0 +1,37 @@
+{
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "Okay, the user mentioned \""
+      }
+    }
+  ],
+  "created": 1781033767,
+  "model": "Qwen3-0.6B-Q8_0.gguf",
+  "system_fingerprint": "b9541-f7282f535",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 8,
+    "prompt_tokens": 24,
+    "total_tokens": 32,
+    "prompt_tokens_details": {
+      "cached_tokens": 23
+    }
+  },
+  "id": "chatcmpl-HMcfdhdV2GHKgVFQup8JimZiJoHX9IAR",
+  "timings": {
+    "cache_n": 23,
+    "prompt_n": 1,
+    "prompt_ms": 12.272,
+    "prompt_per_token_ms": 12.272,
+    "prompt_per_second": 81.48631029986961,
+    "predicted_n": 8,
+    "predicted_ms": 89.687,
+    "predicted_per_token_ms": 11.210875,
+    "predicted_per_second": 89.19910354900934
+  }
+}

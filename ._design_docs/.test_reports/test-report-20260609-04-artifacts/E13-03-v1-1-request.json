@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "content": "You answer briefly.",
+      "role": "system"
+    },
+    {
+      "content": "Stage 13 chat prompt.",
+      "role": "user"
+    }
+  ],
+  "model": "local",
+  "temperature": 0,
+  "stream": false,
+  "max_tokens": 8
+}

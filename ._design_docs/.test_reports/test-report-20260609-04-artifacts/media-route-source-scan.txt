@@ -1,0 +1,37 @@
+tools/server\server.cpp:154:        routes.post_transcriptions_oai     = models_routes->proxy_post;
+tools/server\server.cpp:192:    ctx_http.post("/v1/audio/transcriptions",  ex_wrapper(routes.post_transcriptions_oai));
+tools/server\server.cpp:193:    ctx_http.post("/audio/transcriptions",     ex_wrapper(routes.post_transcriptions_oai));
+tools/server\server-task.h:38:    TASK_RESPONSE_TYPE_OAI_ASR, // transcriptions API
+tools/server\server-context.h:120:    server_http_context::handler_t post_transcriptions_oai;
+tools/server\server-context.cpp:1122:            mparams.media_marker     = get_media_marker();
+tools/server\server-context.cpp:4263:        const std::string marker = get_media_marker();
+tools/server\server-context.cpp:4306:        if (type == "text" || type == "media_marker") {
+tools/server\server-context.cpp:5276:            { "media_marker",                get_media_marker() },
+tools/server\server-context.cpp:5533:    this->post_transcriptions_oai = [this](const server_http_req & req) {
+tools/server\server-context.cpp:5542:        json body = convert_transcriptions_to_chatcmpl(
+tools/server\server-chat.cpp:79:                    } else if (type == "input_image") {
+tools/server\server-chat.cpp:83:                        if (!input_item.contains("image_url")) {
+tools/server\server-chat.cpp:84:                            throw std::invalid_argument("'image_url' is required");
+tools/server\server-chat.cpp:87:                            {"image_url", json {
+tools/server\server-chat.cpp:88:                                {"url", input_item.at("image_url")}
+tools/server\server-chat.cpp:90:                            {"type", "image_url"},
+tools/server\server-chat.cpp:95:                        throw std::invalid_argument("'type' must be one of 'input_text', 'input_image', or 'input_file'");
+tools/server\server-chat.cpp:406:                            {"type", "image_url"},
+tools/server\server-chat.cpp:407:                            {"image_url", {
+tools/server\server-chat.cpp:414:                            {"type", "image_url"},
+tools/server\server-chat.cpp:415:                            {"image_url", {
+tools/server\server-chat.cpp:580:json convert_transcriptions_to_chatcmpl(
+tools/server\server-chat.cpp:609:    prompt += get_media_marker();
+tools/server\server-chat.h:19:// convert OpenAI transcriptions API format to OpenAI Chat Completions API format
+tools/server\server-chat.h:20:json convert_transcriptions_to_chatcmpl(
+tools/server\server-common.h:98:const char * get_media_marker();
+tools/server\server-common.cpp:87:const char * get_media_marker() {
+tools/server\server-common.cpp:993:            if (type == "image_url") {
+tools/server\server-common.cpp:998:                json image_url = json_value(p, "image_url", json::object());
+tools/server\server-common.cpp:999:                handle_media(out_files, image_url, opt.media_path);
+tools/server\server-common.cpp:1001:                p["type"] = "media_marker";
+tools/server\server-common.cpp:1002:                p["text"] = get_media_marker();
+tools/server\server-common.cpp:1003:                p.erase("image_url");
+tools/server\server-common.cpp:1020:                // TODO: add audio_url support by reusing handle_media()
+tools/server\server-common.cpp:1022:                p["type"] = "media_marker";
+tools/server\server-common.cpp:1023:                p["text"] = get_media_marker();

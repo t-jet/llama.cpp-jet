@@ -1,0 +1,7 @@
+{
+  "n_predict": 8,
+  "stream": false,
+  "temperature": 0,
+  "prompt": "Stage 13 plain prompt. Answer with one word.",
+  "cache_prompt": true
+}

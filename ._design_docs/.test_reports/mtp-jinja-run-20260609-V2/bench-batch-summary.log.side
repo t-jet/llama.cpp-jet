@@ -1,0 +1,34 @@
+﻿2026-06-09T11:47:32.4661746+03:00] bench-batch-V2 start; rows=16; perRowTimeoutMs=600000; model=D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf
+2026-06-09T11:47:32.4736974+03:00] S12-MTP-B01-V2-Joriginal start port=8301
+2026-06-09T11:48:05.3948456+03:00] S12-MTP-B01-V2-Joriginal end elapsed=32s verdict=PENDING base=PENDING pmr=1.0000
+2026-06-09T11:48:05.3948456+03:00] S12-MTP-B01-V2-Jmarked start port=8317
+2026-06-09T11:48:37.3731195+03:00] S12-MTP-B01-V2-Jmarked end elapsed=31s verdict=PENDING base=PENDING pmr=1.0000
+2026-06-09T11:48:37.3731195+03:00] S12-MTP-B02-V2-Joriginal start port=8302
+2026-06-09T11:49:41.9970955+03:00] S12-MTP-B02-V2-Joriginal end elapsed=64s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:49:41.9970955+03:00] S12-MTP-B02-V2-Jmarked start port=8318
+2026-06-09T11:50:46.4025074+03:00] S12-MTP-B02-V2-Jmarked end elapsed=64s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:50:46.4035081+03:00] S12-MTP-B03-V2-Joriginal start port=8303
+2026-06-09T11:52:54.5886940+03:00] S12-MTP-B03-V2-Joriginal end elapsed=128s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:52:54.5896944+03:00] S12-MTP-B03-V2-Jmarked start port=8319
+2026-06-09T11:55:02.7355154+03:00] S12-MTP-B03-V2-Jmarked end elapsed=128s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:55:02.7365160+03:00] S12-MTP-B04-V2-Joriginal start port=8304
+2026-06-09T11:57:15.4372511+03:00] S12-MTP-B04-V2-Joriginal end elapsed=132s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:57:15.4382501+03:00] S12-MTP-B04-V2-Jmarked start port=8320
+2026-06-09T11:59:25.6125058+03:00] S12-MTP-B04-V2-Jmarked end elapsed=130s verdict=PENDING base=PENDING pmr=
+2026-06-09T11:59:25.6135092+03:00] S12-MTP-B05-V2-Joriginal start port=8305
+2026-06-09T12:00:29.8336373+03:00] S12-MTP-B05-V2-Joriginal end elapsed=64s verdict=PENDING base=PENDING pmr=
+2026-06-09T12:00:29.8336373+03:00] S12-MTP-B05-V2-Jmarked start port=8321
+2026-06-09T12:01:34.1015684+03:00] S12-MTP-B05-V2-Jmarked end elapsed=64s verdict=PENDING base=PENDING pmr=
+2026-06-09T12:01:34.1025688+03:00] S12-MTP-B06-V2-Joriginal start port=8306
+2026-06-09T12:02:28.3378474+03:00] S12-MTP-B06-V2-Joriginal end elapsed=54s verdict=PENDING base=PENDING pmr=1.0000
+2026-06-09T12:02:28.3388473+03:00] S12-MTP-B06-V2-Jmarked start port=8322
+2026-06-09T12:03:21.5000307+03:00] S12-MTP-B06-V2-Jmarked end elapsed=53s verdict=PENDING base=PENDING pmr=1.0000
+2026-06-09T12:03:21.5005342+03:00] S12-MTP-B07-V2-Joriginal start port=8307
+2026-06-09T12:06:33.6257292+03:00] S12-MTP-B07-V2-Joriginal end elapsed=192s verdict=PENDING base= pmr=
+2026-06-09T12:06:33.6257292+03:00] S12-MTP-B07-V2-Jmarked start port=8323
+2026-06-09T12:09:45.4769166+03:00] S12-MTP-B07-V2-Jmarked end elapsed=191s verdict=PENDING base= pmr=
+2026-06-09T12:09:45.4779192+03:00] S12-MTP-B08-V2-Joriginal start port=8308
+2026-06-09T12:16:53.7812120+03:00] S12-MTP-B08-V2-Joriginal end elapsed=428s verdict=PENDING base=PENDING pmr=
+2026-06-09T12:16:53.7812120+03:00] S12-MTP-B08-V2-Jmarked start port=8324
+2026-06-09T12:23:59.7718082+03:00] S12-MTP-B08-V2-Jmarked end elapsed=425s verdict=PENDING base=PENDING pmr=
+2026-06-09T12:23:59.7743100+03:00] bench-batch-V2 end; csv=D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260609-V2\bench-batch-verdicts-v2.csv

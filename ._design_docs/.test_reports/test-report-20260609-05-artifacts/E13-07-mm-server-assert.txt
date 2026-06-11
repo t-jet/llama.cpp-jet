@@ -1,0 +1,18 @@
+
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:16:0.03.390.484 W load_hparams: Qwen-VL models require at minimum 1024 image tokens to function correctly on grounding tasks
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:17:0.03.390.489 W load_hparams: if you encounter problems with accuracy, try adding --image-min-tokens 1024
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:18:0.03.390.490 W load_hparams: more info: https://github.com/ggml-org/llama.cpp/issues/16842
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:19:
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:20:0.04.961.628 W init_audio: audio input is in experimental stage and may have reduced quality:
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:21:    https://github.com/ggml-org/llama.cpp/discussions/13759
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:22:0.04.961.681 I srv    load_model: loaded multimodal model, 'D:\source\llama.cpp-jet\._test_models\Qwen2.5-Omni-3B-GGUF\mmproj-Qwen2.5-Omni-3B-f16.gguf'
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:23:0.04.961.684 I srv    load_model: initializing slots, n_slots = 1
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:27:0.05.088.283 I srv    load_model: use `--cache-ram 0` to disable the prompt cache
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:28:0.05.088.292 I srv    load_model: cache mode: hybrid (LRU, non-destructive hits)
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:29:0.05.088.293 I srv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:30:0.05.088.294 I srv    load_model: context checkpoints enabled, max = 32, min spacing = 256
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:31:0.05.088.323 W srv          init: --cache-idle-slots requires --kv-unified, disabling
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:44:0.05.095.587 I srv  llama_server: server is listening on http://127.0.0.1:18215
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:45:0.05.095.597 I srv  update_slots: all slots are idle
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server4.stderr.log:46:D:\source\llama.cpp-jet\tools\server\server-common.cpp:398: GGML_ASSERT(!has_mtmd) failed
+

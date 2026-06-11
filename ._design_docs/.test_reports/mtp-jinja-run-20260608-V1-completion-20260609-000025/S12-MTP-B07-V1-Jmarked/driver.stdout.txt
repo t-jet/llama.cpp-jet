@@ -1,0 +1,4 @@
+S12-B07 mixed-profile comparison
+D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B07-V1-Jmarked\plain-transformer\evidence-summary.md
+D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B07-V1-Jmarked\target-plus-draft\evidence-summary.md
+D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B07-V1-Jmarked\checkpoint-dependent\evidence-summary.md

@@ -1,0 +1,51 @@
+﻿{
+    "prompt_seed":  42,
+    "demotion_count":  "PENDING",
+    "binary_timestamp":  "2026-06-09T11:47:12.3053603+03:00",
+    "correctness_verdict":  "PENDING",
+    "warmup_window":  "warmup_iters=2",
+    "host_hardware":  "PENDING",
+    "commit_sha":  "PENDING",
+    "p95_latency_ms":  "PENDING",
+    "server_flags":  [
+                         "--cache-mode",
+                         "hybrid",
+                         "--parallel",
+                         "1",
+                         "--cache-ram",
+                         "100",
+                         "--metrics",
+                         "--ctx-size",
+                         "512",
+                         "--temp",
+                         "0",
+                         "--seed",
+                         "42",
+                         "--chat-template-file",
+                         "D:\\source\\llama.cpp-jet\\._test_models\\Qwen3-8B-GGUF\\chat_template_new.jinja"
+                     ],
+    "build_type":  "Release",
+    "slot_count":  1,
+    "restore_latency_by_kind":  {
+
+                                },
+    "throughput_tps":  "PENDING",
+    "checkpoint_hit_rate":  0,
+    "workingset_samples":  [
+
+                           ],
+    "eviction_count":  "PENDING",
+    "promotion_count":  "PENDING",
+    "ctx_size":  512,
+    "model_fixture":  "Qwen3-8B-Q6_K.gguf",
+    "p50_latency_ms":  "PENDING",
+    "exact_hit_rate":  "PENDING",
+    "p99_latency_ms":  "PENDING",
+    "draft_mode":  "none",
+    "dirty_worktree":  "PENDING",
+    "handle_samples":  [
+
+                       ],
+    "request_count":  12,
+    "measurement_window":  "iters=12"
+}

@@ -1,0 +1,12 @@
+{
+  "system": "You answer briefly.",
+  "messages": [
+    {
+      "content": "Stage 13 anthropic prompt.",
+      "role": "user"
+    }
+  ],
+  "model": "local",
+  "stream": false,
+  "max_tokens": 8
+}

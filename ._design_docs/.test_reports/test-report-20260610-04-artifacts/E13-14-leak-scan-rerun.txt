@@ -1,0 +1,14 @@
+leak_scan_target=SRV_DBG cache metadata: line family only
+native_line: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=30 boundaries=2
+native_secret_hits=0
+native_tool_arg_hits=0
+native_path_hits=0
+native_checksum_hits=0
+native_rawmedia_hits=0
+chat_line: cache metadata: source=openai-chat method=rendered-text-boundary-inference degraded=rendered text boundary inference tokens=46 boundaries=6
+chat_secret_hits=0
+chat_tool_arg_hits=0
+chat_path_hits=0
+chat_checksum_hits=0
+chat_rawmedia_hits=0
+note: pre-existing log_server_r request:/response: lines at verbosity 5 echo full bodies; not a Stage 13 regression

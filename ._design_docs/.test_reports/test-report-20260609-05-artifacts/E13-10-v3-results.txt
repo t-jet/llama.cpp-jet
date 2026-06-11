@@ -1,0 +1,12 @@
+=== E13-10 /slots save+restore+erase (v3) ===
+HEALTH status=ok model=
+BEFORE n_slots=2
+BEFORE-fields: id,n_ctx,speculative,is_processing
+SAVE-ERR Response status code does not indicate success: 500 (Internal Server Error).
+GEN content=0.0. I'm trying to cache_n=0
+GEN keys: index,content,tokens,id_slot,stop,model,tokens_predicted,tokens_evaluated,generation_settings,prompt,has_new_line,truncated,stop_type,stopping_word,tokens_cached,timings
+RESTORE-ERR Response status code does not indicate success: 400 (Bad Request).
+ERASE keys: id_slot,n_erased
+ERASE resp: {"id_slot":0,"n_erased":0}
+FINAL n_slots=2
+FINAL-fields: id,n_ctx,speculative,is_processing

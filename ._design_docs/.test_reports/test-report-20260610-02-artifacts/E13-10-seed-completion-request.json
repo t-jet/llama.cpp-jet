@@ -1,0 +1,7 @@
+{
+    "id_slot":  0,
+    "n_predict":  4,
+    "prompt":  "Slots save restore erase CUDA Stage 13 seed.",
+    "cache_prompt":  true,
+    "temperature":  0
+}

@@ -1,0 +1,4 @@
+cmake: cmake version 4.3.2
+git: git version 2.54.0.windows.1
+powershell: 7.6.2
+msbuild-via-vsdevcmd: MSBuild version 18.6.3+84d3e95b4 for .NET Framework (from clean-step.log)

@@ -1,0 +1,41 @@
+ A ._design_docs/.test_reports/test-report-20260610-02-fixes.md
+ A ._design_docs/.test_reports/test-report-20260610-03-fixes.md
+ A ._design_docs/cache-handling-phase13-implementation.md
+ A ._design_docs/cache-handling-phase13-implementation/part-01-status-gates-and-route-inventory.md
+ A ._design_docs/cache-handling-phase13-implementation/part-02-metadata-and-adapter-plan.md
+ A ._design_docs/cache-handling-phase13-implementation/part-03-diagnostics-and-qa-handoff.md
+ A ._design_docs/cache-handling-phase13-implementation/part-04-risks-nongoals-and-review-handoff.md
+ A ._design_docs/cache-handling-phase13-implementation/part-08-implementation-evidence.md
+ M ._design_docs/cache-handling-test-plan.md
+ M ._design_docs/document-index.md
+ M .agents/skills/self-improvement/assets/architect.md
+ M .agents/skills/self-improvement/assets/developer.md
+ M .agents/skills/self-improvement/assets/manager.md
+ M .agents/skills/self-improvement/assets/qa.md
+ M tests/test-cache-controller.cpp
+ M tools/server/server-cache-hybrid.cpp
+ M tools/server/server-common.cpp
+ M tools/server/server-common.h
+ M tools/server/server-context.cpp
+ M tools/server/server-context.h
+ M tools/server/server-task.h
+?? ._design_docs/.test_reports/test-report-20260609-04-fixes.md
+?? ._design_docs/.test_reports/test-report-20260609-04.md
+?? ._design_docs/.test_reports/test-report-20260610-01.md
+?? ._design_docs/.test_reports/test-report-20260610-02-developer-review.md
+?? ._design_docs/.test_reports/test-report-20260610-02.md
+?? ._design_docs/.test_reports/test-report-20260610-03-developer-review.md
+?? ._design_docs/.test_reports/test-report-20260610-03.md
+?? ._design_docs/cache-handling-phase13-design.md
+?? ._design_docs/cache-handling-phase13-design/
+?? ._design_docs/cache-handling-phase13-implementation/part-05-implementation-plan-review.md
+?? ._design_docs/cache-handling-phase13-implementation/part-06-implementation-plan-re-review.md
+?? ._design_docs/cache-handling-phase13-implementation/part-07-manager-implementation-plan-gate.md
+?? ._design_docs/cache-handling-phase13-implementation/part-09-architect-implementation-review.md
+?? ._design_docs/cache-handling-phase13-implementation/part-10-bugfix-review-20260610.md
+?? ._design_docs/cache-handling-phase13-implementation/part-11-bugfix-re-review-20260610.md
+?? ._design_docs/cache-handling-phase13-implementation/part-12-bugfix-review-20260610-3.md
+?? ._design_docs/cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md
+?? ._design_docs/cache-handling-test-plan/stage-13-manager-test-plan-gate-20260609.md
+?? ._design_docs/cache-handling-test-plan/stage-13-test-plan-re-review-20260609.md
+?? ._design_docs/cache-handling-test-plan/stage-13-test-plan-review-20260609.md

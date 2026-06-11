@@ -1,0 +1,31 @@
+{
+  "completed_at": 1781033767,
+  "created_at": 1781033767,
+  "id": "resp_cvj2GSWFpVaZP81h0kPSiX59Wij7kqGe",
+  "model": "Qwen3-0.6B-Q8_0.gguf",
+  "object": "response",
+  "output": [
+    {
+      "id": "rs_JUxV5vPCQwiGVLHm833tCEWZdo5kC5B3",
+      "summary": [],
+      "type": "reasoning",
+      "content": [
+        {
+          "text": "Okay, the user mentioned \"",
+          "type": "reasoning_text"
+        }
+      ],
+      "encrypted_content": "",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "usage": {
+    "input_tokens": 16,
+    "output_tokens": 8,
+    "total_tokens": 24,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    }
+  }
+}

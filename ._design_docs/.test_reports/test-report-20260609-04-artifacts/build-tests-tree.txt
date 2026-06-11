@@ -1,0 +1,341 @@
+
+FullName                                                                          Mode  Length LastWriteTime
+--------                                                                          ----  ------ -------------
+D:\source\llama.cpp-jet\build\tests\CMakeFiles                                    d----        2026-06-09 22:34:12
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.dir                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.dir                                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\Release                                       d----        2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.dir                                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.dir                                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.dir                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.dir                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.dir                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.dir                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.dir                              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.dir                                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.dir                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.dir                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.dir                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.dir                                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.dir                                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.dir                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.dir                                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.dir                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.dir                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.dir                                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.dir                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.dir                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.dir                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.dir             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.dir                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.dir                                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.dir                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.dir         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.dir                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.dir             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.dir                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.dir                       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.dir    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.dir                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.dir                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.dir                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.dir        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.dir                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.dir              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.dir             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.dir             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.dir             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.dir                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.dir                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\cmake_install.cmake                           -a--- 46169  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\CTestTestfile.cmake                           -a--- 121722 2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.vcxproj                      -a--- 29648  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.vcxproj.filters              -a--- 583    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.vcxproj                               -a--- 10690  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.vcxproj.filters                       -a--- 520    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.vcxproj                             -a--- 10048  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.vcxproj.filters                     -a--- 522    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.vcxproj                            -a--- 29613  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.vcxproj.filters                    -a--- 703    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.vcxproj                       -a--- 29307  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.vcxproj.filters               -a--- 708    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.vcxproj                      -a--- 29325  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.vcxproj.filters              -a--- 709    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.vcxproj                      -a--- 29325  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.vcxproj.filters              -a--- 709    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.vcxproj                  -a--- 29397  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.vcxproj.filters          -a--- 713    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.vcxproj                          -a--- 29253  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.vcxproj.filters                  -a--- 705    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.vcxproj                                -a--- 27230  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.vcxproj.filters                        -a--- 571    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.vcxproj                 -a--- 31243  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.vcxproj.filters         -a--- 714    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.vcxproj                 -a--- 29415  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.vcxproj.filters         -a--- 714    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.vcxproj                  -a--- 29487  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.vcxproj.filters          -a--- 856    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.vcxproj                    -a--- 29361  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.vcxproj.filters            -a--- 711    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.vcxproj                             -a--- 29199  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.vcxproj.filters                     -a--- 702    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.vcxproj                            -a--- 29217  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.vcxproj.filters                    -a--- 703    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.vcxproj                     -a--- 29343  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.vcxproj.filters             -a--- 710    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.vcxproj                              -a--- 29181  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.vcxproj.filters                      -a--- 701    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.vcxproj                -a--- 29433  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.vcxproj.filters        -a--- 715    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.vcxproj                       -a--- 30084  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.vcxproj.filters               -a--- 706    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.vcxproj                              -a--- 29181  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.vcxproj.filters                      -a--- 701    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.vcxproj                       -a--- 30029  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.vcxproj.filters               -a--- 2020   2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.vcxproj                     -a--- 29343  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.vcxproj.filters             -a--- 710    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.vcxproj                    -a--- 29361  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.vcxproj.filters            -a--- 711    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.vcxproj         -a--- 29559  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.vcxproj.filters -a--- 722    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.vcxproj                    -a--- 29361  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.vcxproj.filters            -a--- 711    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.vcxproj                             -a--- 29199  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.vcxproj.filters                     -a--- 702    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.vcxproj                  -a--- 29397  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.vcxproj.filters          -a--- 713    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.vcxproj     -a--- 31386  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.vcxproj.fi… -a--- 600    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.vcxproj               -a--- 31006  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.vcxproj.filters       -a--- 590    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.vcxproj         -a--- 29559  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.vcxproj.filters -a--- 722    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.vcxproj              -a--- 31297  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.vcxproj.filters      -a--- 717    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.vcxproj                   -a--- 31207  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.vcxproj.filters           -a--- 712    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.vcxpr… -a--- 31549  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.vcxpr… -a--- 731    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.vcxproj              -a--- 31297  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.vcxproj.filters      -a--- 717    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.vcxproj                    -a--- 31189  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.vcxproj.filters            -a--- 711    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.vcxproj                 -a--- 31243  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.vcxproj.filters         -a--- 714    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.vcxproj    -a--- 31477  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.vcxproj.f… -a--- 727    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.vcxproj                  -a--- 31225  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.vcxproj.filters          -a--- 713    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.vcxproj          -a--- 31369  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.vcxproj.filters  -a--- 721    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.vcxproj         -a--- 31387  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.vcxproj.filters -a--- 722    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.vcxproj         -a--- 31387  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.vcxproj.filters -a--- 722    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.vcxproj         -a--- 31387  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.vcxproj.filters -a--- 722    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.vcxproj                    -a--- 29361  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.vcxproj.filters            -a--- 711    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.vcxproj                      -a--- 29252  2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.vcxproj.filters              -a--- 583    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\CMakeFiles\generate.stamp                     -a--- 55     2026-06-09 22:34:12
+D:\source\llama.cpp-jet\build\tests\CMakeFiles\generate.stamp.depend              -a--- 176    2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.dir\Debug                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.dir\MinSizeRel               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.dir\Release                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\export-graph-ops.dir\RelWithDebInfo           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.dir\Debug                             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.dir\MinSizeRel                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.dir\Release                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\INSTALL.dir\RelWithDebInfo                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.dir\Debug                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.dir\MinSizeRel                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.dir\Release                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\RUN_TESTS.dir\RelWithDebInfo                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.dir\Debug                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.dir\MinSizeRel                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.dir\Release                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-alloc.dir\RelWithDebInfo                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.dir\Debug                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.dir\MinSizeRel                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.dir\Release                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-arg-parser.dir\RelWithDebInfo            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.dir\Debug                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.dir\MinSizeRel               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.dir\Release                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-autorelease.dir\RelWithDebInfo           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.dir\Debug                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.dir\MinSizeRel               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.dir\Release                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-ops.dir\RelWithDebInfo           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.dir\Debug                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.dir\MinSizeRel           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.dir\Release              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-backend-sampler.dir\RelWithDebInfo       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.dir\Debug                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.dir\MinSizeRel                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.dir\Release                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-barrier.dir\RelWithDebInfo               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.dir\Debug                              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.dir\MinSizeRel                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.dir\Release                            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-c.dir\RelWithDebInfo                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Debug               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\MinSizeRel          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release             d----        2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\RelWithDebInfo      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… d----        2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\get-model.… -a--- 3384   2026-06-09 22:34:11
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cache… -a--- 1184   2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cache… -a--- 49597… 2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 2986   2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 282    2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 409    2026-06-09 22:34:11
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 121    2026-06-09 22:34:11
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 110    2026-06-09 22:34:11
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 2      2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 2      2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 182    2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 2      2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 39584  2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 574    2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-cache-controller.dir\Release\test-cac.0… -a--- 316    2026-06-09 22:34:14
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.dir\Debug               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.dir\MinSizeRel          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.dir\Release             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-auto-parser.dir\RelWithDebInfo      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.dir\Debug                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.dir\MinSizeRel           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.dir\Release              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-peg-parser.dir\RelWithDebInfo       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.dir\Debug                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.dir\MinSizeRel             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.dir\Release                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-chat-template.dir\RelWithDebInfo         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.dir\Debug                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.dir\MinSizeRel                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.dir\Release                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-gguf.dir\RelWithDebInfo                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.dir\Debug                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.dir\MinSizeRel                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.dir\Release                        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-jinja.dir\RelWithDebInfo                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.dir\Debug                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.dir\MinSizeRel              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.dir\Release                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-json-partial.dir\RelWithDebInfo          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.dir\Debug                            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.dir\MinSizeRel                       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.dir\Release                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-log.dir\RelWithDebInfo                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.dir\Debug              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.dir\MinSizeRel         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.dir\Release            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-model-load-cancel.dir\RelWithDebInfo     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.dir\Debug                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.dir\MinSizeRel                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.dir\Release                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-mtmd-c-api.dir\RelWithDebInfo            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.dir\Debug                            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.dir\MinSizeRel                       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.dir\Release                          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-opt.dir\RelWithDebInfo                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.dir\Debug                     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.dir\MinSizeRel                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.dir\Release                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-peg-parser.dir\RelWithDebInfo            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.dir\Debug                   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.dir\MinSizeRel              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.dir\Release                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-fns.dir\RelWithDebInfo          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.dir\Debug                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.dir\MinSizeRel             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.dir\Release                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-quantize-perf.dir\RelWithDebInfo         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.dir\Debug       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.dir\MinSizeRel  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.dir\Release     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-recurrent-state-rollback.dir\RelWithDeb… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.dir\Debug                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.dir\MinSizeRel             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.dir\Release                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-regex-partial.dir\RelWithDebInfo         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.dir\Debug                           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.dir\MinSizeRel                      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.dir\Release                         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-rope.dir\RelWithDebInfo                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.dir\Debug                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.dir\MinSizeRel           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.dir\Release              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-save-load-state.dir\RelWithDebInfo       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.dir\Debug   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.dir\MinSiz… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.dir\Release d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-cold-store-hardening.dir\RelWit… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.dir\Debug             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.dir\MinSizeRel        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.dir\Release           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-stage10-policy-lru.dir\RelWithDebInfo    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.dir\Debug       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.dir\MinSizeRel  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.dir\Release     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-state-restore-fragmented.dir\RelWithDeb… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.dir\Debug            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.dir\MinSizeRel       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.dir\Release          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step1-state-machine.dir\RelWithDebInfo   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.dir\Debug                 d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.dir\MinSizeRel            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.dir\Release               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step10-metrics.dir\RelWithDebInfo        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.dir\D… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.dir\M… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.dir\R… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step11-test-hooks-fault-injection.dir\R… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.dir\Debug            d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.dir\MinSizeRel       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.dir\Release          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step12-branch-graph.dir\RelWithDebInfo   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.dir\Debug                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.dir\MinSizeRel             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.dir\Release                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step13-stage8.dir\RelWithDebInfo         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.dir\Debug               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.dir\MinSizeRel          d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.dir\Release             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step2-cold-store.dir\RelWithDebInfo      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.dir\Debug  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.dir\MinSi… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.dir\Relea… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step3-4-cold-store-write-read.dir\RelWi… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.dir\Debug                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.dir\MinSizeRel           d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.dir\Release              d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step5-io-worker.dir\RelWithDebInfo       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.dir\Debug        d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.dir\MinSizeRel   d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.dir\Release      d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step6-demotion-protocol.dir\RelWithDebI… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.dir\Debug       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.dir\MinSizeRel  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.dir\Release     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step7-promotion-protocol.dir\RelWithDeb… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.dir\Debug       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.dir\MinSizeRel  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.dir\Release     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step8-integration-wiring.dir\RelWithDeb… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.dir\Debug       d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.dir\MinSizeRel  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.dir\Release     d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-step9-startup-validation.dir\RelWithDeb… d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.dir\Debug                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.dir\MinSizeRel             d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.dir\Release                d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-thread-safety.dir\RelWithDebInfo         d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.dir\Debug                    d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.dir\MinSizeRel               d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.dir\Release                  d----        2026-06-09 22:32:20
+D:\source\llama.cpp-jet\build\tests\test-tokenizer-0.dir\RelWithDebInfo           d----        2026-06-09 22:32:20
+

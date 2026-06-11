@@ -1,0 +1,15 @@
+{
+    "temperature":  0,
+    "messages":  [
+                     {
+                         "content":  "Answer briefly.",
+                         "role":  "system"
+                     },
+                     {
+                         "content":  "STAGE13_SECRET_DO_NOT_LEAK_CHAT tool_arg=password123 path=C:\\secret\\chat.bin checksum=abcdef rawmedia=bytes",
+                         "role":  "user"
+                     }
+                 ],
+    "stream":  false,
+    "max_tokens":  2
+}

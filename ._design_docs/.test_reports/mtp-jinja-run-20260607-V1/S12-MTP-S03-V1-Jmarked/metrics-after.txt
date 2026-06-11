@@ -1,0 +1,1243 @@
+﻿# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed.
+# TYPE llamacpp:prompt_tokens_total counter
+llamacpp:prompt_tokens_total 155168
+# HELP llamacpp:prompt_seconds_total Prompt process time
+# TYPE llamacpp:prompt_seconds_total counter
+llamacpp:prompt_seconds_total 1394.47
+# HELP llamacpp:tokens_predicted_total Number of generation tokens processed.
+# TYPE llamacpp:tokens_predicted_total counter
+llamacpp:tokens_predicted_total 26624
+# HELP llamacpp:tokens_predicted_seconds_total Predict process time
+# TYPE llamacpp:tokens_predicted_seconds_total counter
+llamacpp:tokens_predicted_seconds_total 236.943
+# HELP llamacpp:n_decode_total Total number of llama_decode() calls
+# TYPE llamacpp:n_decode_total counter
+llamacpp:n_decode_total 175136
+# HELP llamacpp:n_tokens_max Largest observed n_tokens.
+# TYPE llamacpp:n_tokens_max counter
+llamacpp:n_tokens_max 29
+# HELP llamacpp:prompt_tokens_seconds Average prompt throughput in tokens/s.
+# TYPE llamacpp:prompt_tokens_seconds gauge
+llamacpp:prompt_tokens_seconds 111.273
+# HELP llamacpp:predicted_tokens_seconds Average generation throughput in tokens/s.
+# TYPE llamacpp:predicted_tokens_seconds gauge
+llamacpp:predicted_tokens_seconds 112.365
+# HELP llamacpp:requests_processing Number of requests processing.
+# TYPE llamacpp:requests_processing gauge
+llamacpp:requests_processing 0
+# HELP llamacpp:requests_deferred Number of requests deferred.
+# TYPE llamacpp:requests_deferred gauge
+llamacpp:requests_deferred 0
+# HELP llamacpp:n_busy_slots_per_decode Average number of busy slots per llama_decode() call
+# TYPE llamacpp:n_busy_slots_per_decode gauge
+llamacpp:n_busy_slots_per_decode 1
+# HELP llamacpp_cache_entries Current cache entry count by mode.
+# TYPE llamacpp_cache_entries gauge
+llamacpp_cache_entries{mode="hybrid"} 17
+# HELP llamacpp_cache_bytes Current cache resident bytes by mode.
+# TYPE llamacpp_cache_bytes gauge
+llamacpp_cache_bytes{mode="hybrid"} 50940740
+# HELP llamacpp_cache_tokens Current cached token count by mode.
+# TYPE llamacpp_cache_tokens gauge
+llamacpp_cache_tokens{mode="hybrid"} 444
+# HELP llamacpp_cache_hits_total Successful cache restores by mode.
+# TYPE llamacpp_cache_hits_total counter
+llamacpp_cache_hits_total{mode="hybrid"} 0
+# HELP llamacpp_cache_misses_total Cache lookup misses by mode.
+# TYPE llamacpp_cache_misses_total counter
+llamacpp_cache_misses_total{mode="hybrid"} 6656
+# HELP llamacpp_cache_evictions_total Cache evictions by mode.
+# TYPE llamacpp_cache_evictions_total counter
+llamacpp_cache_evictions_total{mode="hybrid"} 6639
+# HELP llamacpp_cache_payload_evictions_total Hot payload evictions by mode.
+# TYPE llamacpp_cache_payload_evictions_total counter
+llamacpp_cache_payload_evictions_total{mode="hybrid"} 6639
+# HELP llamacpp_cache_protected_root_decisions_total Protected-root cache policy decisions by mode.
+# TYPE llamacpp_cache_protected_root_decisions_total counter
+llamacpp_cache_protected_root_decisions_total{mode="hybrid"} 0
+# HELP llamacpp_cache_restore_failures_total Cache restore failures by mode.
+# TYPE llamacpp_cache_restore_failures_total counter
+llamacpp_cache_restore_failures_total{mode="hybrid"} 0
+# HELP llamacpp_cache_descriptor_validation_failures_total Payload descriptor validation failures by mode.
+# TYPE llamacpp_cache_descriptor_validation_failures_total counter
+llamacpp_cache_descriptor_validation_failures_total{mode="hybrid"} 0
+# HELP llamacpp_cache_pairing_violations_total Payload target and draft pairing violations by mode.
+# TYPE llamacpp_cache_pairing_violations_total counter
+llamacpp_cache_pairing_violations_total{mode="hybrid"} 0
+# HELP llamacpp_cache_fallback_restores_total Cache restore attempts that fell back after descriptor or transaction failure by mode.
+# TYPE llamacpp_cache_fallback_restores_total counter
+llamacpp_cache_fallback_restores_total{mode="hybrid"} 0
+# HELP cache_branch_nodes_created_total Branch nodes created by mode.
+# TYPE cache_branch_nodes_created_total counter
+cache_branch_nodes_created_total{mode="hybrid"} 6656
+# HELP cache_branch_lookup_hits_total Branch lookup hits by mode.
+# TYPE cache_branch_lookup_hits_total counter
+cache_branch_lookup_hits_total{mode="hybrid"} 0
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10055927561871737599",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10122959722649993481",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="103137551323617553",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10405479658023709063",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10658302455719316693",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10663837111734677017",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11179883722096647025",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11443065656966158083",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11910701441483545237",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11942072996490846659",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="12315765492985282765",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13182489209744554729",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13503447335903908319",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13895220191311195235",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13915662247866973195",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15058156819311725949",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15206050151105289629",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15207997565831142461",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="1548238588723159541",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="1565611704055589391",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16175157327607864117",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16330821798111982457",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16492811565392940659",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16611265260227881317",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16634779127395167623",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16816884268062281473",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17421568501738719225",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17433202029070876565",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17668954581876815643",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17694091304566758657",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17860586625017224661",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18158573187184478165",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18361299778632158389",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18438568268875133227",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="2116591856281658035",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="2144537531668376999",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3087303972721917937",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3268387904940009689",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3570960631682355413",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3701536294808990061",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3922834719426066925",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3964923926253687397",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="4527268208056947275",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5193553245106574557",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5302854121347719089",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5378655436170686705",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5689780332802372773",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="6389749951648581997",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="6652205789421054609",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7361484830054439017",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="75908549749749633",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7619265701467309587",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="786181901238561501",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7915917628137591315",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7979094874538656053",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7988745413139668475",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8695725991232029621",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8801497993325334125",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8886956671705906703",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8920030444272880973",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8970874095781159815",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9388231407419737429",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9709657741154340529",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9852727929093100779",method="token_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10055927561871737599",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10122959722649993481",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="103137551323617553",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10405479658023709063",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10658302455719316693",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="10663837111734677017",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11179883722096647025",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11443065656966158083",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11910701441483545237",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="11942072996490846659",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="12315765492985282765",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13182489209744554729",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13503447335903908319",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13895220191311195235",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="13915662247866973195",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15058156819311725949",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15206050151105289629",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="15207997565831142461",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="1548238588723159541",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="1565611704055589391",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16175157327607864117",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16330821798111982457",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16492811565392940659",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16611265260227881317",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16634779127395167623",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="16816884268062281473",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17421568501738719225",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17433202029070876565",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17668954581876815643",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17694091304566758657",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="17860586625017224661",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18158573187184478165",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18361299778632158389",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="18438568268875133227",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="2116591856281658035",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="2144537531668376999",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3087303972721917937",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3268387904940009689",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3570960631682355413",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3701536294808990061",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3922834719426066925",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="3964923926253687397",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="4527268208056947275",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5193553245106574557",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5302854121347719089",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5378655436170686705",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="5689780332802372773",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="6389749951648581997",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="6652205789421054609",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7361484830054439017",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="75908549749749633",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7619265701467309587",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="786181901238561501",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7915917628137591315",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7979094874538656053",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="7988745413139668475",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8695725991232029621",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8801497993325334125",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8886956671705906703",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8920030444272880973",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="8970874095781159815",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9388231407419737429",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9709657741154340529",method="checksum_span"} 208
+# HELP cache_branch_lookups_total Branch lookups by namespace and method.
+# TYPE cache_branch_lookups_total counter
+cache_branch_lookups_total{mode="hybrid",namespace="9852727929093100779",method="checksum_span"} 208
+# HELP cache_branch_traversals_total Branch traversals by operation.
+# TYPE cache_branch_traversals_total counter
+cache_branch_traversals_total{mode="hybrid",operation="path_to_root"} 0
+# HELP cache_branch_traversals_total Branch traversals by operation.
+# TYPE cache_branch_traversals_total counter
+cache_branch_traversals_total{mode="hybrid",operation="descendants"} 0
+# HELP cache_branch_traversals_total Branch traversals by operation.
+# TYPE cache_branch_traversals_total counter
+cache_branch_traversals_total{mode="hybrid",operation="children"} 0
+# HELP cache_namespace_count Current branch namespace count by mode.
+# TYPE cache_namespace_count gauge
+cache_namespace_count{mode="hybrid"} 64
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="10055927561871737599"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="10055927561871737599"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="10055927561871737599"} 52832
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="10122959722649993481"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="10122959722649993481"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="10122959722649993481"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="103137551323617553"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="103137551323617553"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="103137551323617553"} 56368
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="10405479658023709063"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="10405479658023709063"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="10405479658023709063"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="10658302455719316693"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="10658302455719316693"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="10658302455719316693"} 54080
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="10663837111734677017"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="10663837111734677017"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="10663837111734677017"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="11179883722096647025"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="11179883722096647025"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="11179883722096647025"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="11443065656966158083"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="11443065656966158083"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="11443065656966158083"} 57824
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="11910701441483545237"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="11910701441483545237"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="11910701441483545237"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="11942072996490846659"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="11942072996490846659"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="11942072996490846659"} 57824
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="12315765492985282765"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="12315765492985282765"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="12315765492985282765"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="13182489209744554729"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="13182489209744554729"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="13182489209744554729"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="13503447335903908319"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="13503447335903908319"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="13503447335903908319"} 52832
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="13895220191311195235"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="13895220191311195235"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="13895220191311195235"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="13915662247866973195"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="13915662247866973195"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="13915662247866973195"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="15058156819311725949"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="15058156819311725949"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="15058156819311725949"} 54080
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="15206050151105289629"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="15206050151105289629"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="15206050151105289629"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="15207997565831142461"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="15207997565831142461"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="15207997565831142461"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="1548238588723159541"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="1548238588723159541"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="1548238588723159541"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="1565611704055589391"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="1565611704055589391"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="1565611704055589391"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16175157327607864117"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16175157327607864117"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16175157327607864117"} 57824
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16330821798111982457"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16330821798111982457"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16330821798111982457"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16492811565392940659"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16492811565392940659"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16492811565392940659"} 59072
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16611265260227881317"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16611265260227881317"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16611265260227881317"} 54080
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16634779127395167623"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16634779127395167623"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16634779127395167623"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="16816884268062281473"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="16816884268062281473"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="16816884268062281473"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="17421568501738719225"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="17421568501738719225"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="17421568501738719225"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="17433202029070876565"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="17433202029070876565"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="17433202029070876565"} 56576
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="17668954581876815643"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="17668954581876815643"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="17668954581876815643"} 54080
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="17694091304566758657"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="17694091304566758657"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="17694091304566758657"} 54080
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="17860586625017224661"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="17860586625017224661"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="17860586625017224661"} 52832
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="18158573187184478165"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="18158573187184478165"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="18158573187184478165"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="18361299778632158389"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="18361299778632158389"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="18361299778632158389"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="18438568268875133227"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="18438568268875133227"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="18438568268875133227"} 55328
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="2116591856281658035"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="2116591856281658035"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="2116591856281658035"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="2144537531668376999"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="2144537531668376999"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="2144537531668376999"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3087303972721917937"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3087303972721917937"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3087303972721917937"} 57720
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3268387904940009689"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3268387904940009689"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3268387904940009689"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3570960631682355413"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3570960631682355413"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3570960631682355413"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3701536294808990061"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3701536294808990061"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3701536294808990061"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3922834719426066925"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3922834719426066925"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3922834719426066925"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="3964923926253687397"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="3964923926253687397"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="3964923926253687397"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="4527268208056947275"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="4527268208056947275"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="4527268208056947275"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="5193553245106574557"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="5193553245106574557"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="5193553245106574557"} 52728
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="5302854121347719089"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="5302854121347719089"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="5302854121347719089"} 53976
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="5378655436170686705"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="5378655436170686705"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="5378655436170686705"} 52728
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="5689780332802372773"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="5689780332802372773"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="5689780332802372773"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="6389749951648581997"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="6389749951648581997"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="6389749951648581997"} 53976
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="6652205789421054609"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="6652205789421054609"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="6652205789421054609"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="7361484830054439017"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="7361484830054439017"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="7361484830054439017"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="75908549749749633"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="75908549749749633"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="75908549749749633"} 55016
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="7619265701467309587"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="7619265701467309587"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="7619265701467309587"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="786181901238561501"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="786181901238561501"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="786181901238561501"} 55120
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="7915917628137591315"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="7915917628137591315"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="7915917628137591315"} 57720
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="7979094874538656053"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="7979094874538656053"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="7979094874538656053"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="7988745413139668475"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="7988745413139668475"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="7988745413139668475"} 58968
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="8695725991232029621"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="8695725991232029621"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="8695725991232029621"} 53976
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="8801497993325334125"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="8801497993325334125"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="8801497993325334125"} 53976
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="8886956671705906703"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="8886956671705906703"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="8886956671705906703"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="8920030444272880973"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="8920030444272880973"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="8920030444272880973"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="8970874095781159815"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="8970874095781159815"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="8970874095781159815"} 55224
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="9388231407419737429"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="9388231407419737429"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="9388231407419737429"} 56472
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="9709657741154340529"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="9709657741154340529"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="9709657741154340529"} 57720
+# HELP cache_namespace_nodes Branch nodes by namespace.
+# TYPE cache_namespace_nodes gauge
+cache_namespace_nodes{mode="hybrid",namespace="9852727929093100779"} 104
+# HELP cache_namespace_roots Branch roots by namespace.
+# TYPE cache_namespace_roots gauge
+cache_namespace_roots{mode="hybrid",namespace="9852727929093100779"} 104
+# HELP cache_namespace_metadata_bytes Branch metadata bytes by namespace.
+# TYPE cache_namespace_metadata_bytes gauge
+cache_namespace_metadata_bytes{mode="hybrid",namespace="9852727929093100779"} 56472
+# HELP cache_budget_branch_metadata_bytes Current branch metadata RAM bytes by mode.
+# TYPE cache_budget_branch_metadata_bytes gauge
+cache_budget_branch_metadata_bytes{mode="hybrid"} 3562104
+# HELP cache_budget_branch_metadata_soft_max_bytes Branch metadata RAM soft limit by mode.
+# TYPE cache_budget_branch_metadata_soft_max_bytes gauge
+cache_budget_branch_metadata_soft_max_bytes{mode="hybrid"} 0
+# HELP cache_budget_branch_metadata_ratio Branch metadata RAM ratio by mode.
+# TYPE cache_budget_branch_metadata_ratio gauge
+cache_budget_branch_metadata_ratio{mode="hybrid"} 0
+# HELP cache_budget_branch_metadata_over_limit Whether branch metadata exceeds its soft limit by mode.
+# TYPE cache_budget_branch_metadata_over_limit gauge
+cache_budget_branch_metadata_over_limit{mode="hybrid"} 0
+# HELP cache_eviction_payloads_total Payload eviction or demotion decisions by action.
+# TYPE cache_eviction_payloads_total counter
+cache_eviction_payloads_total{mode="hybrid",action="evict"} 6639
+# HELP cache_eviction_payload_bytes_total Payload bytes evicted or demoted by action.
+# TYPE cache_eviction_payload_bytes_total counter
+cache_eviction_payload_bytes_total{mode="hybrid",action="evict"} -1433043336
+# HELP cache_eviction_payload_blocked_refs_total Payload eviction candidates blocked by active slot refs by mode.
+# TYPE cache_eviction_payload_blocked_refs_total counter
+cache_eviction_payload_blocked_refs_total{mode="hybrid"} 0
+# HELP cache_protected_root_payload_decisions_total Protected-root payload decisions by decision.
+# TYPE cache_protected_root_payload_decisions_total counter
+cache_protected_root_payload_decisions_total{mode="hybrid",decision="all"} 0
+# HELP cache_protected_root_payload_bytes Protected-root payload bytes by residency.
+# TYPE cache_protected_root_payload_bytes gauge
+cache_protected_root_payload_bytes{mode="hybrid",residency="hot"} 0
+# HELP cache_slot_ref_acquires_total Branch slot reference acquires by mode.
+# TYPE cache_slot_ref_acquires_total counter
+cache_slot_ref_acquires_total{mode="hybrid"} 6656
+# HELP cache_slot_ref_releases_total Branch slot reference releases by mode.
+# TYPE cache_slot_ref_releases_total counter
+cache_slot_ref_releases_total{mode="hybrid"} 6655
+# HELP cache_forest_lock_acquires_total Branch forest lock acquires by mode.
+# TYPE cache_forest_lock_acquires_total counter
+cache_forest_lock_acquires_total{mode="hybrid"} 0
+# HELP cache_forest_lock_retries_total Branch forest lock retries by mode.
+# TYPE cache_forest_lock_retries_total counter
+cache_forest_lock_retries_total{mode="hybrid"} 0
+# HELP cache_namespace_validations_total Namespace validation checks by result.
+# TYPE cache_namespace_validations_total counter
+cache_namespace_validations_total{mode="hybrid",result="pass"} 0
+# HELP cache_namespace_validations_total Namespace validation checks by result.
+# TYPE cache_namespace_validations_total counter
+cache_namespace_validations_total{mode="hybrid",result="fail"} 0
+# HELP cache_namespace_validation_failures_total Namespace validation failures by mode.
+# TYPE cache_namespace_validation_failures_total counter
+cache_namespace_validation_failures_total{mode="hybrid"} 0
+# HELP cache_slot_ref_concurrent_peak Peak branch slot references by mode.
+# TYPE cache_slot_ref_concurrent_peak gauge
+cache_slot_ref_concurrent_peak{mode="hybrid"} 1
+# HELP llamacpp_cache_hot_payload_descriptors Current hot payload descriptor count by mode.
+# TYPE llamacpp_cache_hot_payload_descriptors gauge
+llamacpp_cache_hot_payload_descriptors{mode="hybrid"} 17
+# HELP llamacpp_cache_evicted_payload_descriptors Current evicted payload descriptor count by mode.
+# TYPE llamacpp_cache_evicted_payload_descriptors gauge
+llamacpp_cache_evicted_payload_descriptors{mode="hybrid"} 6639
+# HELP llamacpp_cache_payload_demotions_total Demotion operations completed by mode.
+# TYPE llamacpp_cache_payload_demotions_total counter
+llamacpp_cache_payload_demotions_total{mode="hybrid"} 0
+# HELP llamacpp_cache_payload_demotion_failures_total Demotion operations failed by mode.
+# TYPE llamacpp_cache_payload_demotion_failures_total counter
+llamacpp_cache_payload_demotion_failures_total{mode="hybrid"} 0
+# HELP llamacpp_cache_payload_promotions_total Promotion operations completed by mode.
+# TYPE llamacpp_cache_payload_promotions_total counter
+llamacpp_cache_payload_promotions_total{mode="hybrid"} 0
+# HELP llamacpp_cache_payload_promotion_failures_total Promotion operations failed by mode.
+# TYPE llamacpp_cache_payload_promotion_failures_total counter
+llamacpp_cache_payload_promotion_failures_total{mode="hybrid"} 0
+# HELP llamacpp_cache_payload_cold_evictions_total Cold payload evictions by mode.
+# TYPE llamacpp_cache_payload_cold_evictions_total counter
+llamacpp_cache_payload_cold_evictions_total{mode="hybrid"} 0
+# HELP llamacpp_cache_demotion_queue_full_total Demotion queue-full events by mode.
+# TYPE llamacpp_cache_demotion_queue_full_total counter
+llamacpp_cache_demotion_queue_full_total{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_queue_full_total Promotion queue-full events by mode.
+# TYPE llamacpp_cache_promotion_queue_full_total counter
+llamacpp_cache_promotion_queue_full_total{mode="hybrid"} 0
+# HELP llamacpp_cache_cold_payload_bytes Current total bytes of demoted payloads in cold storage by mode.
+# TYPE llamacpp_cache_cold_payload_bytes gauge
+llamacpp_cache_cold_payload_bytes{mode="hybrid"} 0
+# HELP llamacpp_cache_cold_payload_count Current count of cold payload descriptors by mode.
+# TYPE llamacpp_cache_cold_payload_count gauge
+llamacpp_cache_cold_payload_count{mode="hybrid"} 0
+# HELP llamacpp_cache_protected_root_demotions_total Protected root demotions by mode.
+# TYPE llamacpp_cache_protected_root_demotions_total counter
+llamacpp_cache_protected_root_demotions_total{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_0_1ms Promotion latency bucket 0-1ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_0_1ms counter
+llamacpp_cache_promotion_latency_bucket_0_1ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_1_5ms Promotion latency bucket 1-5ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_1_5ms counter
+llamacpp_cache_promotion_latency_bucket_1_5ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_5_10ms Promotion latency bucket 5-10ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_5_10ms counter
+llamacpp_cache_promotion_latency_bucket_5_10ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_10_50ms Promotion latency bucket 10-50ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_10_50ms counter
+llamacpp_cache_promotion_latency_bucket_10_50ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_50_100ms Promotion latency bucket 50-100ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_50_100ms counter
+llamacpp_cache_promotion_latency_bucket_50_100ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_100_500ms Promotion latency bucket 100-500ms by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_100_500ms counter
+llamacpp_cache_promotion_latency_bucket_100_500ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_500_1000ms Promotion latency bucket 500ms-1s by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_500_1000ms counter
+llamacpp_cache_promotion_latency_bucket_500_1000ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_latency_bucket_over_1000ms Promotion latency bucket over 1s by mode.
+# TYPE llamacpp_cache_promotion_latency_bucket_over_1000ms counter
+llamacpp_cache_promotion_latency_bucket_over_1000ms{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_failure_checksum_mismatch_total Promotion failures due to checksum mismatch by mode.
+# TYPE llamacpp_cache_promotion_failure_checksum_mismatch_total counter
+llamacpp_cache_promotion_failure_checksum_mismatch_total{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_failure_not_found_total Promotion failures due to file not found by mode.
+# TYPE llamacpp_cache_promotion_failure_not_found_total counter
+llamacpp_cache_promotion_failure_not_found_total{mode="hybrid"} 0
+# HELP llamacpp_cache_promotion_failure_other_total Promotion failures due to other reasons by mode.
+# TYPE llamacpp_cache_promotion_failure_other_total counter
+llamacpp_cache_promotion_failure_other_total{mode="hybrid"} 0
+# HELP llamacpp_cache_demotion_failure_write_error_total Demotion failures due to write error by mode.
+# TYPE llamacpp_cache_demotion_failure_write_error_total counter
+llamacpp_cache_demotion_failure_write_error_total{mode="hybrid"} 0
+# HELP llamacpp_cache_demotion_failure_other_total Demotion failures due to other reasons by mode.
+# TYPE llamacpp_cache_demotion_failure_other_total counter
+llamacpp_cache_demotion_failure_other_total{mode="hybrid"} 0
+# HELP cache_exact_blob_restores_total Exact blob restore attempts by bounded result shape.
+# TYPE cache_exact_blob_restores_total counter
+cache_exact_blob_restores_total{mode="hybrid",payload_kind="none",profile="none",pair_state="none",residency="none",result="none",reason="none"} 0
+# HELP cache_payload_transitions_total Payload promotion and demotion decisions by bounded result shape.
+# TYPE cache_payload_transitions_total counter
+cache_payload_transitions_total{mode="hybrid",operation="none",payload_kind="none",pair_state="none",result="none",reason="none"} 0
+# HELP cache_payload_evictions_by_shape_total Payload eviction decisions by bounded result shape.
+# TYPE cache_payload_evictions_by_shape_total counter
+cache_payload_evictions_by_shape_total{mode="hybrid",payload_kind="exact_blob",pair_state="target_only",result="success",reason="hot_budget"} 6639
+# HELP cache_protected_root_decisions_by_shape_total Protected root admission decisions by bounded result shape.
+# TYPE cache_protected_root_decisions_by_shape_total counter
+cache_protected_root_decisions_by_shape_total{mode="hybrid",decision="none",pressure_source="none",result="none",reason="none"} 0
+# HELP cache_fallback_restores_by_shape_total Fallback restore attempts by bounded result shape.
+# TYPE cache_fallback_restores_by_shape_total counter
+cache_fallback_restores_by_shape_total{mode="hybrid",strategy="none",payload_kind="none",result="none",reason="none"} 0
+# HELP cache_structured_diagnostics_total Structured cache diagnostic events by bounded result shape.
+# TYPE cache_structured_diagnostics_total counter
+cache_structured_diagnostics_total{mode="hybrid",event="none",result="none",reason="none",payload_kind="none"} 0
+# HELP cache_protected_root_decisions_by_shape_total Protected-root decisions by bounded pressure shape.
+# TYPE cache_protected_root_decisions_by_shape_total counter
+cache_protected_root_decisions_by_shape_total{mode="hybrid",decision="none",pressure_source="none",result="none",reason="none"} 0
+# HELP cache_fallback_restores_by_shape_total Fallback restore decisions by bounded strategy shape.
+# TYPE cache_fallback_restores_by_shape_total counter
+cache_fallback_restores_by_shape_total{mode="hybrid",strategy="none",payload_kind="none",result="none",reason="none"} 0
+# HELP cache_structured_diagnostics_total Structured hybrid-cache diagnostics by bounded event shape.
+# TYPE cache_structured_diagnostics_total counter
+cache_structured_diagnostics_total{mode="hybrid",event="none",result="none",reason="none",payload_kind="none"} 0
+# HELP cache_metadata_only_retentions_total Nodes retained after payload eviction.
+# TYPE cache_metadata_only_retentions_total counter
+cache_metadata_only_retentions_total{mode="hybrid",namespace="all",reason="evicted"} 6639
+# HELP cache_node_rematerializations_total Re-materialization attempts and outcomes.
+# TYPE cache_node_rematerializations_total counter
+cache_node_rematerializations_total{mode="hybrid",namespace="all",result="success"} 0
+# HELP cache_node_rematerialization_bytes_total Payload bytes recreated for metadata-only nodes.
+# TYPE cache_node_rematerialization_bytes_total counter
+cache_node_rematerialization_bytes_total{mode="hybrid",namespace="all"} 0
+# HELP cache_validation_mismatches_total Token or checksum validation mismatches.
+# TYPE cache_validation_mismatches_total counter
+cache_validation_mismatches_total{mode="hybrid",namespace="all",method="token_span"} 0
+# HELP cache_mismatch_parent_selections_total New-branch parent selections after mismatch.
+# TYPE cache_mismatch_parent_selections_total counter
+cache_mismatch_parent_selections_total{mode="hybrid",namespace="all",source="metadata_validation"} 0
+# HELP cache_equivalent_branch_deduplications_total Equivalent branch reuse or canonicalization.
+# TYPE cache_equivalent_branch_deduplications_total counter
+cache_equivalent_branch_deduplications_total{mode="hybrid",namespace="all",action="reuse_or_rematerialize"} 0
+# HELP cache_branch_pruning_total Branch metadata pruning attempts and outcomes.
+# TYPE cache_branch_pruning_total counter
+cache_branch_pruning_total{mode="hybrid",namespace="all",result="success",reason="metadata_budget"} 0
+# HELP cache_branch_pruned_metadata_bytes_total Metadata bytes freed by pruning.
+# TYPE cache_branch_pruned_metadata_bytes_total counter
+cache_branch_pruned_metadata_bytes_total{mode="hybrid",namespace="all"} 0
+# HELP cache_cold_cleanup_total Cold cleanup attempts after eviction or pruning.
+# TYPE cache_cold_cleanup_total counter
+cache_cold_cleanup_total{mode="hybrid",namespace="all",result="success"} 0
+# HELP cache_branch_metadata_admission_rejections_total Metadata admissions refused because safe pruning could not satisfy budget.
+# TYPE cache_branch_metadata_admission_rejections_total counter
+cache_branch_metadata_admission_rejections_total{mode="hybrid",namespace="all",reason="metadata_budget"} 0
+# HELP cache_checkpoint_restores_total Checkpoint restore attempts.
+# TYPE cache_checkpoint_restores_total counter
+cache_checkpoint_restores_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none",result="none"} 0
+# HELP cache_checkpoint_hits_total Accepted checkpoint cache hits.
+# TYPE cache_checkpoint_hits_total counter
+cache_checkpoint_hits_total{mode="hybrid",profile="none",payload_residency="none",pair_state="none"} 0
+# HELP cache_checkpoint_admissions_total Checkpoint payload admissions by mode.
+# TYPE cache_checkpoint_admissions_total counter
+cache_checkpoint_admissions_total{mode="hybrid"} 0
+# HELP cache_checkpoint_admission_failures_total Checkpoint payload admission failures by mode.
+# TYPE cache_checkpoint_admission_failures_total counter
+cache_checkpoint_admission_failures_total{mode="hybrid"} 0
+

@@ -1,0 +1,16 @@
+2.16.378.485 D srv  update_slots: decoding batch, n_tokens = 1
+2.16.378.487 D set_adapters_lora: adapters = 0000000000000000
+2.16.378.487 D adapters_lora_are_same: adapters = 0000000000000000
+2.16.378.488 D set_embeddings: value = 0
+2.16.378.489 D srv  update_slots: srv  update_slots: speculative chunked decode, chunk=0 n_tokens=1 cap=1
+2.16.477.699 D slot process_toke: id  0 | task 1 | stopped by limit, n_decoded = 12, n_predict = 12
+2.16.477.706 D slot process_toke: id  0 | task 1 | n_decoded = 12, n_remaining = 0, next token: 24549 ' pants'
+2.16.477.711 I slot print_timing: id  0 | task 1 | prompt eval time =     476.27 ms /     5 tokens (   95.25 ms per token,    10.50 tokens per second)
+2.16.477.712 I slot print_timing: id  0 | task 1 |        eval time =    1157.00 ms /    12 tokens (   96.42 ms per token,    10.37 tokens per second)
+2.16.477.713 I slot print_timing: id  0 | task 1 |       total time =    1633.27 ms /    17 tokens
+2.16.477.713 I slot print_timing: id  0 | task 1 |    graphs reused =         15
+2.16.477.740 D res          send: sending result for task id = 1
+2.16.477.741 D res          send: task id = 1 pushed to result queue
+2.16.477.779 D No parser definition detected, assuming pure content parser.2.16.477.790 I srv     save_slot:  - hybrid cache: saving slot 0 with 16 tokens, state size = 0.564 MiB (tgt: 0.564, dft: 0.000)
+2.16.477.802 D Parsed message: {"role":"assistant","content":" The video shows a man in a white shirt and black pants"}
+D:\source\llama.cpp-jet\tools\server\server-common.cpp:398: GGML_ASSERT(!has_mtmd) failed

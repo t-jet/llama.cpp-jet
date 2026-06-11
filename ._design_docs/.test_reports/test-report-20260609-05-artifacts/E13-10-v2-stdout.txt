@@ -1,0 +1,6 @@
+=== E13-10 /slots with --slot-save-path ===
+GEN content= The cache has a cache line size of cache_n=0 id_slot=0
+SAVE-OK {"id_slot":0,"filename":"stage13-slot-test2.slot","n_saved":16,"n_written":1835968,"timings":{"save_ms":2.387}}
+ERASE-OK {"id_slot":0,"n_erased":16}
+RESTORE-OK {"id_slot":0,"filename":"stage13-slot-test2.slot","n_restored":16,"n_read":1835968,"timings":{"restore_ms":2.868}}
+PROBE-DONE

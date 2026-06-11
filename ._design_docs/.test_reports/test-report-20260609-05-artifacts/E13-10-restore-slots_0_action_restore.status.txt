@@ -1,0 +1,1 @@
+row=E13-10-restore path=/slots/0?action=restore status=200

@@ -1,0 +1,45 @@
+    } else {
+        GGML_ABORT("Invalid chunk type");
+    }
+}
+
+void server_tokens::push_back(server_tokens & tokens) {
+    size_t start_idx = size();
+    for (size_t i = 0; i < tokens.size(); i++) {
+        push_back(tokens[i]);
+    }
+    if (tokens.has_mtmd) {
+        // Assert if we are copying MTMD chunks to a server_tokens that does not have mtmd.
+        // We could also just check, but this will prevent silently dropping MTMD data.
+        GGML_ASSERT(has_mtmd);
+        for (auto it = tokens.map_idx_to_media.begin(); it != tokens.map_idx_to_media.end(); ) {
+            auto * chunk = tokens.map_idx_to_media[it->first].get();
+            mtmd::input_chunk_ptr new_chunk(mtmd_input_chunk_copy(chunk));
+            map_idx_to_media[start_idx + it->first] = std::move(new_chunk);
+        }
+    }
+}
+
+void server_tokens::insert(const llama_tokens & inp_tokens) {
+    tokens.insert(tokens.end(), inp_tokens.begin(), inp_tokens.end());
+}
+
+const llama_tokens & server_tokens::get_tokens() const {
+    GGML_ASSERT(!has_mtmd);
+    return tokens;
+}
+
+llama_tokens server_tokens::get_text_tokens() const {
+    llama_tokens res;
+    res.reserve(tokens.size());
+    for (llama_token t : tokens) {
+        if (t != LLAMA_TOKEN_NULL) {
+            res.push_back(t);
+        }
+    }
+    return res;
+}
+
+void server_tokens::set_token(llama_pos pos, llama_token id) {
+    GGML_ASSERT(!has_mtmd); // only allow this if mtmd is disabled
+    tokens[pos] = id;

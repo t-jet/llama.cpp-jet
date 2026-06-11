@@ -1,0 +1,12 @@
+FOUND D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf dir=False size=6725899040 mtime=2026-05-28T12:51:45.9694381+03:00
+FOUND D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf dir=False size=639446688 mtime=2026-05-28T13:34:39.5187382+03:00
+MISSING D:\models
+FOUND D:\source\llama.cpp-jet\._test_models dir=True size=1 mtime=2026-06-05T11:19:48.4380901+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen2.5-VL-3B-Instruct-GGUF\mmproj-model-f16.gguf size=1338428128 mtime=2026-05-24T13:16:14.8506445+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen2.5-VL-3B-Instruct-GGUF\Qwen2.5-VL-3B-Instruct-Q6_K.gguf size=2538157056 mtime=2026-05-24T13:16:40.9957492+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf size=639446688 mtime=2026-05-28T13:34:39.5187382+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf size=6725899040 mtime=2026-05-28T12:51:45.9694381+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-GGUF\mmproj-F32.gguf size=1334075072 mtime=2026-05-24T13:05:08.9739169+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-GGUF\Qwen3.5-4B-Q4_1.gguf size=2784416928 mtime=2026-05-24T13:05:37.2424834+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\mmproj-F32.gguf size=1334074944 mtime=2026-05-24T13:07:15.6621779+03:00
+  FILE D:\source\llama.cpp-jet\._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf size=2834975040 mtime=2026-05-24T13:07:39.0319417+03:00

@@ -1,0 +1,8 @@
+
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:10:0.09.441.867 I srv    load_model: [mtmd] estimated worst-case memory usage of mmproj is 1981.18 MiB
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:11:0.09.441.874 D srv    load_model: [mtmd] adding 1981.18 MiB to fit_params_target for device CPU
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:54:0.09.684.777 D load: control token: 151654 '<|vision_pad|>' is not marked as EOG
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:62:0.09.687.122 D load: control token: 151652 '<|vision_start|>' is not marked as EOG
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:63:0.09.687.122 D load: control token: 151653 '<|vision_end|>' is not marked as EOG
+._design_docs\.test_reports\test-report-20260609-04-artifacts\server-mm-stderr.log:250:D:\source\llama.cpp-jet\tools\server\server-common.cpp:398: GGML_ASSERT(!has_mtmd) failed
+

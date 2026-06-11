@@ -1,0 +1,2 @@
+cmake --build build --config Release --target clean
+cmake --build build --config Release --target llama-server test-cache-controller

@@ -1,0 +1,9 @@
+{
+  "id_slot": 0,
+  "filename": "stage13-slot.bin",
+  "n_restored": 15,
+  "n_read": 1721260,
+  "timings": {
+    "restore_ms": 2.212
+  }
+}

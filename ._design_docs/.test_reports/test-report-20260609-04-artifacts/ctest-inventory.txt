@@ -1,0 +1,518 @@
+Test project D:/source/llama.cpp-jet/build
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #1: test-tokenizer-0-bert-bge
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #2: test-tokenizer-0-command-r
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #3: test-tokenizer-0-deepseek-coder
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #4: test-tokenizer-0-deepseek-llm
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #5: test-tokenizer-0-falcon
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #6: test-tokenizer-0-gemma-4
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #7: test-tokenizer-0-gpt-2
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #8: test-tokenizer-0-llama-bpe
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test  #9: test-tokenizer-0-llama-spm
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #10: test-tokenizer-0-mpt
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #11: test-tokenizer-0-phi-3
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #12: test-tokenizer-0-qwen2
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #13: test-tokenizer-0-qwen35
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #14: test-tokenizer-0-refact
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-tokenizer-0.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-tokenizer-0.exe.exe
+  Test #15: test-tokenizer-0-starcoder
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-chat-peg-parser.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-peg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-peg-parser.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-peg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-peg-parser.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-peg-parser.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-peg-parser.exe.exe
+  Test #16: test-chat-peg-parser
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-jinja.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-jinja.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe.exe
+  Test #17: test-jinja
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-jinja.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-jinja.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-jinja.exe.exe
+  Test #18: test-jinja-py
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-chat-auto-parser.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-auto-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-auto-parser.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-auto-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-auto-parser.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-auto-parser.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-auto-parser.exe.exe
+  Test #19: test-chat-auto-parser
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-chat-template.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-template.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-chat-template.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-template.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-chat-template.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-template.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-chat-template.exe.exe
+  Test #20: test-chat-template
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-json-partial.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-json-partial.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-json-partial.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-json-partial.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-json-partial.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-json-partial.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-json-partial.exe.exe
+  Test #21: test-json-partial
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-log.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-log.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-log.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-log.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-log.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-log.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-log.exe.exe
+  Test #22: test-log
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-peg-parser.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-peg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-peg-parser.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-peg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-peg-parser.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-peg-parser.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-peg-parser.exe.exe
+  Test #23: test-peg-parser
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-regex-partial.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-regex-partial.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-regex-partial.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-regex-partial.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-regex-partial.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-regex-partial.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-regex-partial.exe.exe
+  Test #24: test-regex-partial
+  Test #25: test-download-model
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-thread-safety.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-thread-safety.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-thread-safety.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-thread-safety.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-thread-safety.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-thread-safety.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-thread-safety.exe.exe
+  Test #26: test-thread-safety
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-arg-parser.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-arg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-arg-parser.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-arg-parser.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-arg-parser.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-arg-parser.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-arg-parser.exe.exe
+  Test #27: test-arg-parser
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-cache-controller.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-cache-controller.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-cache-controller.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-cache-controller.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-cache-controller.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-cache-controller.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-cache-controller.exe.exe
+  Test #28: test-cache-controller
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step1-state-machine.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step1-state-machine.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step1-state-machine.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step1-state-machine.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step1-state-machine.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step1-state-machine.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step1-state-machine.exe.exe
+  Test #29: test-step1-state-machine
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step2-cold-store.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step2-cold-store.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step2-cold-store.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step2-cold-store.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step2-cold-store.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step2-cold-store.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step2-cold-store.exe.exe
+  Test #30: test-step2-cold-store
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step3-4-cold-store-write-read.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step3-4-cold-store-write-read.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step3-4-cold-store-write-read.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step3-4-cold-store-write-read.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step3-4-cold-store-write-read.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step3-4-cold-store-write-read.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step3-4-cold-store-write-read.exe.exe
+  Test #31: test-step3-4-cold-store-write-read
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step5-io-worker.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step5-io-worker.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step5-io-worker.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step5-io-worker.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step5-io-worker.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step5-io-worker.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step5-io-worker.exe.exe
+  Test #32: test-step5-io-worker
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step6-demotion-protocol.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step6-demotion-protocol.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step6-demotion-protocol.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step6-demotion-protocol.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step6-demotion-protocol.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step6-demotion-protocol.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step6-demotion-protocol.exe.exe
+  Test #33: test-step6-demotion-protocol
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step7-promotion-protocol.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step7-promotion-protocol.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step7-promotion-protocol.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step7-promotion-protocol.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step7-promotion-protocol.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step7-promotion-protocol.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step7-promotion-protocol.exe.exe
+  Test #34: test-step7-promotion-protocol
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step8-integration-wiring.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step8-integration-wiring.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step8-integration-wiring.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step8-integration-wiring.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step8-integration-wiring.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step8-integration-wiring.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step8-integration-wiring.exe.exe
+  Test #35: test-step8-integration-wiring
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step9-startup-validation.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step9-startup-validation.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step9-startup-validation.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step9-startup-validation.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step9-startup-validation.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step9-startup-validation.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step9-startup-validation.exe.exe
+  Test #36: test-step9-startup-validation
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step10-metrics.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step10-metrics.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step10-metrics.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step10-metrics.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step10-metrics.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step10-metrics.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step10-metrics.exe.exe
+  Test #37: test-step10-metrics
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-stage10-cold-store-hardening.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-stage10-cold-store-hardening.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-stage10-cold-store-hardening.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-stage10-cold-store-hardening.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-stage10-cold-store-hardening.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-stage10-cold-store-hardening.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-stage10-cold-store-hardening.exe.exe
+  Test #38: test-stage10-cold-store-hardening
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-stage10-policy-lru.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-stage10-policy-lru.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-stage10-policy-lru.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-stage10-policy-lru.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-stage10-policy-lru.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-stage10-policy-lru.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-stage10-policy-lru.exe.exe
+  Test #39: test-stage10-policy-lru
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step11-test-hooks-fault-injection.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step11-test-hooks-fault-injection.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step11-test-hooks-fault-injection.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step11-test-hooks-fault-injection.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step11-test-hooks-fault-injection.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step11-test-hooks-fault-injection.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step11-test-hooks-fault-injection.exe.exe
+  Test #40: test-step11-test-hooks-fault-injection
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step12-branch-graph.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step12-branch-graph.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step12-branch-graph.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step12-branch-graph.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step12-branch-graph.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step12-branch-graph.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step12-branch-graph.exe.exe
+  Test #41: test-step12-branch-graph
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-step13-stage8.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-step13-stage8.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-step13-stage8.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step13-stage8.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-step13-stage8.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step13-stage8.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-step13-stage8.exe.exe
+  Test #42: test-step13-stage8
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-opt.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-opt.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-opt.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-opt.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-opt.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-opt.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-opt.exe.exe
+  Test #43: test-opt
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-gguf.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-gguf.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-gguf.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-gguf.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-gguf.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-gguf.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-gguf.exe.exe
+  Test #44: test-gguf
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-backend-ops.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-backend-ops.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-backend-ops.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-backend-ops.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-backend-ops.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-backend-ops.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-backend-ops.exe.exe
+  Test #45: test-backend-ops
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-model-load-cancel.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-model-load-cancel.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-model-load-cancel.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-model-load-cancel.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-model-load-cancel.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-model-load-cancel.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-model-load-cancel.exe.exe
+  Test #46: test-model-load-cancel
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-autorelease.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-autorelease.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-autorelease.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-autorelease.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-autorelease.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-autorelease.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-autorelease.exe.exe
+  Test #47: test-autorelease
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-backend-sampler.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-backend-sampler.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-backend-sampler.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-backend-sampler.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-backend-sampler.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-backend-sampler.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-backend-sampler.exe.exe
+  Test #48: test-backend-sampler
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-state-restore-fragmented.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-state-restore-fragmented.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-state-restore-fragmented.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-state-restore-fragmented.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-state-restore-fragmented.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-state-restore-fragmented.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-state-restore-fragmented.exe.exe
+  Test #49: test-state-restore-fragmented
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-recurrent-state-rollback.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-recurrent-state-rollback.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-recurrent-state-rollback.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-recurrent-state-rollback.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-recurrent-state-rollback.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-recurrent-state-rollback.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-recurrent-state-rollback.exe.exe
+  Test #50: test-recurrent-state-rollback
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-save-load-state.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-save-load-state.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-save-load-state.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-save-load-state.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-save-load-state.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-save-load-state.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-save-load-state.exe.exe
+  Test #51: test-save-load-state
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-barrier.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-barrier.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-barrier.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-barrier.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-barrier.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-barrier.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-barrier.exe.exe
+  Test #52: test-barrier
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-quantize-fns.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-quantize-fns.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-quantize-fns.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-quantize-fns.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-quantize-fns.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-quantize-fns.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-quantize-fns.exe.exe
+  Test #53: test-quantize-fns
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-quantize-perf.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-quantize-perf.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-quantize-perf.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-quantize-perf.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-quantize-perf.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-quantize-perf.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-quantize-perf.exe.exe
+  Test #54: test-quantize-perf
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-rope.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-rope.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-rope.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-rope.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-rope.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-rope.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-rope.exe.exe
+  Test #55: test-rope
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-mtmd-c-api.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-mtmd-c-api.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-mtmd-c-api.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-mtmd-c-api.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-mtmd-c-api.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-mtmd-c-api.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-mtmd-c-api.exe.exe
+  Test #56: test-mtmd-c-api
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/test-alloc.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/test-alloc.exe
+D:/source/llama.cpp-jet/build/bin/Release/test-alloc.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-alloc.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/test-alloc.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-alloc.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/test-alloc.exe.exe
+  Test #57: test-alloc
+  Test #58: test-eval-callback-download-model
+Could not find executable D:/source/llama.cpp-jet/build/bin/Release/llama-eval-callback.exe
+Looked in the following places:
+D:/source/llama.cpp-jet/build/bin/Release/llama-eval-callback.exe
+D:/source/llama.cpp-jet/build/bin/Release/llama-eval-callback.exe.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/llama-eval-callback.exe
+D:/source/llama.cpp-jet/build/bin/Release/Release/llama-eval-callback.exe.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/llama-eval-callback.exe
+Release/D:/source/llama.cpp-jet/build/bin/Release/llama-eval-callback.exe.exe
+  Test #59: test-eval-callback
+
+Total Tests: 59

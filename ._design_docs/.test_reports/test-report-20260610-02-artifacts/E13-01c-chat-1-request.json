@@ -1,0 +1,22 @@
+{
+    "temperature":  0,
+    "messages":  [
+                     {
+                         "content":  [
+                                         {
+                                             "text":  "In one short sentence, describe the visible content.",
+                                             "type":  "text"
+                                         },
+                                         {
+                                             "image_url":  {
+                                                               "url":  "sample-15s-360p.mp4"
+                                                           },
+                                             "type":  "image_url"
+                                         }
+                                     ],
+                         "role":  "user"
+                     }
+                 ],
+    "stream":  false,
+    "max_tokens":  8
+}

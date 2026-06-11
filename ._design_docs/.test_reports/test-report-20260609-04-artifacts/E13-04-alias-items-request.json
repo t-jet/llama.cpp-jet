@@ -1,0 +1,17 @@
+{
+  "max_output_tokens": 8,
+  "stream": false,
+  "model": "local",
+  "temperature": 0,
+  "input": [
+    {
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Stage 13 responses item input."
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

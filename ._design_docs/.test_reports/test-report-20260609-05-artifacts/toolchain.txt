@@ -1,0 +1,9 @@
+TOOLCHAIN: Visual Studio 18 2026 (Community) - vsdevcmd.bat -arch=x64
+TOOLSET: MSVC 14.44.35207 (per cmake cache requirement)
+MSBuild: 18.6.3+84d3e95b4 for .NET Framework
+vsdevcmd path: C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\vsdevcmd.bat
+CMAKE: 4.3.2
+PYTHON: 3.11.9
+NODE: v24.12.0
+POWERSHELL: 7.6
+GENERATOR: Visual Studio 18 2026

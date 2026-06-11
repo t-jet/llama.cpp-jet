@@ -1,0 +1,12 @@
+[e13-01c-qwen-vl-image-marker-metrics-start.txt]
+llamacpp_cache_entries{mode="hybrid"} 0
+llamacpp_cache_tokens{mode="hybrid"} 0
+llamacpp_cache_hits_total{mode="hybrid"} 0
+llamacpp_cache_misses_total{mode="hybrid"} 0
+cache_branch_lookup_hits_total{mode="hybrid"} 0
+[e13-01c-qwen-vl-image-marker-metrics-end.txt]
+llamacpp_cache_entries{mode="hybrid"} 1
+llamacpp_cache_tokens{mode="hybrid"} 23
+llamacpp_cache_hits_total{mode="hybrid"} 1
+llamacpp_cache_misses_total{mode="hybrid"} 1
+cache_branch_lookup_hits_total{mode="hybrid"} 1

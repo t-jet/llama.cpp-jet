@@ -1,0 +1,14 @@
+
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:7:0.00.011.009 I srv  llama_server: loading model
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:8:0.00.011.040 I srv    load_model: loading model 'D:\source\llama.cpp-jet\._test_models\Qwen2.5-Omni-3B-GGUF\Qwen2.5-Omni-3B-f16.gguf'
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:9:0.21.567.535 I srv    load_model: [mtmd] estimated worst-case memory usage of mmproj is 3262.74 MiB
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:10:0.21.567.574 I common_init_result: fitting params to device memory ...
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:11:0.21.567.576 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:18:0.49.160.380 W load_hparams: more info: https://github.com/ggml-org/llama.cpp/issues/16842
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:19:
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:20:0.50.660.849 W init_audio: audio input is in experimental stage and may have reduced quality:
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:21:    https://github.com/ggml-org/llama.cpp/discussions/13759
+> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:22:0.50.660.907 I srv    load_model: loaded multimodal model, 'D:\source\llama.cpp-jet\._test_models\Qwen2.5-Omni-3B-GGUF\mmproj-Qwen2.5-Omni-3B-f16.gguf'
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:23:0.50.660.909 I srv    load_model: initializing slots, n_slots = 1
+  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:24:0.50.768.676 W common_speculative_init: no implementations specified for speculative decoding
+

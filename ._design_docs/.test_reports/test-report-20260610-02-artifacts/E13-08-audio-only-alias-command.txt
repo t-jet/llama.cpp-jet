@@ -1,0 +1,1 @@
+curl.exe -sS -X POST http://127.0.0.1:18138/audio/transcriptions -F file=@D:\source\llama.cpp-jet\.media\sample-speech-5m.mp3 -F model=local -F response_format=json -F max_tokens=8 -F temperature=0

@@ -1,0 +1,36 @@
+{
+    "choices":  [
+                    {
+                        "finish_reason":  "length",
+                        "index":  0,
+                        "message":  {
+                                        "role":  "assistant",
+                                        "content":  "\u003cthink\u003e\n"
+                                    }
+                    }
+                ],
+    "created":  1781096839,
+    "model":  "Qwen3-0.6B-Q8_0.gguf",
+    "system_fingerprint":  "b9541-f7282f535",
+    "object":  "chat.completion",
+    "usage":  {
+                  "completion_tokens":  2,
+                  "prompt_tokens":  46,
+                  "total_tokens":  48,
+                  "prompt_tokens_details":  {
+                                                "cached_tokens":  0
+                                            }
+              },
+    "id":  "chatcmpl-CRL8g4OsrzbAtUgB7LuQbUUZmJHMZaO9",
+    "timings":  {
+                    "cache_n":  0,
+                    "prompt_n":  46,
+                    "prompt_ms":  105.587,
+                    "prompt_per_token_ms":  2.2953695652173915,
+                    "prompt_per_second":  435.6596929546251,
+                    "predicted_n":  2,
+                    "predicted_ms":  4.421,
+                    "predicted_per_token_ms":  2.2105,
+                    "predicted_per_second":  452.3863379325944
+                }
+}

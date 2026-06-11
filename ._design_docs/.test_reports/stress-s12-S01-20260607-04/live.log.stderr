@@ -1,0 +1,6 @@
+Invoke-WebRequest : {"error":{"code":400,"message":"model name is missing from the request","type":"invalid_request_error"}}
+At D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s01_budget_exhaustion.ps1:113 char:2
++ (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -UseBasicPar ...
++  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-WebRequest], WebException
+    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeWebRequestCommand

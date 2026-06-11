@@ -1,0 +1,2 @@
+S12-B08 large-forest lookup cost; stub=False forest=256
+D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B08-V1-Jmarked\hybrid\evidence-summary.md

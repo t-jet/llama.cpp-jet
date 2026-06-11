@@ -1,0 +1,14 @@
+
+FullName      : D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\llama-server.exe
+Length        : 10752
+LastWriteTime : 2026-06-10 10:54:04
+
+FullName      : D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\test-cache-controller.exe
+Length        : 890880
+LastWriteTime : 2026-06-10 10:54:09
+
+FullName      : D:\source\llama.cpp-jet\build-cuda-stage13\bin\Release\ggml-cuda.dll
+Length        : 34829824
+LastWriteTime : 2026-06-10 10:53:19
+
+

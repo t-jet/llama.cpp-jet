@@ -1,0 +1,62 @@
+tools/server\server-http.h:49:    std::string query_string; // query parameters string (e.g. "action=save")
+tools/server\server.cpp:167:        routes.post_slots                  = models_routes->proxy_post;
+tools/server\server.cpp:212:    ctx_http.post("/slots/:id_slot",           ex_wrapper(routes.post_slots));
+tools/server\server.cpp:318:    struct sigaction sigint_action;
+tools/server\server.cpp:319:    sigint_action.sa_handler = signal_handler;
+tools/server\server.cpp:320:    sigemptyset (&sigint_action.sa_mask);
+tools/server\server.cpp:321:    sigint_action.sa_flags = 0;
+tools/server\server.cpp:322:    sigaction(SIGINT, &sigint_action, NULL);
+tools/server\server.cpp:323:    sigaction(SIGTERM, &sigint_action, NULL);
+tools/server\server-context.h:111:    server_http_context::handler_t post_slots;
+tools/server\server-cache-hybrid.h:319:    bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
+tools/server\server-cache-hybrid.h:412:    bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
+tools/server\server-task.h:25:    SERVER_TASK_TYPE_SLOT_SAVE,
+tools/server\server-task.h:26:    SERVER_TASK_TYPE_SLOT_RESTORE,
+tools/server\server-task.h:27:    SERVER_TASK_TYPE_SLOT_ERASE,
+tools/server\server-task.h:89:    std::string        control_action;
+tools/server\server-task.h:264:    // used by SERVER_TASK_TYPE_SLOT_SAVE, SERVER_TASK_TYPE_SLOT_RESTORE, SERVER_TASK_TYPE_SLOT_ERASE
+tools/server\server-task.h:265:    struct slot_action {
+tools/server\server-task.h:270:    slot_action slot_action;
+tools/server\server-context.cpp:1725:                // fraction of the Longest Common Prefix length with respect to the input prompt length
+tools/server\server-context.cpp:2699:                    if (task.params.control_action == "reasoning_end") {
+tools/server\server-context.cpp:2712:                        res->message = "unknown control action";
+tools/server\server-context.cpp:2769:            case SERVER_TASK_TYPE_SLOT_SAVE:
+tools/server\server-context.cpp:2775:                    const int id_slot = task.slot_action.id_slot;
+tools/server\server-context.cpp:2791:                    std::string filename = task.slot_action.filename;
+tools/server\server-context.cpp:2792:                    std::string filepath = task.slot_action.filepath;
+tools/server\server-context.cpp:2810:            case SERVER_TASK_TYPE_SLOT_RESTORE:
+tools/server\server-context.cpp:2813:                    const int id_slot = task.slot_action.id_slot;
+tools/server\server-context.cpp:2828:                    std::string filename = task.slot_action.filename;
+tools/server\server-context.cpp:2829:                    std::string filepath = task.slot_action.filepath;
+tools/server\server-context.cpp:2857:            case SERVER_TASK_TYPE_SLOT_ERASE:
+tools/server\server-context.cpp:2862:                    const int id_slot = task.slot_action.id_slot;
+tools/server\server-context.cpp:4953:            write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
+tools/server\server-context.cpp:5008:            write_cache_metric_with_label("counter", "cache_eviction_payloads_total", "Payload eviction or demotion decisions by action.", "action", "evict", json_value(cache_stats, "n_payload_evictions", 0));
+tools/server\server-context.cpp:5009:            write_cache_metric_with_label("counter", "cache_eviction_payload_bytes_total", "Payload bytes evicted or demoted by action.", "action", "evict", json_value(cache_stats, "n_payload_eviction_bytes", 0));
+tools/server\server-context.cpp:5114:            write_cache_metric_with_two_labels("counter", "cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+tools/server\server-context.cpp:5216:    this->post_slots = [this](const server_http_req & req) {
+tools/server\server-context.cpp:5219:            res->error(format_error_response("This server does not support slots action. Start it with `--slot-save-path`", ERROR_TYPE_NOT_SUPPORTED));
+tools/server\server-context.cpp:5233:        std::string action = req.get_param("action");
+tools/server\server-context.cpp:5235:        if (action == "save") {
+tools/server\server-context.cpp:5238:        if (action == "restore") {
+tools/server\server-context.cpp:5241:        if (action == "erase") {
+tools/server\server-context.cpp:5245:        res->error(format_error_response("Invalid action", ERROR_TYPE_INVALID_REQUEST));
+tools/server\server-context.cpp:5444:        const std::string action  = json_value(body, "action", std::string());
+tools/server\server-context.cpp:5449:        if (action != "reasoning_end") {
+tools/server\server-context.cpp:5450:            res->error(format_error_response("unknown control action", ERROR_TYPE_INVALID_REQUEST));
+tools/server\server-context.cpp:5459:            task.params.control_action  = action;
+tools/server\server-context.cpp:5481:        const std::string action  = json_value(body, "action", std::string());
+tools/server\server-context.cpp:5486:        if (action != "reasoning_end") {
+tools/server\server-context.cpp:5487:            res->error(format_error_response("unknown control action", ERROR_TYPE_INVALID_REQUEST));
+tools/server\server-context.cpp:5496:            task.params.control_action  = action;
+tools/server\server-context.cpp:5892:        server_task task(SERVER_TASK_TYPE_SLOT_SAVE);
+tools/server\server-context.cpp:5894:        task.slot_action.id_slot  = id_slot;
+tools/server\server-context.cpp:5895:        task.slot_action.filename = filename;
+tools/server\server-context.cpp:5896:        task.slot_action.filepath = filepath;
+tools/server\server-context.cpp:5928:        server_task task(SERVER_TASK_TYPE_SLOT_RESTORE);
+tools/server\server-context.cpp:5930:        task.slot_action.id_slot  = id_slot;
+tools/server\server-context.cpp:5931:        task.slot_action.filename = filename;
+tools/server\server-context.cpp:5932:        task.slot_action.filepath = filepath;
+tools/server\server-context.cpp:5957:        server_task task(SERVER_TASK_TYPE_SLOT_ERASE);
+tools/server\server-context.cpp:5959:        task.slot_action.id_slot = id_slot;
+tools/server\server-cache-hybrid.cpp:1998:bool hybrid_cache_controller::debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit) {

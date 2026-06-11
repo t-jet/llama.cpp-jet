@@ -1,0 +1,168 @@
+2026-06-08T02:58:13.684+03:00] kickoff-v2-stress-longrun start; target_old_pids=2120,22448,26304,27552
+2026-06-08T02:58:13.692+03:00] KILL_SKIP pid=2120 not_found
+2026-06-08T02:58:13.693+03:00] KILL_SKIP pid=22448 not_found
+2026-06-08T02:58:13.693+03:00] KILL_SKIP pid=26304 not_found
+2026-06-08T02:58:13.694+03:00] KILL_SKIP pid=27552 not_found
+2026-06-08T02:58:18.721+03:00] plan rows=22 batches=11 perRowTimeout={stress:30m,L01:2h,L03:2h,L02:30m}
+2026-06-08T02:58:18.721+03:00] plan list: S01-Joriginal, S01-Jmarked, S02-Joriginal, S02-Jmarked, S03-Joriginal, S03-Jmarked, S04-Joriginal, S04-Jmarked, S05-Joriginal, S05-Jmarked, S06-Joriginal, S06-Jmarked, S07-Joriginal, S07-Jmarked, S08-Joriginal, S08-Jmarked, L01-Joriginal, L01-Jmarked, L03-Joriginal, L03-Jmarked, L02-Joriginal, L02-Jmarked
+2026-06-08T02:58:18.744+03:00] batch_start #1 idx=0-1 rows=
+2026-06-08T02:58:18.767+03:00] LAUNCH_FAIL S01-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:58:18.777+03:00] LAUNCH_FAIL S01-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:58:20.785+03:00] verify S01-Joriginal launchLogSize=57
+2026-06-08T02:58:20.787+03:00] verify S01-Jmarked launchLogSize=57
+2026-06-08T02:58:20.787+03:00] batch_end #1 idx=0-1
+2026-06-08T02:58:50.803+03:00] batch_start #2 idx=2-3 rows=
+2026-06-08T02:58:50.815+03:00] LAUNCH_FAIL S02-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:58:50.823+03:00] LAUNCH_FAIL S02-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:58:52.824+03:00] verify S02-Joriginal launchLogSize=43
+2026-06-08T02:58:52.825+03:00] verify S02-Jmarked launchLogSize=43
+2026-06-08T02:58:52.825+03:00] batch_end #2 idx=2-3
+2026-06-08T02:59:22.844+03:00] batch_start #3 idx=4-5 rows=
+2026-06-08T02:59:22.867+03:00] LAUNCH_FAIL S03-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:59:22.876+03:00] LAUNCH_FAIL S03-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:59:24.891+03:00] verify S03-Joriginal launchLogSize=42
+2026-06-08T02:59:24.891+03:00] verify S03-Jmarked launchLogSize=42
+2026-06-08T02:59:24.892+03:00] batch_end #3 idx=4-5
+2026-06-08T02:59:54.910+03:00] batch_start #4 idx=6-7 rows=
+2026-06-08T02:59:54.929+03:00] LAUNCH_FAIL S04-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:59:54.942+03:00] LAUNCH_FAIL S04-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T02:59:56.958+03:00] verify S04-Joriginal launchLogSize=35
+2026-06-08T02:59:56.958+03:00] verify S04-Jmarked launchLogSize=35
+2026-06-08T02:59:56.959+03:00] batch_end #4 idx=6-7
+2026-06-08T03:00:26.964+03:00] batch_start #5 idx=8-9 rows=
+2026-06-08T03:00:26.974+03:00] LAUNCH_FAIL S05-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:00:26.982+03:00] LAUNCH_FAIL S05-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:00:28.993+03:00] verify S05-Joriginal launchLogSize=0
+2026-06-08T03:00:28.994+03:00] verify S05-Jmarked launchLogSize=0
+2026-06-08T03:00:28.995+03:00] batch_end #5 idx=8-9
+2026-06-08T03:00:59.002+03:00] batch_start #6 idx=10-11 rows=
+2026-06-08T03:00:59.022+03:00] LAUNCH_FAIL S06-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:00:59.046+03:00] LAUNCH_FAIL S06-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:01:01.049+03:00] verify S06-Joriginal launchLogSize=81
+2026-06-08T03:01:01.050+03:00] verify S06-Jmarked launchLogSize=81
+2026-06-08T03:01:01.050+03:00] batch_end #6 idx=10-11
+2026-06-08T03:01:07.027+03:00] KICKOFF_ABORTED reason=\6968 collides with PowerShell automatic variable; 4 batches launched, 8 children killed for clean restart
+2026-06-08T03:01:31.060+03:00] batch_start #7 idx=12-13 rows=
+2026-06-08T03:01:31.069+03:00] LAUNCH_FAIL S07-Joriginal err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:01:31.079+03:00] LAUNCH_FAIL S07-Jmarked err=Cannot overwrite variable PID because it is read-only or constant.
+2026-06-08T03:01:50.783+03:00] kickoff-v2-stress-longrun start; target_old_pids=2120,22448,26304,27552
+2026-06-08T03:01:50.790+03:00] KILL_SKIP pid=2120 not_found
+2026-06-08T03:01:50.791+03:00] KILL_SKIP pid=22448 not_found
+2026-06-08T03:01:50.791+03:00] KILL_SKIP pid=26304 not_found
+2026-06-08T03:01:50.792+03:00] KILL_SKIP pid=27552 not_found
+2026-06-08T03:01:55.811+03:00] plan rows=22 batches=11 perRowTimeout={stress:30m,L01:2h,L03:2h,L02:30m}
+2026-06-08T03:01:55.811+03:00] plan list: S01-Joriginal, S01-Jmarked, S02-Joriginal, S02-Jmarked, S03-Joriginal, S03-Jmarked, S04-Joriginal, S04-Jmarked, S05-Joriginal, S05-Jmarked, S06-Joriginal, S06-Jmarked, S07-Joriginal, S07-Jmarked, S08-Joriginal, S08-Jmarked, L01-Joriginal, L01-Jmarked, L03-Joriginal, L03-Jmarked, L02-Joriginal, L02-Jmarked
+2026-06-08T03:01:55.825+03:00] batch_start #1 idx=0-1 rows=
+2026-06-08T03:01:55.848+03:00] launched S01-Joriginal port=8600 pid=29484 script=stress_s12_s01_budget_exhaustion.ps1 hours=0 min=30
+2026-06-08T03:01:55.857+03:00] launched S01-Jmarked port=8601 pid=30048 script=stress_s12_s01_budget_exhaustion.ps1 hours=0 min=30
+2026-06-08T03:01:57.865+03:00] verify S01-Joriginal launchLogSize=57
+2026-06-08T03:01:57.866+03:00] verify S01-Jmarked launchLogSize=57
+2026-06-08T03:01:57.866+03:00] batch_end #1 idx=0-1
+2026-06-08T03:02:27.871+03:00] batch_start #2 idx=2-3 rows=
+2026-06-08T03:02:27.881+03:00] launched S02-Joriginal port=8602 pid=16720 script=stress_s12_s02_concurrent_multi_slot.ps1 hours=0 min=30
+2026-06-08T03:02:27.888+03:00] launched S02-Jmarked port=8603 pid=18768 script=stress_s12_s02_concurrent_multi_slot.ps1 hours=0 min=30
+2026-06-08T03:02:29.903+03:00] verify S02-Joriginal launchLogSize=43
+2026-06-08T03:02:29.904+03:00] verify S02-Jmarked launchLogSize=43
+2026-06-08T03:02:29.904+03:00] batch_end #2 idx=2-3
+2026-06-08T03:02:59.909+03:00] batch_start #3 idx=4-5 rows=
+2026-06-08T03:02:59.919+03:00] launched S03-Joriginal port=8604 pid=27464 script=stress_s12_s03_large_branch_forests.ps1 hours=0 min=30
+2026-06-08T03:02:59.938+03:00] launched S03-Jmarked port=8605 pid=3404 script=stress_s12_s03_large_branch_forests.ps1 hours=0 min=30
+2026-06-08T03:03:01.961+03:00] verify S03-Joriginal launchLogSize=42
+2026-06-08T03:03:01.961+03:00] verify S03-Jmarked launchLogSize=42
+2026-06-08T03:03:01.962+03:00] batch_end #3 idx=4-5
+2026-06-08T03:03:31.972+03:00] batch_start #4 idx=6-7 rows=
+2026-06-08T03:03:31.984+03:00] launched S04-Joriginal port=8606 pid=23104 script=stress_s12_s04_prompt_storms.ps1 hours=0 min=30
+2026-06-08T03:03:31.993+03:00] launched S04-Jmarked port=8607 pid=23564 script=stress_s12_s04_prompt_storms.ps1 hours=0 min=30
+2026-06-08T03:03:33.998+03:00] verify S04-Joriginal launchLogSize=35
+2026-06-08T03:03:33.999+03:00] verify S04-Jmarked launchLogSize=35
+2026-06-08T03:03:33.999+03:00] batch_end #4 idx=6-7
+2026-06-08T03:04:04.005+03:00] batch_start #5 idx=8-9 rows=
+2026-06-08T03:04:04.017+03:00] launched S05-Joriginal port=8608 pid=22112 script=stress_s12_s05_mixed_workload_profiles.ps1 hours=0 min=30
+2026-06-08T03:04:04.029+03:00] launched S05-Jmarked port=8609 pid=25548 script=stress_s12_s05_mixed_workload_profiles.ps1 hours=0 min=30
+2026-06-08T03:04:06.037+03:00] verify S05-Joriginal launchLogSize=0
+2026-06-08T03:04:06.038+03:00] verify S05-Jmarked launchLogSize=0
+2026-06-08T03:04:06.038+03:00] batch_end #5 idx=8-9
+2026-06-08T03:06:47.044+03:00] KICKOFF_STOPPED reason=10_of_10_launched_children_died_within_2-3min; same_RAM_exhaustion_pattern_as_session_1c; kill_ppid_stopped_at_2026-06-08T03:06:47.044+03:00
+2026-06-08T03:15:13.660+03:00] kickoff-v3-sequential-stress-longrun start
+2026-06-08T03:15:18.717+03:00] plan rows=22 total_budget_sec=61200 (17h)
+2026-06-08T03:15:18.717+03:00] plan list: S01-Joriginal, S01-Jmarked, S02-Joriginal, S02-Jmarked, S03-Joriginal, S03-Jmarked, S04-Joriginal, S04-Jmarked, S05-Joriginal, S05-Jmarked, S06-Joriginal, S06-Jmarked, S07-Joriginal, S07-Jmarked, S08-Joriginal, S08-Jmarked, L01-Joriginal, L01-Jmarked, L03-Joriginal, L03-Jmarked, L02-Joriginal, L02-Jmarked
+2026-06-08T03:15:18.728+03:00] start S12-MTP-S01-V1-Joriginal port=8600 cap=2100s
+2026-06-08T03:15:19.260+03:00] end S12-MTP-S01-V1-Joriginal elapsed=1s verdict=NO-EVIDENCE
+2026-06-08T03:15:49.270+03:00] start S12-MTP-S01-V1-Jmarked port=8601 cap=2100s
+2026-06-08T03:15:49.410+03:00] end S12-MTP-S01-V1-Jmarked elapsed=0s verdict=NO-EVIDENCE
+2026-06-08T03:16:19.428+03:00] start S12-MTP-S02-V1-Joriginal port=8602 cap=2100s
+2026-06-08T03:16:19.566+03:00] end S12-MTP-S02-V1-Joriginal elapsed=0s verdict=NO-EVIDENCE
+2026-06-08T03:16:49.580+03:00] start S12-MTP-S02-V1-Jmarked port=8603 cap=2100s
+2026-06-08T03:16:49.726+03:00] end S12-MTP-S02-V1-Jmarked elapsed=0s verdict=NO-EVIDENCE
+2026-06-08T03:17:19.746+03:00] start S12-MTP-S03-V1-Joriginal port=8604 cap=2100s
+2026-06-08T03:17:19.887+03:00] end S12-MTP-S03-V1-Joriginal elapsed=0s verdict=NO-EVIDENCE
+2026-06-08T03:17:53.226+03:00] kickoff-v3-sequential-stress-longrun start
+2026-06-08T03:17:58.272+03:00] plan rows=22 total_budget_sec=61200 (17h)
+2026-06-08T03:17:58.272+03:00] plan list: S01-Joriginal, S01-Jmarked, S02-Joriginal, S02-Jmarked, S03-Joriginal, S03-Jmarked, S04-Joriginal, S04-Jmarked, S05-Joriginal, S05-Jmarked, S06-Joriginal, S06-Jmarked, S07-Joriginal, S07-Jmarked, S08-Joriginal, S08-Jmarked, L01-Joriginal, L01-Jmarked, L03-Joriginal, L03-Jmarked, L02-Joriginal, L02-Jmarked
+2026-06-08T03:17:58.284+03:00] start S12-MTP-S01-V1-Joriginal port=8600 cap=2100s
+2026-06-08T03:17:58.297+03:00]   driver pid=2916 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s01_budget_exhaustion.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S01-V1-Joriginal -Port 8600 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T03:48:03.154+03:00] end S12-MTP-S01-V1-Joriginal elapsed=1805s verdict=NO-EVIDENCE
+2026-06-08T03:48:33.173+03:00] start S12-MTP-S01-V1-Jmarked port=8601 cap=2100s
+2026-06-08T03:48:33.182+03:00]   driver pid=31172 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s01_budget_exhaustion.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S01-V1-Jmarked -Port 8601 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T04:18:37.220+03:00] end S12-MTP-S01-V1-Jmarked elapsed=1804s verdict=NO-EVIDENCE
+2026-06-08T04:19:07.242+03:00] start S12-MTP-S02-V1-Joriginal port=8602 cap=2100s
+2026-06-08T04:19:07.255+03:00]   driver pid=26612 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s02_concurrent_multi_slot.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S02-V1-Joriginal -Port 8602 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T04:54:07.274+03:00] end S12-MTP-S02-V1-Joriginal elapsed=2100s verdict=BLOCKED-infrastructure-limited
+2026-06-08T04:54:37.303+03:00] start S12-MTP-S02-V1-Jmarked port=8603 cap=2100s
+2026-06-08T04:54:37.312+03:00]   driver pid=22804 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s02_concurrent_multi_slot.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S02-V1-Jmarked -Port 8603 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T05:29:37.327+03:00] end S12-MTP-S02-V1-Jmarked elapsed=2100s verdict=BLOCKED-infrastructure-limited
+2026-06-08T05:30:07.347+03:00] start S12-MTP-S03-V1-Joriginal port=8604 cap=2100s
+2026-06-08T05:30:07.356+03:00]   driver pid=23208 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s03_large_branch_forests.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S03-V1-Joriginal -Port 8604 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T06:00:11.622+03:00] end S12-MTP-S03-V1-Joriginal elapsed=1804s verdict=PENDING
+2026-06-08T06:00:41.630+03:00] start S12-MTP-S03-V1-Jmarked port=8605 cap=2100s
+2026-06-08T06:00:41.640+03:00]   driver pid=25268 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s03_large_branch_forests.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S03-V1-Jmarked -Port 8605 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T06:31:00.195+03:00] end S12-MTP-S03-V1-Jmarked elapsed=1819s verdict=PENDING
+2026-06-08T06:31:30.216+03:00] start S12-MTP-S04-V1-Joriginal port=8606 cap=2100s
+2026-06-08T06:31:30.224+03:00]   driver pid=26144 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s04_prompt_storms.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S04-V1-Joriginal -Port 8606 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T09:30:13.290+03:00] end S12-MTP-S04-V1-Joriginal elapsed=10723s verdict=PENDING
+2026-06-08T09:30:43.312+03:00] start S12-MTP-S04-V1-Jmarked port=8607 cap=2100s
+2026-06-08T09:30:43.321+03:00]   driver pid=29852 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s04_prompt_storms.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S04-V1-Jmarked -Port 8607 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T10:00:55.776+03:00] end S12-MTP-S04-V1-Jmarked elapsed=1812s verdict=PENDING
+2026-06-08T10:01:25.800+03:00] start S12-MTP-S05-V1-Joriginal port=8608 cap=2100s
+2026-06-08T10:01:25.809+03:00]   driver pid=32380 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s05_mixed_workload_profiles.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S05-V1-Joriginal -Port 8608 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T10:36:25.933+03:00] end S12-MTP-S05-V1-Joriginal elapsed=2100s verdict=BLOCKED-infrastructure-limited
+2026-06-08T10:36:55.954+03:00] start S12-MTP-S05-V1-Jmarked port=8609 cap=2100s
+2026-06-08T10:36:55.963+03:00]   driver pid=1708 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s05_mixed_workload_profiles.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S05-V1-Jmarked -Port 8609 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T11:11:55.991+03:00] end S12-MTP-S05-V1-Jmarked elapsed=2100s verdict=BLOCKED-infrastructure-limited
+2026-06-08T11:12:26.010+03:00] start S12-MTP-S06-V1-Joriginal port=8610 cap=2100s
+2026-06-08T11:12:26.020+03:00]   driver pid=31308 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s06_cold_queue_pressure.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S06-V1-Joriginal -Port 8610 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T11:42:30.206+03:00] end S12-MTP-S06-V1-Joriginal elapsed=1804s verdict=PENDING
+2026-06-08T11:43:00.232+03:00] start S12-MTP-S06-V1-Jmarked port=8611 cap=2100s
+2026-06-08T11:43:00.242+03:00]   driver pid=5152 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s06_cold_queue_pressure.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S06-V1-Jmarked -Port 8611 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T12:13:04.218+03:00] end S12-MTP-S06-V1-Jmarked elapsed=1804s verdict=PENDING
+2026-06-08T12:13:34.247+03:00] start S12-MTP-S07-V1-Joriginal port=8612 cap=2100s
+2026-06-08T12:13:34.259+03:00]   driver pid=31960 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s07_protected_root_pressure.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S07-V1-Joriginal -Port 8612 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T12:43:38.623+03:00] end S12-MTP-S07-V1-Joriginal elapsed=1804s verdict=PENDING
+2026-06-08T12:44:08.663+03:00] start S12-MTP-S07-V1-Jmarked port=8613 cap=2100s
+2026-06-08T12:44:08.673+03:00]   driver pid=14328 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s07_protected_root_pressure.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S07-V1-Jmarked -Port 8613 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T13:14:13.691+03:00] end S12-MTP-S07-V1-Jmarked elapsed=1805s verdict=PENDING
+2026-06-08T13:14:43.717+03:00] start S12-MTP-S08-V1-Joriginal port=8614 cap=2100s
+2026-06-08T13:14:43.727+03:00]   driver pid=28924 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s08_integrity_failure_under_load.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S08-V1-Joriginal -Port 8614 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T13:44:50.202+03:00] end S12-MTP-S08-V1-Joriginal elapsed=1806s verdict=PENDING
+2026-06-08T13:45:20.231+03:00] start S12-MTP-S08-V1-Jmarked port=8615 cap=2100s
+2026-06-08T13:45:20.241+03:00]   driver pid=28488 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\stress\stress_s12_s08_integrity_failure_under_load.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-S08-V1-Jmarked -Port 8615 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T14:15:26.970+03:00] end S12-MTP-S08-V1-Jmarked elapsed=1807s verdict=PENDING
+2026-06-08T14:15:57.006+03:00] start S12-MTP-L01-V1-Joriginal port=8616 cap=7500s
+2026-06-08T14:15:57.017+03:00]   driver pid=36724 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l01_6h_hybrid_stability.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L01-V1-Joriginal -Port 8616 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationHours 2
+2026-06-08T16:16:07.669+03:00] end S12-MTP-L01-V1-Joriginal elapsed=7211s verdict=PENDING
+2026-06-08T16:16:37.693+03:00] start S12-MTP-L01-V1-Jmarked port=8617 cap=7500s
+2026-06-08T16:16:37.703+03:00]   driver pid=38004 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l01_6h_hybrid_stability.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L01-V1-Jmarked -Port 8617 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationHours 2
+2026-06-08T18:16:49.685+03:00] end S12-MTP-L01-V1-Jmarked elapsed=7212s verdict=PENDING
+2026-06-08T18:17:19.703+03:00] start S12-MTP-L03-V1-Joriginal port=8618 cap=7500s
+2026-06-08T18:17:19.713+03:00]   driver pid=20088 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l03_2h_mixed_workload.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L03-V1-Joriginal -Port 8618 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationHours 2
+2026-06-08T20:17:29.874+03:00] end S12-MTP-L03-V1-Joriginal elapsed=7210s verdict=PENDING
+2026-06-08T20:17:59.894+03:00] start S12-MTP-L03-V1-Jmarked port=8619 cap=7500s
+2026-06-08T20:17:59.905+03:00]   driver pid=556 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l03_2h_mixed_workload.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L03-V1-Jmarked -Port 8619 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationHours 2
+2026-06-08T22:18:09.763+03:00] end S12-MTP-L03-V1-Jmarked elapsed=7210s verdict=PENDING
+2026-06-08T22:18:39.780+03:00] start S12-MTP-L02-V1-Joriginal port=8620 cap=2100s
+2026-06-08T22:18:39.790+03:00]   driver pid=25756 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l02_30m_legacy_comparison.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L02-V1-Joriginal -Port 8620 -MtpVariant 1 -JinjaVariant original -ParallelSlots 1 -DurationMin 30
+2026-06-08T22:48:46.929+03:00] end S12-MTP-L02-V1-Joriginal elapsed=1807s verdict=PENDING
+2026-06-08T22:49:16.948+03:00] start S12-MTP-L02-V1-Jmarked port=8621 cap=2100s
+2026-06-08T22:49:16.957+03:00]   driver pid=31388 args=-NoProfile -File D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\longrun\longrun_s12_l02_30m_legacy_comparison.ps1 -BuildDir D:\source\llama.cpp-jet\build-cov -OutDir D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260607-V1\S12-MTP-L02-V1-Jmarked -Port 8621 -MtpVariant 1 -JinjaVariant marked -ParallelSlots 1 -DurationMin 30
+2026-06-08T23:19:24.535+03:00] end S12-MTP-L02-V1-Jmarked elapsed=1808s verdict=PENDING
+2026-06-08T23:19:54.550+03:00] kickoff-v3-sequential-stress-longrun end
