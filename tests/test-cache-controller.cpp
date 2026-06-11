@@ -579,10 +579,12 @@ void test_hybrid_prefix_index_short_entry() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}));
-
+    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
+    // rejected by Stage 5 admission validation (missing target payload). Use the
+    // 2-arg metadata form so the entry namespace matches the lookup namespace
+    // (compute_namespace_id(metadata)) and the entry is admitted.
     prepared_prompt_metadata meta;
-    GGML_UNUSED(meta);
+    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), meta);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({7, 8, 9, 10, 11, 12, 13, 14})) == 2);
 
     printf("  PASSED\n");
@@ -594,8 +596,12 @@ void test_hybrid_lru_eviction_by_token_limit() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 100, 3, nullptr, nullptr);
-    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}));
-    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}));
+    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
+    // rejected by Stage 5 admission validation. Use the 2-arg metadata form so
+    // both entries share the same default-namespace and are admitted.
+    prepared_prompt_metadata meta;
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), meta);
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), meta);
 
     assert(ctrl.n_tokens() == 4);
     ctrl.update();
@@ -615,6 +621,13 @@ void test_hybrid_protected_eviction_paths() {
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 100, 3, nullptr, nullptr);
+    // Stage 14 batch test fix: 2-arg with bool form delegates to 5-arg with
+    // target_bytes=0, rejected by Stage 5 admission validation. SUBSTANTIVE
+    // ISSUE: the 2-arg metadata form loses protected_root (metadata form
+    // does not set entry.protected_root), so the test's protected_root-based
+    // eviction assertions cannot pass with the available debug helpers
+    // without a production code change (new test helper that accepts
+    // (tokens, metadata, protected_root)). Reported to Manager.
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), true);
     ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false);
 
@@ -1071,7 +1084,11 @@ void test_hybrid_lookup_edge_paths() {
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "other-namespace");
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({1, 2, 3, 4})) == -1);
 
-    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}));
+    // Stage 14 batch test fix: 1-arg form delegates to 5-arg with target_bytes=0,
+    // rejected by Stage 5 admission validation. Use the 2-arg metadata form so
+    // the entry namespace matches the lookup namespace and is admitted.
+    prepared_prompt_metadata meta;
+    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}), meta);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({})) == -1);
     assert(ctrl.debug_find_match_tokens_for_tests(create_tokens({4, 5, 6, 7})) == 3);
 
