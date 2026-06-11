@@ -341,6 +341,12 @@ public:
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes);
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_after_descriptor);
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end);
+    // Stage 14 test_stage9 fix: 4-arg form that bypasses the workload profile
+    // check in validate_checkpoint_descriptor_metadata. Test-only path
+    // (gated by LLAMA_SERVER_CACHE_TESTS); used by tests that build a
+    // controller with nullptr ctx_tgt (which makes detect_workload_profile
+    // return unsupported) and still need to admit a checkpoint payload.
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end, bool bypass_workload_profile);
     bool debug_validate_first_checkpoint_for_tests();
     bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
     int debug_first_checkpoint_restore_token_count_for_tests() const;
@@ -440,6 +446,8 @@ private:
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes);
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_after_descriptor);
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end);
+    // Stage 14 test_stage9 fix: see public-section comment above.
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end, bool bypass_workload_profile);
     bool debug_validate_first_checkpoint_for_tests();
     bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
     int debug_first_checkpoint_restore_token_count_for_tests() const;
@@ -671,7 +679,8 @@ private:
         const common_prompt_checkpoint * checkpoint = nullptr,
         const prepared_prompt_metadata * metadata = nullptr,
         std::string * failure_reason = nullptr,
-        bool fail_after_descriptor = false);
+        bool fail_after_descriptor = false,
+        bool bypass_workload_profile = false);
     bool admit_latest_checkpoint(
         hybrid_cache_entry & entry,
         const common_prompt_checkpoint & checkpoint,
@@ -694,7 +703,8 @@ private:
         const hybrid_cache_entry & entry,
         const payload_descriptor & descriptor,
         const prepared_prompt_metadata * metadata,
-        std::string * failure_reason = nullptr) const;
+        std::string * failure_reason = nullptr,
+        bool bypass_workload_profile = false) const;
     bool validate_descriptor_against_record(
         const hybrid_cache_entry & entry,
         const payload_descriptor & descriptor,

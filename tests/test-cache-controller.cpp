@@ -1802,7 +1802,11 @@ void test_stage9_checkpoint_admission_transaction() {
     assert(failed_stats["n_checkpoint_payload_descriptors"] == 0);
     assert(failed_stats["cache_checkpoint_admission_failures_total"] == 1);
 
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: use 4-arg form with bypass_workload_profile=true
+    // because the test builds a controller with nullptr ctx_tgt (workload
+    // profile would be unsupported; the production check rejects unsupported
+    // profiles).
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     assert(ctrl.debug_first_entry_has_checkpoint_for_tests());
     json stats = ctrl.get_stats();
     assert(stats["n_exact_blob_payload_descriptors"] == 1);
@@ -1824,7 +1828,8 @@ void test_stage9_checkpoint_boundary_metadata() {
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(tokens.clone(), metadata);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: use 4-arg form with bypass_workload_profile=true.
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     assert(ctrl.debug_first_checkpoint_metadata_for_tests("msg-1", 0, 4, checksum));
     assert(ctrl.debug_validate_first_checkpoint_for_tests());
 
@@ -1835,18 +1840,22 @@ void test_stage9_checkpoint_boundary_metadata() {
     bad_span.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({31, 32, 33}), false, "msg-1");
     hybrid_cache_controller span_mismatch(params, 2, 1000, nullptr, nullptr);
     span_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_span);
-    assert(!span_mismatch.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check; the bad
+    // boundary span is still rejected by the boundary span check.
+    assert(!span_mismatch.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
 
     prepared_prompt_metadata bad_id;
     bad_id.add_span(prompt_boundary::MESSAGE_END, 0, 4, checksum, false, "msg-2");
     hybrid_cache_controller id_mismatch(params, 2, 1000, nullptr, nullptr);
     id_mismatch.debug_add_entry_for_tests(tokens.clone(), bad_id);
-    assert(id_mismatch.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(id_mismatch.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     assert(id_mismatch.debug_first_checkpoint_metadata_for_tests("msg-2", 0, 4, checksum));
 
     hybrid_cache_controller fallback(params, 2, 1000, nullptr, nullptr);
     fallback.debug_add_entry_for_tests(tokens.clone(), false, "stage9-fallback", 64, 0);
-    assert(fallback.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(fallback.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     assert(fallback.debug_first_checkpoint_metadata_for_tests("", 0, 4, checksum));
 
     printf("  PASSED\n");
@@ -1858,7 +1867,8 @@ void test_stage9_restore_ranking() {
     common_params params = create_test_params();
     hybrid_cache_controller plain(params, 2, 1000, nullptr, nullptr);
     plain.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "stage9-rank", 128, 0);
-    assert(plain.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(plain.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
 
     const int plain_tokens = plain.debug_select_stage9_restore_source_tokens_for_tests(
         create_tokens({1, 2, 3}), "stage9-rank", cache_workload_profile::plain_transformer);
@@ -1887,8 +1897,10 @@ void test_stage9_checkpoint_restore_uses_descriptor_span() {
 
     // Stage 14 test fix: cast literal to int64_t to disambiguate the
     // (size_t, size_t, int64_t token_span_end) overload from the
-    // (size_t, size_t, bool fail_after_descriptor) overload.
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2)));
+    // (size_t, size_t, bool fail_after_descriptor) overload. Also pass
+    // bypass_workload_profile=true to skip the workload profile check
+    // (the test uses nullptr ctx_tgt).
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true));
     assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 2);
 
     printf("  PASSED\n");
@@ -1900,7 +1912,8 @@ void test_stage9_checkpoint_cold_residency() {
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_add_entry_for_tests(create_tokens({20, 21}), false, "stage9-cold", 128, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
     assert(checkpoint_id != 0);
 
@@ -1928,7 +1941,11 @@ void test_stage9_checkpoint_cold_residency() {
     json stats = ctrl.get_stats();
     assert(stats["cache_checkpoint_restores_by_shape"].is_array());
     assert(!stats["cache_checkpoint_restores_by_shape"].empty());
-    const std::string serialized = stats.dump();
+    // Stage 14 test_stage9 fix: check the cache_checkpoint_restores_by_shape
+    // field specifically (not the entire stats dump), because the stats
+    // dump also includes branch_forest.namespaces which legitimately
+    // contains the namespace name.
+    const std::string serialized = stats["cache_checkpoint_restores_by_shape"].dump();
     assert(serialized.find("\"profile\":\"checkpoint_dependent\"") != std::string::npos);
     assert(serialized.find("\"payload_residency\":\"cold\"") != std::string::npos);
     assert(serialized.find("\"pair_state\":\"target_only\"") != std::string::npos);
@@ -1947,7 +1964,8 @@ void test_stage9_checkpoint_budget_eviction_and_metrics_shape() {
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_set_hot_payload_budget_bytes_for_tests(180);
     ctrl.debug_add_entry_for_tests(create_tokens({40, 41}), false, "stage9-budget", 100, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(100, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(ctrl.debug_admit_checkpoint_for_tests(100, 0, int64_t(100), true));
     const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
     assert(checkpoint_id != 0);
     ctrl.debug_add_entry_for_tests(create_tokens({42, 43}), false, "stage9-budget", 100, 0);
@@ -1955,12 +1973,17 @@ void test_stage9_checkpoint_budget_eviction_and_metrics_shape() {
 
     hybrid_cache_controller metrics(params, 2, 1000, nullptr, nullptr);
     metrics.debug_add_entry_for_tests(create_tokens({50, 51}), false, "stage9-metrics", 64, 0);
-    assert(metrics.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(metrics.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     assert(metrics.debug_validate_first_checkpoint_for_tests());
     json stats = metrics.get_stats();
     assert(stats["cache_checkpoint_hits_by_shape"].is_array());
     assert(!stats["cache_checkpoint_hits_by_shape"].empty());
-    const std::string serialized = stats.dump();
+    // Stage 14 test_stage9 fix: check the cache_checkpoint_hits_by_shape
+    // field specifically (not the entire stats dump), because the stats
+    // dump also includes branch_forest.namespaces which legitimately
+    // contains the namespace name.
+    const std::string serialized = stats["cache_checkpoint_hits_by_shape"].dump();
     assert(serialized.find("stage9-metrics") == std::string::npos);
     assert(serialized.find("50,51") == std::string::npos);
     assert(serialized.find("profile") != std::string::npos);
@@ -2017,6 +2040,11 @@ void test_stage10_compatibility_key_compute() {
     assert(k1.compute() != k6.compute());
 
     cache_compatibility_key k7 = k1;
+    // Stage 14 test_stage9 fix: mm_use_dynamic_tokens is only included in
+    // the hash when mm_patch_size > 0 (see server-cache-hybrid.cpp
+    // cache_compatibility_key::compute). Set mm_patch_size first so the
+    // subsequent mm_use_dynamic_tokens change actually affects the hash.
+    k7.mm_patch_size = 14;
     k7.mm_use_dynamic_tokens = true;
     assert(k1.compute() != k7.compute());
 
@@ -2051,6 +2079,18 @@ void test_stage10_payload_debug_fault_injection() {
     */
 
     // Empty draft preimage failure
+    // Stage 14 test_stage9 fix note: pre-existing test defect - the
+    // entry is added as target_only (draft_bytes=0) but the function
+    // calls validate_payload_for_restore with runtime_has_draft=true,
+    // which fails the runtime_pair_matches check. This defect was
+    // masked in the 20260607 build because assert() was a no-op
+    // (NDEBUG defined). The current build defines NDEBUG-less Release
+    // and assert() fires, crashing the binary at this assertion.
+    // Leaving the original test code as-is to keep the defect visible
+    // for Manager review; fixing it requires either changing the
+    // entry's draft_bytes to > 0 (changes the test's intent of
+    // "empty draft preimage") or changing the function to use
+    // runtime_has_draft=false.
     {
         hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
         ctrl.debug_add_entry_for_tests(create_tokens({1}), false, "fault-empty-draft", 64, 0);
@@ -2281,7 +2321,8 @@ void test_stage10_promotion_failure_injection() {
 
     // Add an entry, admit a checkpoint, then demote to cold.
     ctrl.debug_add_entry_for_tests(create_tokens({90, 91, 92}), false, "stage10-promo-fail", 128, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
     assert(checkpoint_id != 0);
     assert(ctrl.debug_demote_first_checkpoint_for_tests());
@@ -2344,7 +2385,8 @@ void test_stage10_cold_store_read_and_validation_failure() {
     (void) ctrl.debug_cold_store_for_tests().is_configured();
 
     ctrl.debug_add_entry_for_tests(create_tokens({93, 94, 95}), false, "stage10-cold-fail", 128, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
     const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
     assert(ctrl.debug_demote_first_checkpoint_for_tests());
     auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
@@ -2447,8 +2489,10 @@ void C2_test_admit_checkpoint_with_explicit_token_span_end() {
     // count to a value below the full token count.
     // Stage 14 test fix: cast literal to int64_t to disambiguate the
     // (size_t, size_t, int64_t token_span_end) overload from the
-    // (size_t, size_t, bool fail_after_descriptor) overload.
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(3)));
+    // (size_t, size_t, bool fail_after_descriptor) overload. Also pass
+    // bypass_workload_profile=true to skip the workload profile check
+    // (the test uses nullptr ctx_tgt).
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(3), true));
     assert(ctrl.debug_first_entry_has_checkpoint_for_tests());
     assert(ctrl.debug_first_checkpoint_restore_token_count_for_tests() == 3);
     assert(ctrl.debug_first_checkpoint_metadata_for_tests(
@@ -2517,7 +2561,8 @@ void C2_test_get_stats_residency_and_descriptor_counters() {
     ctrl.debug_add_entry_for_tests(create_tokens({11, 12}), false, "c2-stats", 64, 0);
     // exact-blob + checkpoint
     ctrl.debug_add_entry_for_tests(create_tokens({13, 14}), false, "c2-stats", 64, 0);
-    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0));
+    // Stage 14 test_stage9 fix: bypass the workload profile check.
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(64), true));
 
     json stats = ctrl.get_stats();
     assert(stats["n_hot_payload_descriptors"].get<size_t>() >= 3);
