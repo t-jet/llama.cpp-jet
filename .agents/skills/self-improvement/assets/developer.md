@@ -439,3 +439,19 @@ Condition:
 
 Action:
 - Write the multi-line command to a temporary .ps1 file and invoke with pwsh -NoProfile -File <path>.ps1. Don't paste the array literal directly into the interactive terminal; the parser treats the open paren as the start of an expression that requires the matching close paren on the same logical input, and the terminal sits idle without a continuation prompt until the close paren is typed. Pattern observed 2026-06-11: $paths = @( "._design_docs\foo.md", "._design_docs\bar.md" ) with a newline after @( left the terminal in >> continuation state and never executed the loop. Even one-line $paths = @("a", "b"); foreach ( in ) {...} works in -Command mode but not when the user is typing into the integrated terminal. Don't try to escape with backtick-n or semicolon-join; the structural issue is the open paren at end of input, not escape parsing. Use a script file for any multi-statement PowerShell that declares arrays or uses open parens.
+
+## Improvement: PowerShell double-quoted here-string drops backticks
+
+Condition:
+- Authoring a PowerShell script that uses a double-quoted here-string ( @"..."@ ) to embed markdown text with backticks (e.g. file paths like `tools/server/server-cache-*`, code spans like `git status --short`, or template strings) and the here-string content is later compared with .Contains() against a target file's text
+
+Action:
+- Use single-quoted here-string syntax ( @'...'@ ) for any PowerShell variable that holds text with backticks. Double-quoted here-strings treat the backtick as the PowerShell escape character; `` ` `` followed by a non-special character (like `.` or `*`) is consumed and only the trailing character is kept, so ` ``tools/server/...` ` inside a double-quoted here-string becomes `tools/server/...` (missing the leading backtick). Single-quoted here-strings are literal, no escape processing. Pattern observed 2026-06-11: an update script's oldBlock (built with @"..."@") failed .Contains() against the pre-merge report because the backticks around file paths were dropped; switching to @'...'@ restored the backticks. Verify with substring search before relying on .Contains() to match. Don't try to escape the backtick as `` `` `` inside a double-quoted here-string; the parser still processes the pair.
+
+## Improvement: PowerShell .ps1 created with create_file on Windows has CRLF and that leaks into here-string content
+
+Condition:
+- Authoring a PowerShell script on Windows with create_file (or replace_string_in_file), and the script uses here-strings (@'...'@ or @"..."@) to embed multi-line text, and the embedded text is later compared byte-for-byte against a target file that is LF-only
+
+Action:
+- After creating the .ps1, convert its line endings to LF before relying on here-string content for byte-level .Contains() / .Replace() matches. The pattern is: read script, $script -replace "`r`n", "`n", write back with [System.IO.File]::WriteAllBytes($path, $utf8.GetBytes($script)) using New-Object System.Text.UTF8Encoding($false). create_file on Windows writes CRLF; the script's here-string inherits those CRLF, so $oldBlock.Length is 18 chars longer than expected for an 18-line block, and $content.Contains($oldBlock) returns false even though the same text appears in the file. Pattern observed 2026-06-11: replacing a 23-line block in a markdown report failed 3 times until the script was converted to LF; the file under edit was LF-only (verified with [System.IO.File]::ReadAllBytes byte scan CR=0 LF=N) but the here-string in the script was CRLF (CR=18 LF=18 for an 18-line block). Combine with the backtick improvement: use single-quoted here-strings AND convert script to LF for any text-replace script.
