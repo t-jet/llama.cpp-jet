@@ -198,6 +198,34 @@ Action:
 - Do accept PASS reclassification for a longrun row with clean counters and Stub data flag MEASURED even if hits+misses is well below 1000; record the actual hits+misses value in the sub-session entry for the audit trail
 - Don't reject a PASS reclassification for a longrun row purely on threshold; the threshold mismatch is structural, not a product defect
 
+## Improvement: work-branch is the default, master merges need explicit user request
+
+Condition:
+
+- User is on the cache-handling-architecture workstream in llama.cpp-jet and the current branch is `work-branch`
+
+Action:
+
+- Do verify `git branch --show-current` returns `work-branch` before delegating any stage work and quote the output in any tracker or handoff document
+- Do not perform, request, or instruct any agent to perform `git merge` from `work-branch` into `master` without an explicit user request in chat
+- Do treat the rule "All development work happens on the `work-branch` branch. The Manager will not merge to `master` without explicit user request." as binding until the user changes it
+- Don't redirect to `master`, `upstream_master`, or any other branch for development work without explicit user approval
+- Don't interpret "release", "ship", or "publish" as implicit merge approval; require an explicit "merge to master" instruction
+
+## Improvement: stage tracker row update on new stage open or status change
+
+Condition:
+
+- Opening a new stage, closing a stage, or recording a Manager gate decision in the cache-handling-architecture workstream
+
+Action:
+
+- Do update `._design_docs/cache-handling-stage-tracker.md` row for the affected stage in the same handoff (status, manager gate decision date, notes)
+- Do reference the tracker file by relative link in the next handoff to the user so the user can verify the row state
+- Do follow the eight-column format (Stage, Title, Status, Design doc, Implementation log, Latest test report, Manager gate decision, Notes) and the copyable template under "Future stages and new tasks"
+- Do not invent rows for stages that are not yet planned; pending tasks get a fresh row with Status `pending` and a stub Title
+- Don't duplicate tracker content in the architecture, design, or implementation entry docs; the tracker is the summary, the entry docs are the detail
+
 ## Improvement: integration branch is a Manager decision, not a git-plumbing inference
 
 Condition:

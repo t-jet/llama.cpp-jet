@@ -1,5 +1,21 @@
 # Architect improvement memory
 
+## Improvement: Hidden test_reports directory and relative path resolution
+
+Condition:
+- Authoring tracker or summary doc that links to test reports under `.test_reports/` and `file_search` returns no matches because the directory has a leading dot (hidden in many tools)
+
+Action:
+- Use `list_dir` on the design_docs parent or `Get-ChildItem -Force` to discover the actual directory name. Don't assume the user-supplied path is filesystem-visible. Confirm with a one-time `(Get-ChildItem -Force $dir).Count` or `list_dir` before writing relative links. Record the actual parent path (`._design_docs/.test_reports/`) in the row once and use it consistently across all rows. Don't waste turns calling `file_search` against a hidden path.
+
+## Improvement: Tracker template must be a literal markdown block, not described
+
+Condition:
+- Authoring a documentation-governance deliverable (stage tracker, handoff sheet, request log) that downstream agents will use to append new rows in a fixed schema
+
+Action:
+- Provide the new-row template as a fenced markdown code block (4-backtick fence) that the consumer can copy-paste verbatim. The block must use the same column order, header text, and pipe style as the main table. Verify the template renders correctly by counting columns against the main table header before committing. Don't describe the template in prose; downstream agents will mistype column names and the schema will drift. Keep the example row short (one short title, `pending` status, em-dash for empty cells, one short line of context) so the consumer sees the minimum-viable shape.
+
 ## Improvement: Coverage denominator rate vs XML root rate
 
 Condition:
