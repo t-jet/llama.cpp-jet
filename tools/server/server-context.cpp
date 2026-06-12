@@ -2691,17 +2691,7 @@ private:
                     if (params_base.cache_idle_slots) {
                         for (auto & slot : slots) {
                             if (!slot.is_processing()) {
-                                SLT_INF(slot, "%s", "saving idle slot to prompt cache\n");
-
-                                if (slot.prompt_save(*prompt_cache)) {
-                                    SLT_DBG(slot, "%s", "__TEST_TAG_CACHE_IDLE_SLOT__\n");
-                                    prompt_cache->update();
-                                }
-
-                                if (params_base.kv_unified) {
-                                    // [TAG_IDLE_SLOT_CLEAR]
-                                    slot.prompt_clear(false);
-                                }
+                                slot_save_and_clear(slot);
                             }
                         }
                     }
@@ -6117,6 +6107,57 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
         ? format_embeddings_response_oaicompat(body, meta->model_name, responses, use_base64)
         : json(responses);
     res->ok(root);
+    return res;
+}
+
+std::unique_ptr<server_res_generator> server_routes::handle_count_tokens(const llama_vocab * vocab, mtmd_context * mctx, const server_http_req & req, task_response_type res_type) {
+    auto res = create_response();
+    std::vector<raw_buffer> files;
+    json body = json::parse(req.body);
+    bool is_oai = false;
+
+    switch (res_type) {
+        case TASK_RESPONSE_TYPE_OAI_CHAT:
+            {
+                is_oai = true;
+            } break;
+        case TASK_RESPONSE_TYPE_OAI_RESP:
+            {
+                is_oai = true;
+                body = server_chat_convert_responses_to_chatcmpl(body);
+            } break;
+        case TASK_RESPONSE_TYPE_ANTHROPIC:
+            {
+                body = server_chat_convert_anthropic_to_oai(body);
+            } break;
+        default:
+            res->error(format_error_response("invalid res_type", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+    }
+
+    json body_parsed = oaicompat_chat_params_parse(
+            body,
+            meta->chat_params,
+            files);
+    json prompt = body_parsed.at("prompt");
+    // SRV_DBG("prompt = %s\n", prompt.dump().c_str());
+
+    // TODO @ngxson : refactor this code block, move this to server-common and reuse it in other places
+    size_t n_tokens;
+    if (mctx != nullptr) {
+        if (!prompt.is_string()) {
+            throw std::runtime_error("for mtmd, input prompt must be a string.");
+        }
+        n_tokens = process_mtmd_prompt(mctx, prompt.get<std::string>(), files, true).size();
+    } else {
+        n_tokens = tokenize_mixed(vocab, prompt, true, true).size();
+    }
+
+    json response = {{"input_tokens", static_cast<int64_t>(n_tokens)}};
+    if (is_oai) {
+        response["object"] = "response.input_tokens";
+    }
+    res->ok(response);
     return res;
 }
 

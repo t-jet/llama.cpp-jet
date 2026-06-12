@@ -2981,19 +2981,6 @@ bool hybrid_cache_controller::validate_checkpoint_descriptor_metadata(
 
     const prepared_prompt_metadata * source_metadata = metadata ? metadata : &entry.metadata;
     if (source_metadata && source_metadata->has_boundaries()) {
-        if (!descriptor.checkpoint_boundary_required) {
-            if (source_metadata->degraded() || !source_metadata->boundaries_native) {
-                const uint64_t span_checksum = cache_token_span_checksum(
-                    entry.tokens,
-                    static_cast<size_t>(descriptor.token_span_start),
-                    static_cast<size_t>(descriptor.token_span_end));
-                if (descriptor.boundary_checksum != 0 && descriptor.boundary_checksum != span_checksum) {
-                    return fail("checkpoint token checksum mismatch");
-                }
-                return true;
-            }
-            return fail("missing checkpoint boundary metadata");
-        }
         if (!descriptor.checkpoint_boundary_required || descriptor.boundary_id.empty() ||
             descriptor.boundary_checksum == 0 || descriptor.checkpoint_boundary_kind < 0) {
             return fail("missing checkpoint boundary metadata");
@@ -3090,21 +3077,7 @@ bool hybrid_cache_controller::attach_checkpoint_payload(
                 break;
             }
             if (!attached_boundary) {
-                const bool allow_degraded_fallback =
-                    source_metadata->degraded() ||
-                    !source_metadata->boundaries_native;
-                if (allow_degraded_fallback) {
-                    descriptor.checkpoint_boundary_required = false;
-                    descriptor.checkpoint_boundary_native = false;
-                    descriptor.checkpoint_boundary_kind = -1;
-                    descriptor.boundary_id.clear();
-                    descriptor.boundary_checksum = cache_token_span_checksum(
-                        entry.tokens,
-                        static_cast<size_t>(descriptor.token_span_start),
-                        static_cast<size_t>(descriptor.token_span_end));
-                } else {
-                    descriptor.checkpoint_boundary_required = true;
-                }
+                descriptor.checkpoint_boundary_required = true;
             }
         } else {
             descriptor.checkpoint_boundary_required = false;

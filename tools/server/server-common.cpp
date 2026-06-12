@@ -737,12 +737,12 @@ static std::string normalize_mtmd_media_marker(std::string prompt) {
     return prompt;
 }
 
-server_tokens process_mtmd_prompt(mtmd_context * mctx, std::string prompt, std::vector<raw_buffer> files) {
-    prompt = normalize_mtmd_media_marker(std::move(prompt));
+server_tokens process_mtmd_prompt(mtmd_context * mctx, const std::string & prompt, const std::vector<raw_buffer> & files, bool is_placeholder) {
+    std::string normalized_prompt = normalize_mtmd_media_marker(prompt);
 
     mtmd::bitmaps bitmaps;
     std::vector<mtmd_helper::video_ptr> videos;
-    for (auto & file : files) {
+    for (const auto & file : files) {
         auto out = mtmd_helper_bitmap_init_from_buf(mctx, file.data(), file.size(), is_placeholder);
         if (!out.bitmap) {
             throw std::runtime_error("Failed to load image or audio file");
@@ -752,11 +752,12 @@ server_tokens process_mtmd_prompt(mtmd_context * mctx, std::string prompt, std::
             videos.emplace_back(out.video_ctx);
         }
     }
+    const std::string & prompt_ref = normalized_prompt;
     // process prompt
     std::vector<server_tokens> inputs;
     // multimodal
     mtmd_input_text inp_txt = {
-        prompt.c_str(),
+        prompt_ref.c_str(),
         /* add_special */   true,
         /* parse_special */ true,
     };
@@ -806,7 +807,7 @@ static server_tokens tokenize_input_subprompt(const llama_vocab * vocab, mtmd_co
             for (const auto & entry : json_prompt.at(JSON_MTMD_DATA_KEY)) {
                 files.push_back(base64_decode(entry));
             }
-            return process_mtmd_prompt(mctx, json_prompt.at(JSON_STRING_PROMPT_KEY), files);
+            return process_mtmd_prompt(mctx, json_prompt.at(JSON_STRING_PROMPT_KEY), files, false);
         } else {
             // Not multimodal, but contains a subobject.
             llama_tokens tmp = tokenize_mixed(vocab, json_prompt.at(JSON_STRING_PROMPT_KEY), add_special, parse_special);
