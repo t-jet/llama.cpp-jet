@@ -8,6 +8,37 @@
 [![Docker](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml/badge.svg)](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml)
 [![Winget](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml/badge.svg)](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml)
 
+## Differences from upstream
+
+This is a private fork of [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) that adds an alternate hybrid cache mode for `llama-server` and tracks upstream via a second-merge cycle. The fork is not intended for upstream contribution.
+
+### Features
+
+- **Hybrid cache mode** (`--cache-mode hybrid`): a byte-accounted, branch-graph-backed cache for the server with cold-storage offload, speculative-decoding checkpoints, draft-pairing, prepared-prompt boundary handling, and Prometheus observability. Opt-in, default path unchanged. Documented under [._design_docs/](./_design_docs/).
+- **Endpoint parity**: public endpoint schemas stay byte-compatible with upstream; cache behavior is selected by command-line flag and internal metadata, not by request fields.
+
+### Process
+
+- **Stage workflow**: features ship in numbered stages, each with a design entry doc, implementation log, test plan, and test reports. See [._design_docs/document-index.md](./_design_docs/document-index.md).
+- **Upstream merge cycle** ([_design_docs/upstream-merge-guide.md](./_design_docs/upstream-merge-guide.md)): a documented procedure for re-syncing the fork with `upstream_master` while preserving prior-stage contracts. The fork tracks `origin/upstream_master` directly (no `upstream` remote required).
+- **Two-folder test-output convention**: durable Markdown test reports go in [._design_docs/.test_reports/](./_design_docs/.test_reports/); non-durable logs, build outputs, and artifacts go in [._test_output/](./_test_output/) (gitignored). Enforced by the `.test_reports/.gitignore` whitelist.
+- **Caveman and humanizer skills** under [.agents/skills/](./.agents/skills/) compress agent output and remove AI-writing patterns. They are not enabled in the upstream repo.
+
+### Branches
+
+- `cache-optimization-caveman`: long-running working branch with the caveman skills and the Stage 1-13 hybrid cache work plus Stage 14 design and pre-merge analysis.
+- `stage14-integration`: integration branch with the Stage 14 upstream merge plus the cycle's test fixes and T114/T114a coverage PASS.
+- `master`: tracks upstream; the fork's caveman and integration work is not merged into `master` automatically.
+
+### Not in this fork
+
+- No public API changes; public endpoint schemas match upstream.
+- No CLI flag renames; `--cache-mode hybrid` is opt-in and the default is unchanged.
+- No re-tuning of upstream benchmark numbers; the fork's local benchmark runs are evidence, not upstream comparisons.
+- No changes to GGUF format, model loaders, or quantization.
+
+For the upstream README, see the original [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
 [Manifesto](https://github.com/ggml-org/llama.cpp/discussions/205) / [ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md)
 
 LLM inference in C/C++
