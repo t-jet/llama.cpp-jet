@@ -5,9 +5,10 @@ longrun-s12-l**
 bench-s12-b*
 benchmark-run*
 test-*-artifacts
-dryrun-*-results.csv
+dryrun*results.csv
 coverage-manual-*.ps1
 S12-B*
 S12-S*
 run-*-2026*.ps1
 mtp-jinja-*
+coverage-run

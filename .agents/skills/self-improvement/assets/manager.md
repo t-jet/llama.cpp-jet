@@ -197,3 +197,31 @@ Action:
 - Do require the QA to apply the intent of the stress-row rule (clean cache counters: evictions >= 0, restore_failures == 0, descriptor_validation_failures == 0, Stub data flag = MEASURED) for longrun rows rather than the literal 1000 number
 - Do accept PASS reclassification for a longrun row with clean counters and Stub data flag MEASURED even if hits+misses is well below 1000; record the actual hits+misses value in the sub-session entry for the audit trail
 - Don't reject a PASS reclassification for a longrun row purely on threshold; the threshold mismatch is structural, not a product defect
+
+## Improvement: integration branch is a Manager decision, not a git-plumbing inference
+
+Condition:
+
+- Stage implementation plan resolves "integration branch" via `git symbolic-ref refs/remotes/origin/HEAD` (which returns the local default branch, e.g. `master`) but the user's working branch is a feature branch (e.g. `cache-optimization-caveman`) that has the stage's pre-merge work
+
+Action:
+
+- Do require the implementation plan to explicitly name the integration branch with Manager sign-off, not infer it from git plumbing
+- Do verify the integration branch is the user's working branch (e.g. `cache-optimization-<feature>`) BEFORE Step 1 of the implementation plan opens, especially for cycles that follow an upstream merge
+- Do record the integration branch decision in the entry doc Manager decisions log with a date and the rationale
+- Do not switch to a different branch mid-cycle without Manager approval; the cherry-pick or re-merge cost to relocate cycle work is substantial (10-18 days for a major cycle)
+- Don't assume the local default branch is the integration branch; it may be upstream-only and lack the feature branch's prior-stage functionality
+
+## Improvement: test fixes against one hybrid code may not apply to another
+
+Condition:
+
+- Cycle adds debug helpers to `server-cache-hybrid.{cpp,h}` and test fixes to `tests/test-cache-controller.cpp` on branch A, but the user's working branch B has a substantially different `server-cache-hybrid.{cpp,h}` (e.g. 400+ lines divergent)
+
+Action:
+
+- Do verify the user's working branch has compatible production code BEFORE delegating test fix work; if the production code is substantially different, the test fixes must be adapted or the cycle is on the wrong branch
+- Do record the integration branch decision early (before Step 1) so test fixes target the correct production code
+- Do run a small cherry-pick smoke test on one debug-helper commit before committing to the full cherry-pick; the smoke test reveals signature mismatches and missing methods early
+- Do expect 5-10 conflict resolutions when cherry-picking cycle work onto a divergent feature branch; budget the Developer session for that
+- Don't assume test fixes written against branch A apply cleanly to branch B; the debug helpers reference existing methods that may differ between branches
