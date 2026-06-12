@@ -741,15 +741,16 @@ server_tokens process_mtmd_prompt(mtmd_context * mctx, std::string prompt, std::
     prompt = normalize_mtmd_media_marker(std::move(prompt));
 
     mtmd::bitmaps bitmaps;
+    std::vector<mtmd_helper::video_ptr> videos;
     for (auto & file : files) {
-        mtmd::bitmap bmp(mtmd_helper_bitmap_init_from_buf(mctx, file.data(), file.size()));
-        if (!bmp.ptr) {
+        auto out = mtmd_helper_bitmap_init_from_buf(mctx, file.data(), file.size(), is_placeholder);
+        if (!out.bitmap) {
             throw std::runtime_error("Failed to load image or audio file");
         }
-        // calculate bitmap hash (for KV caching)
-        std::string hash = fnv_hash(bmp.data(), bmp.n_bytes());
-        bmp.set_id(hash.c_str());
-        bitmaps.entries.push_back(std::move(bmp));
+        bitmaps.entries.emplace_back(out.bitmap);
+        if (out.video_ctx) {
+            videos.emplace_back(out.video_ctx);
+        }
     }
     // process prompt
     std::vector<server_tokens> inputs;
@@ -1048,6 +1049,20 @@ json oaicompat_chat_params_parse(
                 p["type"] = "media_marker";
                 p["text"] = get_media_marker();
                 p.erase("input_audio");
+
+            } else if (type == "input_video") {
+                if (!opt.allow_video) {
+                    throw std::runtime_error("video input is not supported - hint: if this is unexpected, you may need to provide the mmproj");
+                }
+
+                json input_video  = json_value(p, "input_video", json::object());
+                std::string data  = json_value(input_video, "data", std::string());
+                auto decoded_data = base64_decode(data); // expected to be base64 encoded
+                out_files.push_back(decoded_data);
+
+                p["type"] = "media_marker";
+                p["text"] = get_media_marker();
+                p.erase("input_video");
 
             } else if (type != "text") {
                 throw std::invalid_argument("unsupported content[].type");
