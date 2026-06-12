@@ -1006,6 +1006,41 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
     evict_until_within_budget();
 }
 
+// Stage 14 comprehensive fix: comprehensive attach helper. Bundles
+// every per-call test knob identified across the cycle into a single
+// debug_attach_options struct. When opts.namespace_override is non-empty,
+// the override is used in place of compute_namespace_id(metadata). The
+// opts.runtime_has_draft flag controls the validate_payload_for_restore
+// call inside the helper, so tests that add a target_only entry and
+// then call a helper that validates can pass runtime_has_draft=false
+// to match the entry's pair_state. Test-only path; gated by
+// LLAMA_SERVER_CACHE_TESTS in the header.
+bool hybrid_cache_controller::debug_attach_payload_for_tests(server_tokens && tokens, const prepared_prompt_metadata & meta, const debug_attach_options & opts) {
+    if (opts.target_bytes == 0) {
+        return false;
+    }
+    hybrid_cache_entry entry;
+    entry.tokens = std::move(tokens);
+    entry.namespace_id = opts.namespace_override.empty() ? compute_namespace_id(meta) : opts.namespace_override;
+    entry.metadata = meta;
+    entry.protected_root = opts.protected_root;
+    assign_entry_identity(entry);
+    entry.mark_used(next_use_sequence());
+    std::vector<uint8_t> target(opts.target_bytes, 0x11);
+    std::vector<uint8_t> draft(opts.draft_bytes, 0x22);
+    if (!attach_payload(entry, std::move(target), std::move(draft), opts.draft_bytes > 0)) {
+        return false;
+    }
+
+    entries.push_back(std::move(entry));
+    auto it = std::prev(entries.end());
+    create_branch_node_for_entry(*it);
+    add_to_lru_index(it);
+    add_to_prefix_index(it);
+    evict_until_within_budget();
+    return true;
+}
+
 int hybrid_cache_controller::debug_find_match_tokens_for_tests(const server_tokens & tokens) {
     // Stage 14 test 27 fix: empty queries must return -1 (test-only path;
     // gated by LLAMA_SERVER_CACHE_TESTS). Without this guard, the underlying
@@ -1877,28 +1912,12 @@ bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
         size_t draft_bytes,
         int64_t token_span_end,
         bool bypass_workload_profile) {
-    if (entries.empty() || target_bytes == 0) {
-        return false;
-    }
-    int64_t span_end = token_span_end > 0 ? token_span_end : static_cast<int64_t>(entries.front().n_tokens());
-    if (span_end > static_cast<int64_t>(entries.front().n_tokens())) {
-        span_end = static_cast<int64_t>(entries.front().n_tokens());
-    }
-    std::vector<uint8_t> target(target_bytes, 0x33);
-    std::vector<uint8_t> draft(draft_bytes, 0x44);
-    common_prompt_checkpoint checkpoint;
-    checkpoint.update_pos(span_end, 0, static_cast<llama_pos>(span_end));
-    std::string failure_reason;
-    return attach_checkpoint_payload(
-        entries.front(),
-        std::move(target),
-        std::move(draft),
-        draft_bytes > 0,
-        &checkpoint,
-        &entries.front().metadata,
-        &failure_reason,
-        false,
-        bypass_workload_profile);
+    // Stage 14 comprehensive fix: delegate to the opts-based overload so
+    // there is a single code path. The opts struct's bypass_workload_profile
+    // flag mirrors the bool argument.
+    debug_attach_options opts;
+    opts.bypass_workload_profile = bypass_workload_profile;
+    return debug_admit_checkpoint_for_tests(target_bytes, draft_bytes, token_span_end, opts);
 }
 
 bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
@@ -1920,6 +1939,43 @@ bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
         &entries.front().metadata,
         &failure_reason,
         fail_after_descriptor);
+}
+
+// Stage 14 comprehensive fix: opts-based overload of checkpoint
+// admission. The 4-arg bool bypass_workload_profile form above delegates
+// here with an opts struct whose bypass_workload_profile flag mirrors
+// the bool. The opts struct leaves room for future per-call test knobs
+// without further overload proliferation. The token_span_end and
+// fail_after_descriptor semantics mirror the prior int64_t and bool
+// overloads. Test-only path; gated by LLAMA_SERVER_CACHE_TESTS in the
+// header.
+bool hybrid_cache_controller::debug_admit_checkpoint_for_tests(
+        size_t target_bytes,
+        size_t draft_bytes,
+        int64_t token_span_end,
+        const debug_attach_options & opts) {
+    if (entries.empty() || target_bytes == 0) {
+        return false;
+    }
+    int64_t span_end = token_span_end > 0 ? token_span_end : static_cast<int64_t>(entries.front().n_tokens());
+    if (span_end > static_cast<int64_t>(entries.front().n_tokens())) {
+        span_end = static_cast<int64_t>(entries.front().n_tokens());
+    }
+    std::vector<uint8_t> target(target_bytes, 0x33);
+    std::vector<uint8_t> draft(draft_bytes, 0x44);
+    common_prompt_checkpoint checkpoint;
+    checkpoint.update_pos(span_end, 0, static_cast<llama_pos>(span_end));
+    std::string failure_reason;
+    return attach_checkpoint_payload(
+        entries.front(),
+        std::move(target),
+        std::move(draft),
+        draft_bytes > 0,
+        &checkpoint,
+        &entries.front().metadata,
+        &failure_reason,
+        opts.fail_after_descriptor,
+        opts.bypass_workload_profile);
 }
 
 bool hybrid_cache_controller::debug_validate_first_checkpoint_for_tests() {
@@ -2162,13 +2218,21 @@ bool hybrid_cache_controller::debug_transaction_for_tests(bool runtime_has_draft
     return live_target == record->target && (!runtime_has_draft || live_draft == record->draft);
 }
 
-bool hybrid_cache_controller::debug_empty_preimage_draft_failure_for_tests() {
+// Stage 14 comprehensive fix: add runtime_has_draft parameter so the
+// test can pass runtime_has_draft=false when the entry was admitted as
+// target_only (draft_bytes=0). The original hard-coded true caused the
+// validate_payload_for_restore call to fail with "runtime does not
+// accept draft payload", making the helper return false and crashing
+// the test assertion. The default is true to preserve prior behavior
+// for any caller that omits the argument. Test-only path; gated by
+// LLAMA_SERVER_CACHE_TESTS in the header.
+bool hybrid_cache_controller::debug_empty_preimage_draft_failure_for_tests(bool runtime_has_draft) {
     if (entries.empty()) {
         return false;
     }
 
     const hot_payload_record * record = nullptr;
-    if (!validate_payload_for_restore(entries.front(), true, nullptr, &record)) {
+    if (!validate_payload_for_restore(entries.front(), runtime_has_draft, nullptr, &record)) {
         n_fallback_restores++;
         return false;
     }
@@ -2194,13 +2258,13 @@ bool hybrid_cache_controller::debug_empty_preimage_draft_failure_for_tests() {
     return true;
 }
 
-bool hybrid_cache_controller::debug_unsupported_empty_clear_for_tests() {
+bool hybrid_cache_controller::debug_unsupported_empty_clear_for_tests(bool runtime_has_draft) {
     if (entries.empty()) {
         return false;
     }
 
     const hot_payload_record * record = nullptr;
-    if (!validate_payload_for_restore(entries.front(), true, nullptr, &record)) {
+    if (!validate_payload_for_restore(entries.front(), runtime_has_draft, nullptr, &record)) {
         n_fallback_restores++;
         return false;
     }
@@ -2218,13 +2282,13 @@ bool hybrid_cache_controller::debug_unsupported_empty_clear_for_tests() {
     return true;
 }
 
-bool hybrid_cache_controller::debug_rollback_failure_for_tests() {
+bool hybrid_cache_controller::debug_rollback_failure_for_tests(bool runtime_has_draft) {
     if (entries.empty()) {
         return false;
     }
 
     const hot_payload_record * record = nullptr;
-    if (!validate_payload_for_restore(entries.front(), true, nullptr, &record)) {
+    if (!validate_payload_for_restore(entries.front(), runtime_has_draft, nullptr, &record)) {
         n_fallback_restores++;
         return false;
     }

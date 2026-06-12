@@ -241,6 +241,27 @@ struct hybrid_cache_entry {
     }
 };
 
+// Stage 14 comprehensive fix: debug_attach_options bundles all the
+// test-infrastructure parameters identified across the cycle into a
+// single struct. The comprehensive helpers below use the struct to
+// avoid overload proliferation. A default-constructed struct matches
+// the prior simple-helper behavior. Defined unconditionally so the
+// struct is available to both the public test-only block and the
+// private production-side stub declarations. The struct itself is a
+// passive data type with no runtime cost in production builds.
+struct debug_attach_options {
+    size_t target_bytes = 0;                  // > 0 required for Stage 5 admission
+    size_t draft_bytes = 0;                  // 0 for target-only
+    bool fail_after_descriptor = false;      // mirrors the 3-arg bool overload
+    int64_t token_span_end = -1;             // -1 means use full token count
+    bool protected_root = false;             // protected from eviction
+    bool bypass_workload_profile = false;    // skip the workload profile check
+    bool force_empty_draft_preimage_failure = false; // next draft preimage check fails
+    bool fail_token_span_check = false;      // token span boundary failure
+    std::string namespace_override;          // empty means compute from metadata
+    bool runtime_has_draft = true;           // mirrors validate_payload_for_restore's runtime flag
+};
+
 // Phase 1 hybrid cache controller
 // Features:
 //   - Non-destructive cache hits (entries remain in cache after loading)
@@ -293,6 +314,15 @@ public:
     bool validate_hybrid_cache_safety(bool log_warnings = true) const;
 
 #ifdef LLAMA_SERVER_CACHE_TESTS
+    // Comprehensive attach helper. When opts.namespace_override is non-empty,
+    // the override is used in place of compute_namespace_id(metadata). When
+    // opts.bypass_workload_profile is true, the workload profile check is
+    // skipped (for tests that build a controller with nullptr ctx_tgt).
+    // Test-only path; gated by LLAMA_SERVER_CACHE_TESTS.
+    bool debug_attach_payload_for_tests(server_tokens && tokens,
+                                        const prepared_prompt_metadata & meta,
+                                        const debug_attach_options & opts = {});
+
     // Test helpers for pure lookup/index coverage without a llama context.
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
@@ -327,9 +357,16 @@ public:
     bool debug_evict_last_payload_for_tests();
     bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
     bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
-    bool debug_empty_preimage_draft_failure_for_tests();
-    bool debug_unsupported_empty_clear_for_tests();
-    bool debug_rollback_failure_for_tests();
+    // Stage 14 comprehensive fix: add runtime_has_draft parameter so the
+    // test can control whether the hard-coded validate_payload_for_restore
+    // call inside the helper uses runtime_has_draft=true or =false. The
+    // tests add an entry as target_only (draft_bytes=0); the original
+    // hard-coded true caused the validation to fail with "runtime does
+    // not accept draft payload" and the assertion to crash. Default true
+    // preserves the prior behavior for any caller that omits the arg.
+    bool debug_empty_preimage_draft_failure_for_tests(bool runtime_has_draft = true);
+    bool debug_unsupported_empty_clear_for_tests(bool runtime_has_draft = true);
+    bool debug_rollback_failure_for_tests(bool runtime_has_draft = true);
     bool debug_rematerialize_first_entry_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_attach = false);
     bool debug_first_entry_metadata_only_for_tests() const;
     bool debug_first_entry_has_payload_for_tests() const;
@@ -347,6 +384,14 @@ public:
     // controller with nullptr ctx_tgt (which makes detect_workload_profile
     // return unsupported) and still need to admit a checkpoint payload.
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end, bool bypass_workload_profile);
+    // Stage 14 comprehensive fix: opts-based overload of checkpoint
+    // admission. Bundles the bypass flag and any future per-call test
+    // knobs into a struct. The 4-arg bool overload above delegates here.
+    // Test-only path; gated by LLAMA_SERVER_CACHE_TESTS.
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes,
+                                          size_t draft_bytes,
+                                          int64_t token_span_end,
+                                          const debug_attach_options & opts);
     bool debug_validate_first_checkpoint_for_tests();
     bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
     int debug_first_checkpoint_restore_token_count_for_tests() const;
@@ -403,6 +448,13 @@ public:
 
 private:
 #ifndef LLAMA_SERVER_CACHE_TESTS
+    // Stage 14 comprehensive fix: production-side stubs for the test
+    // helpers declared in the public LLAMA_SERVER_CACHE_TESTS block. These
+    // match the public signatures exactly so that the test-only code
+    // paths compile out cleanly in production builds.
+    bool debug_attach_payload_for_tests(server_tokens && tokens,
+                                        const prepared_prompt_metadata & meta,
+                                        const debug_attach_options & opts = {});
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root = false, const std::string & namespace_id = "");
     void debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes);
     void debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata);
@@ -432,9 +484,10 @@ private:
     bool debug_evict_last_payload_for_tests();
     bool debug_inject_first_payload_fault_for_tests(payload_debug_fault fault);
     bool debug_transaction_for_tests(bool runtime_has_draft, bool fail_target, bool fail_draft, bool fail_commit);
-    bool debug_empty_preimage_draft_failure_for_tests();
-    bool debug_unsupported_empty_clear_for_tests();
-    bool debug_rollback_failure_for_tests();
+    // Stage 14 comprehensive fix: add runtime_has_draft parameter.
+    bool debug_empty_preimage_draft_failure_for_tests(bool runtime_has_draft = true);
+    bool debug_unsupported_empty_clear_for_tests(bool runtime_has_draft = true);
+    bool debug_rollback_failure_for_tests(bool runtime_has_draft = true);
     bool debug_rematerialize_first_entry_for_tests(size_t target_bytes, size_t draft_bytes, bool fail_attach = false);
     bool debug_first_entry_metadata_only_for_tests() const;
     bool debug_first_entry_has_payload_for_tests() const;
@@ -448,6 +501,11 @@ private:
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end);
     // Stage 14 test_stage9 fix: see public-section comment above.
     bool debug_admit_checkpoint_for_tests(size_t target_bytes, size_t draft_bytes, int64_t token_span_end, bool bypass_workload_profile);
+    // Stage 14 comprehensive fix: opts-based overload (see public section).
+    bool debug_admit_checkpoint_for_tests(size_t target_bytes,
+                                          size_t draft_bytes,
+                                          int64_t token_span_end,
+                                          const debug_attach_options & opts);
     bool debug_validate_first_checkpoint_for_tests();
     bool debug_first_checkpoint_metadata_for_tests(const std::string & boundary_id, int64_t token_span_start, int64_t token_span_end, uint64_t boundary_checksum) const;
     int debug_first_checkpoint_restore_token_count_for_tests() const;
