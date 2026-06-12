@@ -1,4 +1,0 @@
-
-._design_docs\.test_reports\test-report-20260609-05-artifacts\text-server3.stderr.log:1319:0.11.384.397 D srv  cache_metada: cache metadata: source=openai-chat method=rendered-text-boundary-inference degraded=rendered text boundary inference tokens=15 boundaries=2
-._design_docs\.test_reports\test-report-20260609-05-artifacts\text-server3.stderr.log:1442:0.11.543.253 D srv  cache_metada: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=7 boundaries=2
-

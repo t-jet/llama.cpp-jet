@@ -1,6 +1,0 @@
-start=2026-06-10T16:14:15.7231509+03:00
-pid=32440
-ready_at=0 health=ok
-graceful_kill=start
-ERROR: The process with PID 32440 could not be terminated. Reason: This process can only be terminated forcefully (with /F option).
-fallback_force=start

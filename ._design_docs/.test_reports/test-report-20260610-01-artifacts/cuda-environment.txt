@@ -1,4 +1,0 @@
-DISCARDED: earlier build\ CPU-only probe artifacts are setup error after user clarified CUDA-only testing.
-cuda_path_prefix=D:\app\cuda_13_2\bin\x64
-NVIDIA GeForce RTX 5060 Ti, 16311 MiB, 16050 MiB
-NVIDIA GeForce RTX 5060 Ti, 16311 MiB, 16050 MiB

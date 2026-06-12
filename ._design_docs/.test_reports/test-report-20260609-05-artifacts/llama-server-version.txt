@@ -1,2 +1,0 @@
-version: 9541 (f7282f535)
-built with MSVC 19.51.36246.0 for x64

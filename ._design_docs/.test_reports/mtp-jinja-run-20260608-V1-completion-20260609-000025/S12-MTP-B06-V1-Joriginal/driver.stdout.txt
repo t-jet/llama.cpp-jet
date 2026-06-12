@@ -1,3 +1,0 @@
-S12-B06 prompt-storm efficiency; stub=False
-D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B06-V1-Joriginal\hybrid\evidence-summary.md
-D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B06-V1-Joriginal\legacy\evidence-summary.md

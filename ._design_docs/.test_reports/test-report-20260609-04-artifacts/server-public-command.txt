@@ -1,1 +1,0 @@
-D:\source\llama.cpp-jet\build\bin\Release\llama-server.exe --model D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1 --port 18113 --cache-mode hybrid --cache-ram 100 --ctx-size 512 --parallel 2 --temp 0 --seed 42 --metrics --slots --log-verbosity 5

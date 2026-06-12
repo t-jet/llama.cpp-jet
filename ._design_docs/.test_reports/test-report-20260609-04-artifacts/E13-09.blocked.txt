@@ -1,1 +1,0 @@
-embedding-server2 no health

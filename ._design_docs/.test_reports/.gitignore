@@ -1,14 +1,8 @@
-**/*.log
-coverage-run-*
-stress-s12-s*
-longrun-s12-l**
-bench-s12-b*
-benchmark-run*
-test-*-artifacts
-dryrun*results.csv
-coverage-manual-*.ps1
-S12-B*
-S12-S*
-run-*-2026*.ps1
-mtp-jinja-*
-coverage-run
+# Only test reports (and their review/fixes variants) are tracked.
+# All other content (logs, artifacts, scripts) is non-durable and belongs in ._test_output.
+# See ._design_docs/cache-handling-test-plan.md for the rule.
+!test-report-*.md
+!pre-merge-report-*.md
+!merge-log-*.md
+!stage14-integration-cherry-pick-*.md
+*

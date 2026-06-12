@@ -1,6 +1,0 @@
-{
-    "n_predict":  2,
-    "prompt":  "STAGE13_SECRET_DO_NOT_LEAK_9f30 tool_arg=password123 path=C:\\secret\\cache.bin checksum=abcdef rawmedia=bytes",
-    "cache_prompt":  true,
-    "temperature":  0
-}

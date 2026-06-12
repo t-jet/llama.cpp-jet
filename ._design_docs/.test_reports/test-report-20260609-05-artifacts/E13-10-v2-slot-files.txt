@@ -1,5 +1,0 @@
-
-Name                     Length
-----                     ------
-stage13-slot-test2.slot 1835968
-

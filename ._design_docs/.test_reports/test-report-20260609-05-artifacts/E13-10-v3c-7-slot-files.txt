@@ -1,8 +1,0 @@
-
-Name                    Length
-----                    ------
-slot_1.bin             1835968
-stage13-slot-test.slot      24
-stage13-v3-slot.slot        24
-stage13-v3c-slot.slot       24
-

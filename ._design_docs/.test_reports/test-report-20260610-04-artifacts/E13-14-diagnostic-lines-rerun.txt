@@ -1,2 +1,0 @@
-0.35.094.407 I srv  launch_slot_: cache metadata: source=native-completion method=token-position-fallback degraded=minimal token span metadata tokens=30 boundaries=2
-0.43.239.542 I srv  launch_slot_: cache metadata: source=openai-chat method=rendered-text-boundary-inference degraded=rendered text boundary inference tokens=46 boundaries=6

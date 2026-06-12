@@ -1,6 +1,0 @@
-=== E13-14 Degraded Fallback + Log Leakage ===
-T1-LONG-PROMPT ERR Response status code does not indicate success: 400 (Bad Request).
-T2-EMPTY-CONTENT status=ok content=
-T3-HUGE-PROMPT status=ok
-T4-SECRET-PROMPT status=ok content=. Please use the
-PROBE-DONE

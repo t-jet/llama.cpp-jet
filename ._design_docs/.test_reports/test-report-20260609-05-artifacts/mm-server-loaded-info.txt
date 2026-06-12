@@ -1,4 +1,0 @@
-
-._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:22:0.50.660.907 I srv    load_model: loaded multimodal model, 'D:\source\llama.cpp-jet\._test_models\Qwen2.5-Omni-3B-GGUF\mmproj-Qwen2.5-Omni-3B-f16.gguf'
-._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:43:0.50.773.499 I srv  llama_server: model loaded
-

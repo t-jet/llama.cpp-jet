@@ -1,2 +1,0 @@
-http_code=100
-time_total=0.769631

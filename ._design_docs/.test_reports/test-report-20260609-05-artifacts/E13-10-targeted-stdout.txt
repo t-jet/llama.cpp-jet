@@ -1,7 +1,0 @@
-=== E13-10 /slots targeted id_slot=1 ===
-HEALTH status=ok
-GEN content= The cache has a cache line size of cache_n=8 id_slot=1
-SAVE-ERR Response status code does not indicate success: 501 (Not Implemented).
-ERASE-ERR Response status code does not indicate success: 501 (Not Implemented).
-RESTORE-ERR Response status code does not indicate success: 501 (Not Implemented).
-PROBE-DONE

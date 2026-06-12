@@ -1,1 +1,0 @@
---model D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf --host 127.0.0.1 --port 8613 --cache-mode hybrid --cache-ram 64 --metrics --parallel 1 --ctx-size 1024 --n-predict 4 --temp 0 --seed 123 --slot-save-path D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260609-04-artifacts\slots

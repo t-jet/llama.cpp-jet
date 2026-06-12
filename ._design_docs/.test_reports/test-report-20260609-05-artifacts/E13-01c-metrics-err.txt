@@ -1,7 +1,0 @@
-﻿Invoke-RestMethod : Unable to connect to the remote server
-At D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260609-05-artifacts\probe-E13-01c-v2.ps1:67 char:5
-+     Invoke-RestMethod -Uri "$base/metrics" -TimeoutSec 5 | Out-File - ...
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (System.Net.HttpWebRequest:HttpWebRequest) [Invoke-RestMethod], WebException
-    + FullyQualifiedErrorId : WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeRestMethodCommand
- 

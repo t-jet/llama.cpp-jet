@@ -1,6 +1,0 @@
-Invoke-RestMethod: D:\source\llama.cpp-jet\._design_docs\.test_reports\test-report-20260609-05-artifacts\probe-E13-07-08-20260610-03.ps1:54:10
-Line |
-  54 |      $m = Invoke-RestMethod -Uri "$base/metrics" -TimeoutSec 5
-     |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-     | No connection could be made because the target machine actively refused it.
-

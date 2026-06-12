@@ -1,8 +1,0 @@
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": read tcp 127.0.0.1:56779->127.0.0.1:8306: wsarecv: An existing connection was forcibly closed by the remote host."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=warning msg="Request Failed" error="Post \"http://127.0.0.1:8306/completion\": dial tcp 127.0.0.1:8306: connectex: No connection could be made because the target machine actively refused it."
-time="2026-06-08T02:47:19+03:00" level=error msg="thresholds on metrics 'http_req_failed, prefix_match_rate' have been crossed"

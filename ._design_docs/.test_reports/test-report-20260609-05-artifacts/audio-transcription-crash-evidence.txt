@@ -1,4 +1,0 @@
-
-0.30.163.399 D srv   operator (): Request converted: OpenAI Transcriptions -> OpenAI Chat Completions
-D:\source\llama.cpp-jet\tools\server\server-common.cpp:398: GGML_ASSERT(!has_mtmd) failed
-

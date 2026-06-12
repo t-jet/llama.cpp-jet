@@ -1,9 +1,0 @@
-{
-  "id_slot": 1,
-  "filename": "slot_1.bin",
-  "n_restored": 16,
-  "n_read": 1835968,
-  "timings": {
-    "restore_ms": 0.942
-  }
-}

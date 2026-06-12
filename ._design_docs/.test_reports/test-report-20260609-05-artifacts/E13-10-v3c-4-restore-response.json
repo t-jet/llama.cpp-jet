@@ -1,9 +1,0 @@
-{
-  "id_slot": 0,
-  "filename": "stage13-v3c-slot.slot",
-  "n_restored": 0,
-  "n_read": 24,
-  "timings": {
-    "restore_ms": 0.076
-  }
-}

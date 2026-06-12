@@ -1,1 +1,0 @@
-row=E13-14-chat-degraded path=/v1/chat/completions status=200

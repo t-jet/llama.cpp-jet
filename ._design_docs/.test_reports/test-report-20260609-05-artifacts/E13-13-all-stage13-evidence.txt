@@ -1,4 +1,0 @@
-
-> ._design_docs\.test_reports\test-report-20260609-05-artifacts\test-cache-controller.log:82:test-cache-controller: Stage 13 route-neutral preparation identity...
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\test-cache-controller.log:83:  PASSED
-

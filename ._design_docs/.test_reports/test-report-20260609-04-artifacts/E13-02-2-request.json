@@ -1,7 +1,0 @@
-{
-  "stream": false,
-  "model": "local",
-  "temperature": 0,
-  "prompt": "Stage 13 OAI completion prompt.",
-  "max_tokens": 8
-}

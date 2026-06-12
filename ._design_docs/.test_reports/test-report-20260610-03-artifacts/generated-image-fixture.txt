@@ -1,1 +1,0 @@
-Copied generated-red-square.jpg from prior artifact solely as local image fixture for E13-01c Qwen2.5 VL fallback.

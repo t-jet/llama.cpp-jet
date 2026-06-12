@@ -1,7 +1,0 @@
-{
-  "max_output_tokens": 8,
-  "stream": false,
-  "model": "local",
-  "temperature": 0,
-  "input": "Stage 13 responses string input."
-}

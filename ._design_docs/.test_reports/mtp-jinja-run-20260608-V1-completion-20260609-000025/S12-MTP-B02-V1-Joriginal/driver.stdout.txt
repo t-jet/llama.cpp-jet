@@ -1,2 +1,0 @@
-S12-B02 checkpoint hit rate; stub=False
-D:\source\llama.cpp-jet\._design_docs\.test_reports\mtp-jinja-run-20260608-V1-completion-20260609-000025\S12-MTP-B02-V1-Joriginal\hybrid\evidence-summary.md

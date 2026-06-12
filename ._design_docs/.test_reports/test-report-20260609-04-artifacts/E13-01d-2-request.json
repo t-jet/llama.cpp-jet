@@ -1,7 +1,0 @@
-{
-  "n_predict": 8,
-  "stream": false,
-  "temperature": 0,
-  "prompt": "Stage 13 alias prompt. Answer short.",
-  "cache_prompt": true
-}

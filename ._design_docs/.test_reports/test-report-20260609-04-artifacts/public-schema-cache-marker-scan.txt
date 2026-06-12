@@ -1,1 +1,0 @@
-NO public prompt_metadata, preparation_id, marker, cache_control, cacheMode, or cache_mode fields found in E13 JSON artifacts.

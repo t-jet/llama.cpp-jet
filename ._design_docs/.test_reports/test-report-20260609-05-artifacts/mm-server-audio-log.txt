@@ -1,9 +1,0 @@
-
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:17:0.49.160.380 W load_hparams: if you encounter problems with accuracy, try adding --image-min-tokens 1024
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:18:0.49.160.380 W load_hparams: more info: https://github.com/ggml-org/llama.cpp/issues/16842
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:19:
-> ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:20:0.50.660.849 W init_audio: audio input is in experimental stage and may have reduced quality:
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:21:    https://github.com/ggml-org/llama.cpp/discussions/13759
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:22:0.50.660.907 I srv    load_model: loaded multimodal model, 'D:\source\llama.cpp-jet\._test_models\Qwen2.5-Omni-3B-GGUF\mmproj-Qwen2.5-Omni-3B-f16.gguf'
-  ._design_docs\.test_reports\test-report-20260609-05-artifacts\mm-server.stderr.log:23:0.50.660.909 I srv    load_model: initializing slots, n_slots = 1
-

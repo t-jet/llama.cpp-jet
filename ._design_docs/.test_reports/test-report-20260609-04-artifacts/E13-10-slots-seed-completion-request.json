@@ -1,7 +1,0 @@
-{
-  "temperature": 0,
-  "prompt": "Stage 13 slot save prompt.",
-  "n_predict": 8,
-  "cache_prompt": true,
-  "stream": false
-}
