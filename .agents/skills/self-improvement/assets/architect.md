@@ -428,3 +428,19 @@ Condition:
 
 Action:
 - Run grep_search for the part line before editing and treat multi-match as expected. When inserting a new link into the Contents section, include a neighboring ## section header in the oldString to scope the match. Do not replace a part line in both sections at once; the non-Contents section is a stage-anchored pointer and should keep its own list. Verify the new link appears in the Contents section and that the other section's line is unchanged.
+
+## Improvement: Plan-supplied relative paths vs source-file location
+
+Condition:
+- Executing a user-supplied plan that authors or extends a document at a known repo path (e.g., root `README.md`, a part file under `._design_docs/`) and the plan text contains explicit relative Markdown links or filesystem paths to other files
+
+Action:
+- Before committing, verify each relative path resolves from the source file's actual location. For a root-level README, sibling paths use `./<dir>/<file>` (with the leading dot for `._design_docs/`, `._test_output/`, `.agents/`). For a file inside `._design_docs/cache-handling-architecture/`, sibling paths use `../<sibling-dir>/<file>`. A `../` in a root-level file points outside the repo. When a path in the plan is wrong, correct it during the edit, record the correction in the post-task return summary, and don't reject the plan outright. Verify with `Test-Path` from the source file's parent directory.
+
+## Improvement: Pre-existing UTF-8 characterization before "preserve" claim
+
+Condition:
+- Task or plan says "the existing file may have UTF-8 characters; preserve them" or similar, and the constraint names a specific character (e.g., em dash) without enumerating what is actually present
+
+Action:
+- Scan the source file's raw bytes for the named UTF-8 pattern plus adjacent patterns (em dash `E2 80 94`, en dash `E2 80 93`, BOM `EF BB BF`, emoji) before editing, and report the actual character set in the return summary. Plan text often names em dash as a guess when the file actually has en dashes or emoji. Count with `[System.IO.File]::ReadAllBytes` and a `for` loop over byte triplets, or use a regex against the decoded string with `[char]0x2013`, `[char]0x2014`, `[char]0xFE0F`. Apply the new section as plain ASCII regardless of which UTF-8 form is present in the existing file.
