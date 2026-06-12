@@ -419,3 +419,12 @@ Condition:
 
 Action:
 - Use `(Get-Content $file).Count` or `(Get-Content -Raw $file).Split([char]10).Count` to get the authoritative line count. Confirm with raw byte LF count via `[System.IO.File]::ReadAllBytes` and `foreach` over bytes checking for `0x0A`. `Measure-Object -Line` can undercount on multi-line markdown with trailing newlines, embedded blank lines, or specific encoding handling. Don't trust the `Measure-Object` count alone when the file is near the 300-line cap. Re-run line count verification after any conversion or normalization step.
+
+
+## Improvement: Recurring part-file link across entry-doc sections
+
+Condition:
+- Adding a new Contents-section link for a part file in a test-plan or design entry doc, and the same part number or link text also appears in another section of the same doc (e.g., a Finding current implementation status block that lists the same part files)
+
+Action:
+- Run grep_search for the part line before editing and treat multi-match as expected. When inserting a new link into the Contents section, include a neighboring ## section header in the oldString to scope the match. Do not replace a part line in both sections at once; the non-Contents section is a stage-anchored pointer and should keep its own list. Verify the new link appears in the Contents section and that the other section's line is unchanged.

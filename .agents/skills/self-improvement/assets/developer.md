@@ -478,3 +478,13 @@ Action:
   fixing iteratively; the user directive "Batch-fix all
   found defects, don't defer anything" applies to all
   exposed defects, not just the current crash point.
+
+## Improvement: PowerShell path-separator normalization vs git ls-files
+
+Condition:
+
+- When a PowerShell script needs to decide between git mv and Move-Item for items in a directory by checking if any tracked file from git ls-files <dir>/ lives inside that item, and the script builds the comparison prefix from a Windows-side path (e.g., Get-ChildItem ... | % FullName then Replace('D:\\source\\llama.cpp-jet\\', '')), which yields backslash-separated relative paths
+
+Action:
+
+- Do normalize the tracked-path keys to backslashes (e.g., ( -replace '/', '\\')) OR build the comparison prefix with forward slashes (e.g., ( -replace '\\', '/') + '/') before the StartsWith check; don't compare Windows-side backslash paths to git ls-files forward-slash paths directly. The bug defaults every item to the non-git mv branch and silently loses git rename history on bulk moves. Verified 2026-06-12 (Stage 14 cleanup): my move script built $relSrc + '\' from Get-ChildItem and compared it to git ls-files keys that always use /; the StartsWith never matched, so all 128 subfolders containing 1269 tracked files were Move-Item-ed instead of git mv-ed. The cleanup commit 4f434897e therefore shows 1270 files as 1269 deletes + 1 .gitignore modification with no rename detection. The end state matched the user's accepted "show as deleted" plan, but the same bug in a code-introducing move would lose real history. When this is detected post-hoc, the cheapest recovery is git add -A + commit (current files in dest are gone from index, old files are gone from disk) plus an explicit note in the commit message.
