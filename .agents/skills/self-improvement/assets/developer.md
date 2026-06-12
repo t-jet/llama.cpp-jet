@@ -40,6 +40,46 @@ Action:
 
 - Do make the first assistant action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, AGENTS.md discussion, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, including when the user pasted repo instructions or the note only says memory will be loaded.
 
+## Improvement: Cherry-pick list must distinguish code-introducing merges from worktree-artifact commits
+
+Condition:
+
+- When a "merge cycle" cherry-pick plan lists the cycle's first commit as a merge commit that should bring the upstream code, but the diff between the named commit and its single parent is all worktree artifacts (build logs, test reports, coverage HTML) with no production code changes
+
+Action:
+
+- Do inspect `git show <commit> --stat` and `git diff-tree --no-commit-id --name-only -r <parent> <commit>` before assuming the named commit will bring the upstream code. If the named commit is purely artifacts, fall back to the user's stated fallback: do `git merge <upstream-ref> --no-ff -X ours` (or the user's documented strategy) on the integration branch first, then cherry-pick the artifact commit on top so its files are added but no code is duplicated. Verified 2026-06-12 (Stage 14 Path B integration): `44502e38d` was titled "merge origin/upstream_master" but its diff vs parent `08f3a6155` was 1264 added files of S12 reports and coverage HTML; the actual upstream code merge was in `08f3a6155` which was unreachable from caveman. The plan's fallback (`git merge origin/upstream_master --no-ff -X ours`) brought the code with no conflicts because the -X ours strategy preferred caveman's content for boundary-level conflicts; the 1264 artifact files were then added cleanly by the cherry-pick. Don't try to "force" the cherry-pick to bring code; check the diff structure first.
+
+## Improvement: Cross-merge integration exposes partial function bodies
+
+Condition:
+
+- When a cross-merge integration (e.g. caveman + upstream + cherry-picks) lands and the build fails with link errors like "unresolved external symbol server_routes::handle_count_tokens" but the function is declared in a header and referenced in another .cpp
+
+Action:
+
+- Do check the cycle's other branches (`git show <main-branch>:<file>`) for the function definition; the function definition was on the other lineage but not in the merge result because the merge resolved differently for the .cpp file vs the .h. Copy the function definition verbatim from the lineage that had it (search via `git grep 'function_signature' <main-branch>`) and add it to the merged file at the right class scope. Verified 2026-06-12 (Stage 14 Path B): `server_routes::handle_count_tokens` was declared in `server-context.h:152` (from upstream merge) and referenced at `server-context.cpp:5515, 5576, 5630` (from upstream merge) but the definition was in master's `server-context.cpp:6785` which was unreachable from caveman. Adding the definition verbatim from master resolved 13 link errors at once. Don't try to inline the function or write a minimal stub; the cycle's body has the full logic for Anthropic/OAI/OAI-Resp dispatch that the call sites assume.
+
+## Improvement: Cross-merge function signature mismatches
+
+Condition:
+
+- When a cross-merge integration produces compile errors C2065 (undeclared identifier) inside a function body for a parameter that exists in the upstream signature but not the local lineage's signature, even though the body was applied from upstream
+
+Action:
+
+- Do check whether the function signature comes from the local lineage (kept by `-X ours`) while the body was applied from upstream. The signature kept the 3-arg form, but the body references a 4th parameter (e.g., `is_placeholder`). Add the missing parameter to the local signature and update call sites to pass the new value. Verified 2026-06-12 (Stage 14 Path B): `process_mtmd_prompt(mtmd_context*, std::string, std::vector<raw_buffer>)` was kept from caveman, but upstream's body referenced `is_placeholder`; adding the `bool is_placeholder` parameter to the local signature and updating the call site resolved C2065/C2672/C2668 errors. Don't try to make the body not reference the new parameter; the body is correct, the signature is the local artifact.
+
+## Improvement: Cross-merge rejects caveman's degraded() fallback
+
+Condition:
+
+- When a cross-merge integration's tests fail with an assertion that the helper returned true when the test expected false, and the production code path includes a `degraded() || !boundaries_native` fallback that the upstream branch doesn't have
+
+Action:
+
+- Do remove the fallback from the merged code to match upstream's strict check. The fallback was added by the local lineage to support a specific case (probably non-native or degraded metadata) but it makes the strict boundary check not strict. Verified 2026-06-12 (Stage 14 Path B): the test `test_stage9_checkpoint_boundary_metadata` expected `debug_admit_checkpoint_for_tests(64, 0, 64, true)` to return false for a bad_span metadata; the merged code returned true because `degraded() || !boundaries_native` was true (the metadata was neither, but the fallback fired anyway) and the descriptor's boundary_checksum was set to the GOOD span_checksum for the descriptor's span, bypassing the boundary mismatch. Removing the fallback from both `validate_checkpoint_descriptor_metadata` and `attach_checkpoint_payload` made the test pass. Don't try to make the test match the fallback; the test is the cycle's expected behavior and the fallback is the local artifact.
+
 ## Improvement: Test-results review gate classification
 
 Condition:
