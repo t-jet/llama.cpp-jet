@@ -203,6 +203,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 18a: Stage 12 operational details](./cache-handling-test-plan/part-18a-stage12-operational.md)
 - [Part 19: Stage 12 test automation](./cache-handling-test-plan/part-19-stage12-test-automation.md)
 - [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
+- [Part 24: test output folder convention](./cache-handling-test-plan/part-24-test-output-folder-convention.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -248,6 +249,19 @@ Reusable PowerShell scripts live in [cache-handling-test-scripts/](./cache-handl
 
 See [cache-handling-test-scripts/README.md](./cache-handling-test-scripts/README.md) for usage, parameters, and maintenance notes.
 
+## Test output folder convention
+
+Two folders serve different purposes for test execution outputs:
+
+- [._design_docs/.test_reports/](./.test_reports/) holds **durable** test reports. Only Markdown files live here: `test-report-YYYYMMDD-NN.md`, `pre-merge-report-YYYYMMDD-NN.md`, `merge-log-YYYYMMDD-NN.md`, and their `-developer-review.md`, `-architect-review.md`, `-fixes.md`, `-part02-testfix.md` variants. The `.gitignore` whitelists only `*.md` files. Tracked in git.
+- [._test_output/](../_test_output/) holds **non-durable** test outputs: logs, build artifacts, ctest logs, coverage reports, k6 logs, pytest logs, scripts, k6 results, benchmark outputs, stress harness outputs, MTP and jinja run outputs, and per-test subfolders such as `S12-S01-...`, `bench-s12-b01-...`, `coverage-run-...`, `test-report-YYYYMMDD-NN-artifacts/`. The `.gitignore` is `**/*`. Local only; delete when no longer needed.
+
+**Rule:** Markdown reports go to `._design_docs/.test_reports/test-report-YYYYMMDD-NN.md` and are committed. Everything else goes to `._test_output/` (or a subfolder such as `._test_output/<test-run-id>/`) and is not committed.
+
+**Enforcement:** A pre-commit hook or CI lint can run `Get-ChildItem ._design_docs/.test_reports -File | Where-Object { $_.Name -notmatch '\.md$' -and $_.Name -ne '.gitignore' }` and fail if the result is non-empty.
+
+See [Part 24](./cache-handling-test-plan/part-24-test-output-folder-convention.md) for rationale, examples, and the move procedure for files that land in the wrong folder.
+
 ## Test execution reports
 
 For each execution session, create a new report in [._design_docs/.test_reports/](./.test_reports/) named:
@@ -269,3 +283,5 @@ Each report must include:
 - reproducible bug reports for failures
 
 Use [Part 7](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md) for the detailed report checklist.
+
+See [Test output folder convention](#test-output-folder-convention) above for where to put logs, build outputs, ctest outputs, and other non-durable content. The `.test_reports/` folder is for Markdown reports only.
