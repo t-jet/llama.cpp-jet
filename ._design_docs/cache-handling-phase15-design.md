@@ -177,12 +177,18 @@ responses.
 - [Part 5: benchmark report](cache-handling-phase15-design/part-05-benchmark-report.md)
 - [Part 6: observability, testability, and risks](cache-handling-phase15-design/part-06-observability-testability-risks.md)
 - [Part 7: exclusions, traceability, and handoff](cache-handling-phase15-design/part-07-exclusions-traceability-and-handoff.md)
+- [Part 8: design review gate 01](cache-handling-phase15-design/part-08-design-review-gate-01.md) (Architect PASS 2026-06-12, 0 BLOCKING, 1 non-blocking)
+- [Part 9: post-closure follow-up — chat-path prompt-span boundary](cache-handling-phase15-design/part-09-post-closure-chat-path-prompt-boundary.md) (2026-06-16, Option A)
 
 The entry doc stays under the 300-line cap. Content that would push
 the entry past 300 lines lives in the part files. Part 1 is omitted
 because scope, prerequisites, assumptions, and decisions fit in the
 entry doc. Part 8 is the Architect independent design review and is
-authored by a fresh Architect session, not by this one.
+authored by a fresh Architect session, not by this one. Part 9 is a
+post-closure follow-up (2026-06-16) that adds a prompt-span boundary
+to the chat path so hybrid cache checkpoints on the MTP /v1/chat/completions
+path can attach; it is the third-diff extension referenced in the
+Stage 15 B05/B06 fix review INFO 1.
 
 ## Current gate
 

@@ -16,3 +16,4 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 6: Stage 5 Draft Context Modes and Pairing](./cache-handling-architecture/part-06-stage-5-draft-context-modes-and-pairing.md)
 - [Part 7: Speculative decode-batch cap invariant](./cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md)
 - [Part 8: Stage 13 Endpoint Compatibility Corrections](./cache-handling-architecture/part-08-stage-13-endpoint-compatibility-corrections.md)
+- [Part 9: Chat-Path Prompt-Span Boundary Invariant](./cache-handling-architecture/part-09-chat-path-prompt-boundary-invariant.md) (post-closure follow-up, 2026-06-16)

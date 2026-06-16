@@ -4483,6 +4483,20 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
         }
     }
 
+    // Stage 15 post-closure follow-up: emit a prompt-span boundary whose
+    // token_end equals the full prompt size so the first end-of-prefill
+    // hybrid cache checkpoint can attach. Per-message boundaries above
+    // cover message spans only; the assistant role header at the end of
+    // the rendered prompt has no boundary without this. The fallback path
+    // in cache_metadata_for_request emits the same shape when
+    // has_boundaries() is false; this normalizes the chat path. See
+    // ._design_docs/cache-handling-phase15-design/part-09-post-closure-chat-path-prompt-boundary.md
+    // and ._design_docs/cache-handling-architecture/part-09-chat-path-prompt-boundary-invariant.md.
+    if (!messages.empty()) {
+        const uint64_t prompt_checksum = cache_metadata_checksum(tokens, 0, n_prompt_tokens);
+        metadata.add_span(prompt_boundary::MESSAGE_END, 0, n_prompt_tokens, prompt_checksum, false, "prompt");
+    }
+
     return metadata;
 }
 

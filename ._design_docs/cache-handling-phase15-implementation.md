@@ -1,6 +1,6 @@
 # Stage 15 implementation log: full test suite validation, bug-fix loop, and benchmark report
 
-Status: Implementation-plan gate PASS, 2026-06-12; Implementation review gate PASS, 2026-06-12; Test-plan gate PASS, 2026-06-12; Test execution sub-1 PASS 2026-06-12; Benchmark B01-B08 PASS 2026-06-13 (B05/B06 fixed via checkpoint boundary search relaxation; V2 fixture 29/29 restores p50=913ms p99=981ms; see [./.test_reports/stage15-benchmark-20260613-03.md](./.test_reports/stage15-benchmark-20260613-03.md)); Architect fix review PASS 2026-06-13 (part-07, 0 BLOCKING); Manager final closure 2026-06-13 (all 8 benchmark rows PASS; S01..S08 and L01..L03 DEFERRED-OUT-OF-SCOPE-FOR-SESSION; code change in tools/server/server-cache-hybrid.cpp)
+Status: Implementation-plan gate PASS, 2026-06-12; Implementation review gate PASS, 2026-06-12; Test-plan gate PASS, 2026-06-12; Test execution sub-1 PASS 2026-06-12; Benchmark B01-B08 PASS 2026-06-13 (B05/B06 fixed via checkpoint boundary search relaxation; V2 fixture 29/29 restores p50=913ms p99=981ms; see [./.test_reports/stage15-benchmark-20260613-03.md](./.test_reports/stage15-benchmark-20260613-03.md)); Architect fix review PASS 2026-06-13 (part-07, 0 BLOCKING); Manager final closure 2026-06-13 (all 8 benchmark rows PASS; S01..S08 and L01..L03 DEFERRED-OUT-OF-SCOPE-FOR-SESSION; code change in tools/server/server-cache-hybrid.cpp); Post-closure follow-up applied 2026-06-16 (chat-path prompt-span boundary, third-diff extension referenced in part-07 INFO 1; see design [part-09](cache-handling-phase15-design/part-09-post-closure-chat-path-prompt-boundary.md), architecture [part-09](cache-handling-architecture/part-09-chat-path-prompt-boundary-invariant.md), implementation [part-08](cache-handling-phase15-implementation/part-08-stage15-post-closure-chat-path-impl.md); code change in tools/server/server-context.cpp; Architect re-review pending).
 Date: 2026-06-13
 Stage: 15 (Full Test Suite Validation, Bug-Fix Loop, and Benchmark Report)
 Prerequisite Stages: 1-14 (CLOSED). Stage 14 closed by user direction on
@@ -137,9 +137,10 @@ closure decision.
 - [part-02: evidence plan, risk table, and per-category capture](cache-handling-phase15-implementation/part-02-evidence-plan-and-risks.md)
 - [part-03: Manager decision log (D1..D5 from design, P1..P5 from plan, open P6+)](cache-handling-phase15-implementation/part-03-known-decisions.md)
 - [part-04: prerequisites, host tooling, fixtures, and the V2 driver](cache-handling-phase15-implementation/part-04-prerequisites-and-host-tooling.md)
-- part-05: Architect plan review gate 01 - created by a fresh Architect
-  session after the plan is otherwise complete. Not authored by this
-  Developer session.
+- [part-05: Architect plan review gate 01](cache-handling-phase15-implementation/part-05-architect-plan-review-gate-01.md) (Architect PASS 2026-06-12, 0 BLOCKING, 1 non-blocking)
+- [part-06: Architect implementation review gate 01](cache-handling-phase15-implementation/part-06-architect-implementation-review-gate-01.md) (Architect PASS 2026-06-12, 0 BLOCKING, 1 non-blocking)
+- [part-07: B05/B06 fix review](cache-handling-phase15-implementation/part-07-b05-b06-fix-review.md) (Architect PASS 2026-06-13, 0 BLOCKING, 2 INFO)
+- [part-08: post-closure follow-up — chat-path prompt-span boundary](cache-handling-phase15-implementation/part-08-stage15-post-closure-chat-path-impl.md) (2026-06-16, Option A; Architect re-review pending)
 
 The entry doc stays under the 300-line cap. Content that would push the
 entry past 300 lines lives in the part files.
@@ -164,6 +165,24 @@ B02/B05/B06 reclassified NOT-IN-SCOPE for the MTP fixture per Manager decision 1
 S01..S08 and L01..L03 DEFERRED-OUT-OF-SCOPE-FOR-SESSION per Manager decision 2; future stage to run the stress and longrun rows in a fresh session per the part-25 execution order.
 
 Stage 15 is operational, not a feature. This log records the operational contract and the closure state.
+
+## Post-closure follow-up (2026-06-16)
+
+The 2026-06-16 model log analysis surfaced that the MTP
+/v1/chat/completions path still produces
+`hybrid cache: checkpoint admission skipped (missing checkpoint
+boundary metadata)` warnings on every save, even with the Stage
+15 two-diff fix in place. The exact-blob path is unaffected;
+the cache works via the exact-blob restore, but the checkpoint
+optimization is silently disabled. Root cause, fix (Option A),
+affected file, verification, and Manager follow-up are recorded
+in [part-09](cache-handling-phase15-implementation/part-09-stage15-post-closure-followup-summary.md).
+The detailed code-change record is in
+[part-08](cache-handling-phase15-implementation/part-08-stage15-post-closure-chat-path-impl.md).
+The design is in
+[design part-09](cache-handling-phase15-design/part-09-post-closure-chat-path-prompt-boundary.md)
+and the architecture-level invariant is in
+[architecture part-09](cache-handling-architecture/part-09-chat-path-prompt-boundary-invariant.md).
 
 ## Pre-execution readiness evidence (Step 1-3)
 
