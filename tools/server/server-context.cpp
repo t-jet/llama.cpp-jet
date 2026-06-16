@@ -4458,6 +4458,21 @@ static prepared_prompt_metadata cache_metadata_from_chat_messages(
         metadata.add_span(prompt_boundary::MESSAGE_END, token_start, token_end, checksum, protect, role);
         fallback_token = token_end;
 
+        // Stage 15 post-closure follow-up (expanded 2026-06-16, F-16-TR-02):
+        // emit a [0, token_end] prompt-span boundary so the MTP
+        // speculative-decoding internal checkpoint at this token
+        // position can attach. The per-message boundaries above have
+        // token_start == message_start, so the strict validator's
+        // token_start check (when descriptor.token_span_start == 0) in
+        // validate_checkpoint_descriptor_metadata rejects them. The new
+        // boundary at [0, token_end] has token_start == 0, matching
+        // descriptor.token_span_start == 0 set by
+        // attach_checkpoint_payload. End-of-prefill checkpoint is
+        // covered by the [0, n_prompt_tokens] boundary at the bottom
+        // of this function.
+        const uint64_t msg_end_checksum = cache_metadata_checksum(tokens, 0, token_end);
+        metadata.add_span(prompt_boundary::MESSAGE_END, 0, token_end, msg_end_checksum, false, "prompt");
+
         if (message.contains("tool_calls") && message.at("tool_calls").is_array()) {
             for (const auto & tool_call : message.at("tool_calls")) {
                 const json fn = tool_call.contains("function") ? tool_call.at("function") : json::object();

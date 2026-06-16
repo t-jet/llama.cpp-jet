@@ -492,3 +492,41 @@ Condition:
 
 Action:
 - Don't trust exit 0 from git diff --check <untracked-path> as proof the file is whitespace-clean. Untracked files are not inspected by plain git diff --check, so even a CRLF-only new file returns exit 0. After the file is LF-only, run git diff --check --no-index /dev/null <path> to inspect the actual content; zero lines of warning output and exit 1 (differ) is the clean state. Combine with byte-level CR count check via [System.IO.File]::ReadAllBytes to be certain.
+
+
+## Improvement: PowerShell automatic variables block PID/args/Host reassignment
+
+Condition:
+- A QA session needs to store a server process PID (from Start-Process -PassThru) or pass CLI argument arrays in a variable named $PID or $args (lowercase or mixed case)
+
+Action:
+- Do not use $PID, $pid (case-insensitive automatic variable for current session process ID), $args, $input, $Host, $HOME, $PWD, or any other PowerShell automatic variable name. These are read-only or constant. `Stop-Process -Id $PID` for a server PID variable named $PID throws `WriteError: Cannot overwrite variable PID because it is read-only or constant.` Use explicit names like $ServerPid, $ServerArgs, $ServerHome. Per existing memory item `avoid automatic-variable names in PowerShell harnesses`, the same applies to $args for CLI argument arrays.
+
+## Improvement: Test-Path inconsistency on dot-prefixed paths
+
+Condition:
+- A QA session accesses a dot-prefixed path like `D:\path\._test_output\foo\bar.log` and `Test-Path` returns `False` for an artifact that `Get-ChildItem` (or a previous `Start-Process -RedirectStandardOutput`) clearly produced. The `New-Item -ItemType Directory -Force -Path "._test_output\foo"` succeeded but `Test-Path` on the new dir returns `False` until the path is accessed again. `Get-ChildItem` of the parent dir shows the new dir IS present.
+
+Action:
+- Do not trust `Test-Path` alone for dot-prefixed paths on Windows + PowerShell. PowerShell path resolver may normalize the leading dot and resolve to a sibling `_test_output` (no dot) which is a different physical directory. Use `Get-ChildItem -LiteralPath "D:\path\._test_output" -Force | Where-Object { $_.Name -eq "foo" }` for canonical existence check. If a new file is needed, write it with `Out-File -FilePath $absolutePath` (where `$absolutePath` is built with `Join-Path` from `Get-Location`) and verify with `Get-ChildItem -LiteralPath $absolutePath` immediately after. Per existing memory item `verify create_file path against near-duplicate dir names`, the same applies: after `create_file` or `Out-File` to a dot-prefixed path, verify with `Get-ChildItem -LiteralPath` using the full absolute path, not `Test-Path`.
+
+## Improvement: Manager decision D-NN-M reclassification may not need invocation when fix actually succeeds
+
+Condition:
+- A Manager reclassification decision (e.g., D-16-1: reclassify the n_tokens=11 MTP test case to expected-FAIL because the matching loop requires `token_end <= descriptor.token_span_end` and the system prompt-span at ~12 does not satisfy `<= 11`) is recorded in the test brief as "mandatory, apply if FAIL at n_tokens=11". The fix is applied and the actual evidence shows the user-message prompt-span boundary at exactly [0, 11] satisfies `<= 11` and the matching loop succeeds.
+
+Action:
+- Do not apply a Manager reclassification to a row that did not FAIL. Record explicitly in the test report D-NN-M application section: "no row FAILed at the reclassified position; reclassification not invoked; the actual evidence shows the fix succeeds at that position because the per-message prompt-span boundary at exactly [0, MTP n_tokens] satisfies the relaxed condition". Cite the specific boundary that satisfies the condition (e.g., user MESSAGE_END at [2, 11] with token_end=11, metadata="prompt"). This documents the Manager decision was preemptive and prevents the report from looking like it ignored a mandatory directive. If the fix had failed, document the reclassification in the verdict column and cross-reference the Manager decision row.
+## Improvement: test-output folder name must match the test report ID
+
+Condition:
+- A QA test-execution session creates a subfolder under ._test_output/ to hold build logs, ctest output, and benchmark artifacts for a test run, and the run is associated with a durable test report file
+
+Action:
+- Do name the subfolder 	est-report-YYYYMMDD-NN-artifacts/ (or 	est-report-YYYYMMDD-NN-artifacts/<sub>/ for nested categories) where YYYYMMDD-NN matches the test report filename 	est-report-YYYYMMDD-NN.md. This is the part-24 convention: the same ID ties the report to its supporting artifacts
+- Do not use generic suffixes like -rerun, -rerun2, -rerun3a, -retry, or -fix2; these break the convention and make it impossible to find the artifacts for a given report
+- Do merge multiple intermediate folders from successive reruns into the same 	est-report-YYYYMMDD-NN-artifacts/ folder rather than creating -rerunN variants; the artifacts from rerun 1, rerun 2, and rerun 3 all support the same report
+- Do not commit anything under ._test_output/ (it is gitignored); but do ensure the folder name on disk matches the report ID so a reader can find the artifacts
+- When the second exec reuses the first exec's folder (because the build was not re-cleaned), record this explicitly in the second report's evidence column with a note like "shared with first exec"
+- Don't reference old -rerun folder names in test-report evidence columns; update them when the convention is applied
+

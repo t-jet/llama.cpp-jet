@@ -88,7 +88,7 @@ Condition:
 
 Action:
 
-- Do convert to LF-only with `[System.IO.File]::WriteAllText` UTF8-no-BOM. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
+- Do convert to LF-only by reading raw bytes, filtering out `0x0D`, and writing with `[System.IO.File]::WriteAllBytes` (or `[System.IO.File]::WriteAllText` with explicit UTF8-no-BOM but only AFTER a byte-level CR strip). Do NOT trust `ReadAllText` + `WriteAllText` alone; on Windows the read preserves CR and the write preserves CR. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't trust `Measure-Object -Line` for line count; it counts only non-empty lines and can return a number much smaller than actual line count (e.g. 60 for an 86-line file). Do use `(Get-Content path).Count` or LF byte count for true line count. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
 
 ## Improvement: Design correction vs new stage for post-closure follow-ups
 
@@ -549,3 +549,67 @@ Condition:
 Action:
 
 - Do verify each R-item claim against actual code in touched file, not just brief's interpretation. Do distinguish overall claim from specific code behavior claim. Do read touched function's if/else branches to confirm which case triggers which behavior. Do record wording imprecision as INFO, not BLOCKING, when overall claim holds but specific code behavior narrower than brief describes. Don't reject fix on wording imprecision alone. Don't accept R-item as PASS without checking actual code path.
+
+## Improvement: Post-closure follow-up design review scope and dual-doc traceability
+
+Condition:
+- Reviewing a post-closure follow-up design correction (not full stage re-review) where correction introduces both a new design part (stage-scoped) and a new architecture-level invariant (cross-stage); task brief says review correction only
+
+Action:
+- Do write review verdict in new part file under the new stage's design directory (e.g., cache-handling-phaseN-design/part-01-design-review-gate-01.md), not in the closed stage's part file. Do follow upstream-merge-guide part-04 section 5 step 2 placement. Do explicitly state scope rule in review file (correction only, not full closed-stage re-review). Do list the 10+ files reviewed in a scope table.
+- Do include a separate Traceability section mapping each design claim to BOTH the stage design part AND the new architecture part line refs. Do not merge stage and architecture traceability into one cell.
+- Do verify checksum function equivalence by reading both implementations when design says "same function" and code uses two byte-for-byte identical functions in different files (e.g., cache_metadata_checksum vs cache_token_span_checksum). Do record as non-blocking observation when equivalence holds but design wording imprecise.
+- Do include Manager-decision-impact section when correction affects a prior Manager closure decision (e.g., reclassification of rows). Do recommend but do not make the decision. Do not fold the decision into the review verdict.
+- Do not touch closed-stage design, implementation, test plan, or test report files. Do not run builds, tests, coverage, or k6. Do not load other agents' skills or memory. Do not re-open closed stage's design gate.
+- Don't accept PASS without verifying the architecture-level invariant is correctly scoped to cross-stage applicability (architecture part's Cross-stage applicability section enumerates affected scopes) and the stage-level design correction is correctly scoped to one function or one file.
+- Don't leave manager gate decision column at pending after PASS without recording the next owner in the Handoff section.
+
+## Improvement: Variable scope in restructuring diffs
+
+Condition:
+
+- Reviewing a code diff that restructures control flow (e.g., replacing a `bool flag` pattern with a `pointer-or-null` pattern) and the diff removes the original flag declaration but keeps an assignment to the removed variable
+
+Action:
+
+- Do grep the diff for every variable name in the new code. Do verify each assignment and read has a matching declaration in scope (local, member, or parameter). Do flag the missed variable deletion as BLOCKING compile error. Do not trust the Developer's "Status: applied" claim without checking the code. Do check the touched function's full scope including any helper lambda or nested block. Don't accept "looks fine" without grep verification of every variable name.
+
+## Improvement: Brief file-size claim verification
+
+Condition:
+
+- Reviewing a doc change where the brief claims a file is "at 300 lines (cap)" or any specific line count, and the brief uses the count to claim cap compliance
+
+Action:
+
+- Do verify the actual line count with `(Get-Content path).Count` before recording the cap check. Do flag the discrepancy as non-blocking finding when the file exceeds the cap. Do not trust the brief's count. Do record the actual count in the checklist evidence column. Don't accept "at the cap" as PASS without verification.
+
+## Improvement: Code review for restructuring-diffs must check all surviving variable references
+
+Condition:
+
+- Reviewing a code change that replaces a `bool flag` pattern with a `pointer-or-null` pattern in a function, and the diff has both removed lines (declaration, early assignment, post-loop fallback) and added lines (new pointer variable, if-else branches)
+
+Action:
+
+- Do scan the diff for the original variable name after the `-` removal lines. Do check the `+` added lines for any assignment to the removed variable name. Do flag the surviving assignment as BLOCKING compile error. Do not assume the Developer cleaned up all references. Do verify by reading the actual file, not just the diff hunks. Don't accept the diff hunks alone; the actual file state may have survived lines the diff doesn't show cleanly.
+
+## Improvement: Bug-fix review scope must verify test report root cause against code
+
+Condition:
+
+- Reviewing a bug-fix where the test report (FAIL) includes a root cause analysis that claims a specific code path or loop behavior as the reason for the failure
+
+Action:
+
+- Do verify the test report's root cause claim against the actual code in the touched file (read the function, trace the branches). Do record wording imprecision as non-blocking finding when the test report's overall claim holds but the specific code-behavior claim is slightly off. Do not let test report root cause analysis block the review if the bug-fix code itself is correct. Do not try to debug the original test failure during the bug-fix review; focus on whether the new fix is correct. Don't accept test report root cause as gospel; don't reject fix on test report wording alone.
+
+## Improvement: Brief R-item claim about matching loop first-match behavior
+
+Condition:
+
+- Bug-fix review brief says a new boundary will be picked first by a matching loop, but the loop iterates by token_end and picks the first boundary with the matching token_end regardless of whether it's the new boundary or a pre-existing per-message boundary
+
+Action:
+
+- Do trace the actual matching loop iteration order. Do record the brief's wording as non-blocking finding when the overall fix works (the new boundary is added to the list and is reachable) but the specific first-match claim is slightly off. Do verify the fix works end-to-end by checking the strict validator's re-iteration of boundaries after the matching loop sets descriptor fields. Don't reject fix on first-match wording imprecision alone when end-to-end behavior correct.

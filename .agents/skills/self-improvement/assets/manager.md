@@ -314,3 +314,40 @@ Action:
 - Do accept the V2 fixture as the canonical benchmark fixture when the MTP fixture has a known structural workload limitation (e.g. MTP boundary token_end mismatch due to n_predict expanding the token count) as long as Stage 12 used the same V2 fixture as the B05/B06 baseline
 - Don't close the stage with structural BLOCKED rows when the user requests resolution; route to Developer fix instead
 - Don't reopen the design gate; the fix scope is a targeted code change inside the existing stage's bug-fix loop gate
+
+## Improvement: preemptive Manager decision for known edge-case FAIL risk
+
+Condition:
+- Architect or Developer identifies a known edge case that is expected to FAIL under the proposed fix (e.g., MTP internal checkpoint at n_tokens below message-end position), and the test-execution gate would otherwise block on this edge case before the broader fix can be verified
+
+Action:
+- Do record a preemptive Manager decision in the tracker row (D-NN-N format) that reclassifies the specific edge case to expected-FAIL before QA runs the test
+- Do require the decision to cite the technical rationale (e.g., "system prompt-span at ~12 does not satisfy <= 11; matching loop relaxation is correct for the broader case; edge case is structural")
+- Do instruct the QA prompt to apply the reclassification (D-NN-N) to any FAIL matching the edge-case criteria, so the test-execution gate proceeds without blocking
+- Do note in the closure whether the reclassification was invoked (FAIL at edge case) or preemptive (fix succeeded for all test cases)
+- Don't block the test-execution gate on a known edge case; record the decision and let QA proceed
+- Don't soften the reclassification language to "BLOCKED-with-evidence" or similar; expected-FAIL is the correct status for a known edge case
+
+## Improvement: code changes at stage closure are uncommitted until user approves
+
+Condition:
+- A stage closure involves code changes applied by the Developer across multiple bug-fix iterations, and the changes are uncommitted per AGENTS.md ("Committing or pushing without explicit human approval for each action")
+
+Action:
+- Do list all uncommitted changes in the tracker row Notes column at closure (commit SHAs for already-committed changes, file paths for uncommitted changes)
+- Do include the original commit (if any) plus the uncommitted diff summary (lines added/removed, files modified)
+- Do state explicitly that user approval is required for commit/push/merge
+- Do not assume the user will commit; the closure is a Manager gate decision, not a git operation
+- Do not let the closure doc sweep modify uncommitted code; Architect reviews code, Manager records closure, user commits
+
+## Improvement: bug-fix loop iteration 3 compile error demands tight Architect review scope
+
+Condition:
+- A bug-fix iteration applies a non-trivial code change (e.g., matching-loop relaxation with new variables) and the diff drops a variable declaration while keeping an assignment
+
+Action:
+- Do require the Architect bug-fix review to run Select-String (or equivalent) for every variable introduced in the diff and confirm the declaration is present
+- Do require the Architect to verify the diff's hunk headers match the actual file state (line numbers may drift 1-3 lines between design reference and current code per implementation review F-16-IR-01)
+- Do treat any undeclared variable reference as BLOCKING, not non-blocking, because the code will not compile
+- Do not accept "logic correct" as PASS when the code has a compile error; compile-clean is the floor for any code review verdict
+

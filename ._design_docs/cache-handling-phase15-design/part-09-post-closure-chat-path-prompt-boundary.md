@@ -1,7 +1,7 @@
 # Stage 15 design part 9: post-closure follow-up — chat-path prompt-span boundary
 
-Status: design correction, 2026-06-16
-Stage: 15 (post-closure follow-up)
+Status: design correction + bug-fix expansion, 2026-06-16 (F-16-TR-06 matching-loop relaxation appended 2026-06-16)
+Stage: 15 (post-closure follow-up), F-16-TR-02 expansion
 Date: 2026-06-16
 Source issue: model log analysis on 2026-06-16
   (`d:\source\llama.cpp-jet\._analysis\model_log.txt`,
@@ -216,3 +216,139 @@ needs to be reversed.
 
 The test plan follow-up picks up the proposed test plan rows
 TP-15-PC1..TP-15-PC7.
+
+## Bug-fix correction (2026-06-16)
+
+Test execution
+[test-report-20260616-01.md](../.test_reports/test-report-20260616-01.md)
+FAILed. All 7 operational rows (TP-15-PC1..PC7) FAILed on the MTP
+fixture. Root cause F-16-TR-02: the MTP speculative-decoding
+internal context checkpoint is created at position 10 with
+`n_tokens = 11` (a speculative step boundary at end of the user
+message, not end-of-prefill). The Option A single-boundary fix
+emits a `[0, n_prompt_tokens]` boundary (= 61 in the test
+prompt) which does not match the MTP internal checkpoint's
+`n_tokens = 11`. The strict validator at
+`server-cache-hybrid.cpp:2984` returns
+`missing checkpoint boundary metadata`.
+
+Model log evidence on a longer user workload (Qwen3.6-27B-MTP,
+`._analysis/model_log.txt`) shows the MTP path creates checkpoints
+at growing positions: `n_tokens = 9, 17, 70, 196, 709, 60959,
+61269, 11829, 12309, 21141, 21525, 22033, 22929, 23313, 23637, ...`.
+The first checkpoint position grows with prompt length and is
+not at fixed `min spacing` intervals. For the failing test prompt
+(61 tokens, 3 messages), the first MTP checkpoint is at
+`n_tokens = 11` which is the end of the user message.
+
+### Expanded fix: per-checkpoint prompt-span boundaries
+
+The Option A single-boundary fix is insufficient. The fix must emit
+a per-checkpoint prompt-span boundary for every position the MTP
+path can create a checkpoint at, not just at end of prefill. For
+the chat path, the per-message loop already iterates all messages
+and computes `token_end` for each. Adding a `[0, token_end]`
+boundary inside the loop emits one boundary per message end
+position, which covers:
+
+- The first MTP internal checkpoint at end of user message
+  (`n_tokens = 11` in the test prompt, matches the user message
+  end position).
+- Any MTP internal checkpoint that happens to align with a message
+  end position.
+- The end-of-prefill checkpoint (`n_tokens = n_prompt_tokens`),
+  covered by the last message's `[0, token_end]` boundary
+  (the assistant message ends at `n_prompt_tokens` for
+  standard chat templates).
+
+The existing `[0, n_prompt_tokens]` end-of-prompt boundary at the
+bottom of the function is kept as a safety net for the case where
+no message ends at `n_prompt_tokens` (e.g., system + user only,
+no assistant message). The matching loop at
+`server-cache-hybrid.cpp:3066-3078` picks the first boundary
+whose `token_end == descriptor.token_span_end`; the per-message
+boundaries appear earlier in the list than the end-of-prompt
+boundary, so they take precedence.
+
+The per-message boundary emission adds 1 boundary per message to
+the metadata. For typical chat-completion requests (1-5 messages),
+this is 1-5 additional boundaries. For empty `messages`, the
+`!messages.empty()` guard still applies (the loop is a no-op).
+
+### Code change (F-16-TR-02 fix)
+
+In `cache_metadata_from_chat_messages` (server-context.cpp:4383),
+add a new `[0, token_end]` `MESSAGE_END` boundary inside the
+per-message loop, right after the existing `MESSAGE_END`
+boundary. 15-line insertion, 0 deletions. The new boundary has
+`metadata = "prompt"`, `protect = false`, and a checksum
+computed over `[0, token_end]` via `cache_metadata_checksum`.
+
+### Why per-message instead of pre-computing all MTP positions
+
+The MTP path's checkpoint positions are not predictable from the
+chat structure alone. The model log shows positions that grow
+with prompt length and follow a non-linear pattern (9, 17, 70,
+196, 709, ...). Pre-computing these positions in the metadata
+function would require duplicating the MTP speculative-decoding
+internal checkpoint creation logic, which is fragile and
+out-of-scope for a chat-path metadata function.
+
+The per-message approach covers the test case (61-token prompt,
+first MTP checkpoint at end of user message) and any future case
+where the MTP creates a checkpoint at a message end position.
+For longer prompts where the MTP creates checkpoints at
+non-message-end positions, the same F-16-TR-02 issue would
+recur; that is a separate Manager decision (revisit the
+strict-validator matching loop per Option B in the test report).
+
+### Updated traceability
+
+| Source | Link (updated 2026-06-16) |
+| --- | --- |
+| Code change (per-message boundary) | `tools/server/server-context.cpp:cache_metadata_from_chat_messages` lines 4473-4483 (new 11-line block) |
+| Code change (end-of-prompt boundary, kept) | `tools/server/server-context.cpp:cache_metadata_from_chat_messages` lines 4502-4504 (unchanged from 2026-06-16 original fix) |
+| Test report (FAIL) | `._design_docs/.test_reports/test-report-20260616-01.md` |
+| Test fixes file (F-16-TR-02 detail) | `._design_docs/.test_reports/test-report-20260616-01-fixes.md` |
+| Implementation evidence (F-16-TR-02 fix) | `._design_docs/cache-handling-phase16-implementation/part-03-bugfix-mtp-internal-checkpoint.md` |
+
+## Bug-fix correction iteration 2 (F-16-TR-06, 2026-06-16)
+
+Test execution
+[test-report-20260616-02.md](../.test_reports/test-report-20260616-02.md)
+FAILed again after F-16-TR-02. The matching loop at
+`server-cache-hybrid.cpp:3066-3081` still rejects because the
+MTP checkpoint position (`n_tokens=11`) does not align with any
+chat-path message boundary. The QA hypothesis that the user
+message ends at token 11 is wrong: the test prompt's user
+message is the ~50-token "Explain the major architectural
+differences..." prompt, so the system prompt-span boundary has
+`token_end` ~12 and the user prompt-span boundary has
+`token_end` ~62; neither equals 11. MTP positions follow
+the model's internal speculative-decoding state.
+
+### F-16-TR-06 fix: relax the matching loop for "prompt" boundaries
+
+Relax the matching loop in
+`server-cache-hybrid.cpp:attach_checkpoint_payload` and the
+strict validator in `validate_checkpoint_descriptor_metadata`
+to pick the largest boundary with
+`token_end <= descriptor.token_span_end`, restricted to
+boundaries whose `metadata == "prompt"`. The per-message
+prompt-span boundaries (F-16-TR-02) and the end-of-prompt
+boundary all have `metadata = "prompt"`. For non-prompt
+boundaries (e.g., test fixtures with `metadata = "msg-1"`) the
+strict `token_end == descriptor.token_span_end` match is
+preserved, so test_stage9 holds. The descriptor's
+`boundary_checksum` is recomputed over the descriptor's span
+and the strict validator's checksum recompute uses the same
+span.
+
+### Updated traceability (F-16-TR-06)
+
+| Source | Link |
+| --- | --- |
+| Code change (matching-loop + strict-validator relaxation) | `tools/server/server-cache-hybrid.cpp:attach_checkpoint_payload` and `validate_checkpoint_descriptor_metadata` |
+| Test report (FAIL iteration 2) | `._design_docs/.test_reports/test-report-20260616-02.md` |
+| Bug-fix loop file (F-16-TR-06 detail) | `._design_docs/.test_reports/test-report-20260616-02-fixes.md` |
+| Implementation evidence (F-16-TR-06 fix) | `._design_docs/cache-handling-phase16-implementation/part-05-bugfix-iteration-2-mtp-matching.md` |
