@@ -226,6 +226,30 @@ Action:
 - Do not invent rows for stages that are not yet planned; pending tasks get a fresh row with Status `pending` and a stub Title
 - Don't duplicate tracker content in the architecture, design, or implementation entry docs; the tracker is the summary, the entry docs are the detail
 
+## Improvement: reconcile doc status against git history before answering "what remains"
+
+Condition:
+- User asks "what is remaining" or "what is the current state" for any stage, and the durable docs (entry doc header, implementation log header, tracker row) might be stale relative to the commit history
+
+Action:
+- Do run `git log --oneline -20 -- <entry-doc>` and `git log --oneline -10 work-branch` before answering, and surface the contradiction explicitly in the handoff
+- Do verify merge commit shape with `git rev-list --parents -n 1 <sha>` for any commit that claims to be a merge
+- Do distinguish two views in the answer: "per documentation" and "per git history", and list the doc rows that need updating as a separate "documentation reconciliation" item
+- Do flag any plan-vs-actual path drift (e.g. plan said Path C, actual work used Path B) as a Manager correction decision, not as a product bug
+- Don't treat the latest commit message as ground truth; cross-check with the durable doc that records the Manager decision for that path
+- Don't silently update the stale doc rows in the same turn; ask the user whether to delegate doc reconciliation or proceed to the next gate
+
+## Improvement: distinguish durable from cycle-scoped test artifacts
+
+Condition:
+- Stage 14 (or any upstream-merge cycle) work has produced test evidence via commit messages (ctest counts, coverage numbers) rather than via a durable test-report file under `._design_docs/.test_reports/`
+
+Action:
+- Do require a closing test-report file (e.g. `test-report-20260612-XX.md`) for any cycle that advances past Step 5 regression scope, even if test counts and coverage numbers are already known from commit messages
+- Do not let commit messages substitute for durable test reports; the test report is the audit-trail artifact, the commit message is a pointer
+- Do open a QA test-execution gate when the closing test report is missing, regardless of whether the implementation log says the cycle is otherwise complete
+- Don't accept "tests passed" in a commit message as a substitute for the per-row evidence the test plan requires
+
 ## Improvement: integration branch is a Manager decision, not a git-plumbing inference
 
 Condition:
@@ -253,3 +277,40 @@ Action:
 - Do run a small cherry-pick smoke test on one debug-helper commit before committing to the full cherry-pick; the smoke test reveals signature mismatches and missing methods early
 - Do expect 5-10 conflict resolutions when cherry-picking cycle work onto a divergent feature branch; budget the Developer session for that
 - Don't assume test fixes written against branch A apply cleanly to branch B; the debug helpers reference existing methods that may differ between branches
+
+## Improvement: user-directed closure overrides normal gate evidence
+
+Condition:
+- User directs closure of a stage with an explicit instruction like "close stage X without any other modification" or "the target is done, close it", and the durable docs (implementation log header, test reports, doc reconciliation) are not aligned with closure
+
+Action:
+- Do update only the tracker row to mark the stage `closed`, set the Manager gate decision date to today, and capture the user's directive verbatim in the Notes column
+- Do accept the user's authority to override the normal closure gate; the manager serves the user, not the workflow checklist
+- Do record the user direction (e.g. "without any other modification", "target was X and it's done") in the notes so the audit trail preserves why the closure was granted without the normal evidence
+- Do not touch the implementation log header, test reports, or other durable docs even if they remain stale; the user explicitly asked for minimum scope
+- Do not run QA test execution, architect audit, doc reconciliation, or any other gate unless the user separately requests it
+- Don't reject the closure because the workflow checklist is not satisfied; the user's directive is sufficient authority
+- Don't silently expand the scope to "fix" stale docs; the user is aware of the stale docs and chose closure anyway
+
+## Improvement: close with structural blockers only after explicit plan-change record
+
+Condition:
+- Test rerun converts previous "BLOCKED-environment" rows into "BLOCKED-structural-not-infra" and closure depends on accepting those rows as out-of-scope for the current fixture/session
+
+Action:
+- Do require a Developer test-results review artifact that explicitly reclassifies the rows with evidence and proposes exact Manager decision text
+- Do record the Manager plan-change decision in the test plan (not only in tracker or implementation log) before closure so closure exceptions are durable and auditable
+- Do update tracker, implementation log status/current gate/handoff, and document-index entries in one closure sweep so stale blocker wording is removed everywhere
+- Don't leave closure exceptions only inside chat or benchmark report text; they must be reflected in durable plan/entry docs
+- Don't keep old "BLOCKED-environment" wording after structural proof refutes it; replace with the final structural classification or approved out-of-scope decision
+
+## Improvement: structural benchmark blocker requires code fix before closure
+
+Condition:
+- QA benchmark report classifies a row as BLOCKED-structural-not-infra and the user explicitly asks to resolve it before closure
+
+Action:
+- Do treat this as a product bug requiring the full bug-fix loop: Developer identifies and applies the minimal code fix, Architect reviews, QA reruns the blocked rows with hard numeric evidence
+- Do accept the V2 fixture as the canonical benchmark fixture when the MTP fixture has a known structural workload limitation (e.g. MTP boundary token_end mismatch due to n_predict expanding the token count) as long as Stage 12 used the same V2 fixture as the B05/B06 baseline
+- Don't close the stage with structural BLOCKED rows when the user requests resolution; route to Developer fix instead
+- Don't reopen the design gate; the fix scope is a targeted code change inside the existing stage's bug-fix loop gate

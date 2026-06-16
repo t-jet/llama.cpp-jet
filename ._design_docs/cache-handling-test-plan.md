@@ -204,6 +204,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 19: Stage 12 test automation](./cache-handling-test-plan/part-19-stage12-test-automation.md)
 - [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
 - [Part 24: test output folder convention](./cache-handling-test-plan/part-24-test-output-folder-convention.md)
+- [Part 25: Stage 15 full test suite validation, bug-fix loop, and benchmark report](./cache-handling-test-plan/part-25-stage15-full-test-suite-validation.md)
 
 ## T114 split (Stage 11 onward)
 

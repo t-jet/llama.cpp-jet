@@ -37,7 +37,8 @@ work-branch
 | 11 | Upstream Merge Integration | closed | [cache-handling-phase11-design.md](cache-handling-phase11-design.md) | [cache-handling-phase11-implementation.md](cache-handling-phase11-implementation.md) | [.test_reports/test-report-20260607-02.md](.test_reports/test-report-20260607-02.md) | 2026-06-07 | Cap-fix cycle CLOSED 2026-06-07; invariant in architecture Part 7 |
 | 12 | Stress Testing and Benchmarking | closed | [cache-handling-phase12-design.md](cache-handling-phase12-design.md) | [cache-handling-phase12-implementation.md](cache-handling-phase12-implementation.md) | [.test_reports/test-report-20260609-02-V2-bench.md](.test_reports/test-report-20260609-02-V2-bench.md) | 2026-06-07 | Operational stage; synthetic matrix stopped 2026-06-09 by Manager decision |
 | 13 | Endpoint Compatibility Corrections | closed | [cache-handling-phase13-design.md](cache-handling-phase13-design.md) | [cache-handling-phase13-implementation.md](cache-handling-phase13-implementation.md) | [.test_reports/test-report-20260610-04.md](.test_reports/test-report-20260610-04.md) | 2026-06-10 | E13-14 bounded diagnostic and E13-16 clean-build gate met |
-| 14 | Post-Stage-12/13 Upstream Integration | design-only | [cache-handling-phase14-design.md](cache-handling-phase14-design.md) | - | - | 2026-06-11 | Manager design gate PASS 2026-06-11; implementation planning not started |
+| 14 | Post-Stage-12/13 Upstream Integration | closed | [cache-handling-phase14-design.md](cache-handling-phase14-design.md) | [cache-handling-phase14-implementation.md](cache-handling-phase14-implementation.md) | - | 2026-06-12 | Manager closure 2026-06-12 by user direction. Target: upstream integration done. Stale header status in implementation log and missing closing test report retained per user instruction "without any other modification" |
+| 15 | Full Test Suite Validation, Bug-Fix Loop, and Benchmark Report | closed | [cache-handling-phase15-design.md](cache-handling-phase15-design.md) | [cache-handling-phase15-implementation.md](cache-handling-phase15-implementation.md) | [.test_reports/stage15-benchmark-20260613-03.md](.test_reports/stage15-benchmark-20260613-03.md) | 2026-06-13 | Manager closure 2026-06-13. All 8 benchmark rows PASS. B05/B06 fixed: checkpoint boundary search relaxed (V2 fixture 29/29 restores, p50=913ms p99=981ms, see stage15-benchmark-20260613-03.md). B02 PASS-observed-zero (4 checkpoint metrics exposed). T114 0.8992 T114a 0.8284 T115 T121 PASS. S01..S08 and L01..L03 DEFERRED-OUT-OF-SCOPE-FOR-SESSION. Code change: tools/server/server-cache-hybrid.cpp. Architect fix review PASS (part-07). |
 
 ## Future stages and new tasks
 
@@ -46,7 +47,7 @@ Use this template when the Manager adds a new row. Keep column order, header tex
 ````markdown
 | Stage | Title | Status | Design doc | Implementation log | Latest test report | Manager gate decision | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 15 | Short stage title here | pending | - | - | - | pending | One short line of context |
+| N+1 | Short stage title here | pending | - | - | - | pending | One short line of context |
 ````
 
 ### How to add a new row

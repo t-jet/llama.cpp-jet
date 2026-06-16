@@ -2988,7 +2988,8 @@ bool hybrid_cache_controller::validate_checkpoint_descriptor_metadata(
         for (const auto & boundary : source_metadata->boundaries) {
             if (static_cast<int>(boundary.type) != descriptor.checkpoint_boundary_kind ||
                 boundary.metadata != descriptor.boundary_id ||
-                boundary.token_start != static_cast<size_t>(descriptor.token_span_start) ||
+                (descriptor.token_span_start != 0 &&
+                    boundary.token_start != static_cast<size_t>(descriptor.token_span_start)) ||
                 boundary.token_end != static_cast<size_t>(descriptor.token_span_end) ||
                 boundary.checksum != descriptor.boundary_checksum) {
                 continue;
@@ -3064,7 +3065,7 @@ bool hybrid_cache_controller::attach_checkpoint_payload(
         if (source_metadata && source_metadata->has_boundaries()) {
             bool attached_boundary = false;
             for (const auto & boundary : source_metadata->boundaries) {
-                if (boundary.checksum == 0 || boundary.token_start != static_cast<size_t>(descriptor.token_span_start) ||
+                if (boundary.checksum == 0 ||
                     boundary.token_end != static_cast<size_t>(descriptor.token_span_end)) {
                     continue;
                 }

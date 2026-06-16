@@ -17,6 +17,21 @@ This is a private fork of [ggml-org/llama.cpp](https://github.com/ggml-org/llama
 - **Hybrid cache mode** (`--cache-mode hybrid`): a byte-accounted, branch-graph-backed cache for the server with cold-storage offload, speculative-decoding checkpoints, draft-pairing, prepared-prompt boundary handling, and Prometheus observability. Opt-in, default path unchanged. Documented under [._design_docs/](./_design_docs/).
 - **Endpoint parity**: public endpoint schemas stay byte-compatible with upstream; cache behavior is selected by command-line flag and internal metadata, not by request fields.
 
+### Fork CLI parameters
+
+These fork-specific or fork-modified parameters control prompt/cache behavior. Hybrid cache behavior is a `llama-server` feature.
+
+| Parameter | Applies to | Description |
+| --- | --- | --- |
+| `--cache-mode {legacy,hybrid}` | `llama-server`, `llama-cli` | Selects the prompt-cache implementation. `legacy` is the default FIFO/destructive cache path. `hybrid` enables the fork's LRU, non-destructive hybrid cache. Env: `LLAMA_ARG_CACHE_MODE`. |
+| `--cache-cold-path PATH` | `llama-server` | Enables cold payload storage for hybrid cache mode. `PATH` must be an existing writable directory. Requires `--cache-mode hybrid`. Env: `LLAMA_ARG_CACHE_COLD_PATH`. |
+| `-cram, --cache-ram N` | `llama-server`, `llama-cli` | Sets the cache budget in MiB. `-1` means no limit, `0` disables prompt cache storage, and positive values cap resident cache data. In hybrid mode this is the hot payload budget. Env: `LLAMA_ARG_CACHE_RAM`. |
+| `--cache-idle-slots`, `--no-cache-idle-slots` | `llama-server` | Controls whether idle server slots are saved to prompt cache on a new task. Enabled by default when cache RAM is available. Env: `LLAMA_ARG_CACHE_IDLE_SLOTS`. |
+| `-ctxcp, --ctx-checkpoints, --swa-checkpoints N` | `llama-server`, `llama-cli` | Sets the maximum number of context checkpoints per slot. These checkpoints can be used by hybrid cache restore paths for checkpoint-dependent workloads. Env: `LLAMA_ARG_CTX_CHECKPOINTS`. |
+| `-cms, --checkpoint-min-step N` | `llama-server` | Sets the minimum token spacing between context checkpoints. `0` disables the spacing floor. Env: `LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT`. |
+
+Hybrid cache operator notes are in [tools/server/hybrid-cache.md](./tools/server/hybrid-cache.md).
+
 ### Not in this fork
 
 - No public API changes; public endpoint schemas match upstream.

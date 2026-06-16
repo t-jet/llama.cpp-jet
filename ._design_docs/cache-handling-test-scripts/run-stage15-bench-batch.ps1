@@ -1,0 +1,140 @@
+#requires -Version 5
+# run-stage15-bench-batch.ps1
+# Stage 15 benchmark sub-session: B01..B08 with V2 fixture config
+# (Qwen3-8B target + Qwen3-0.6B draft, MtpVariant=2, JinjaVariant=original)
+# for direct comparison vs the Stage 12 V2 baseline.
+# Mirrors run-v2-bench-batch.ps1 but only runs the original jinja variant.
+# Writes per-row evidence to ._design_docs/.test_reports/bench-stage15-20260612/
+
+param(
+    [string] $BuildDir  = 'D:\source\llama.cpp-jet\build-cov',
+    [string] $RunRoot   = 'D:\source\llama.cpp-jet\._design_docs\.test_reports\bench-stage15-20260612',
+    [string] $ModelPath = 'D:\source\llama.cpp-jet\._test_models\Qwen3-8B-GGUF\Qwen3-8B-Q6_K.gguf',
+    [string] $DraftModelPath = 'D:\source\llama.cpp-jet\._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf',
+    [int]    $PerRowTimeoutMs = 600000
+)
+
+$ErrorActionPreference = 'Continue'
+$benchDir = Join-Path $PSScriptRoot 'bench'
+$sideLog  = Join-Path $RunRoot   'bench-stage15-summary.log.side'
+$csvOut   = Join-Path $RunRoot   'bench-stage15-verdicts.csv'
+
+$plan = @(
+    @{ Id='B01'; Port=8501; Driver='bench_s12_b01_exact_blob_hit_rate.ps1';
+       Extra=@{ MeasurementSec=60 } },
+    @{ Id='B02'; Port=8502; Driver='bench_s12_b02_checkpoint_hit_rate.ps1';
+       Extra=@{} },
+    @{ Id='B03'; Port=8503; Driver='bench_s12_b03_cold_transition_frequency.ps1';
+       Extra=@{ DurationSec=60 } },
+    @{ Id='B04'; Port=8504; Driver='bench_s12_b04_end_to_end_token_throughput.ps1';
+       Extra=@{ DurationSec=60 } },
+    @{ Id='B05'; Port=8505; Driver='bench_s12_b05_restore_latency.ps1';
+       Extra=@{ DurationSec=60 } },
+    @{ Id='B07'; Port=8507; Driver='bench_s12_b07_mixed_profile_comparison.ps1';
+       Extra=@{ DurationSec=60 } },
+    @{ Id='B08'; Port=8508; Driver='bench_s12_b08_large_forest_lookup_cost.ps1';
+       Extra=@{ DurationSec=60 } }
+)
+
+$env:LLAMA_CACHE_TEST_MODEL = $ModelPath
+
+if (-not (Test-Path $RunRoot)) { New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null }
+
+Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+
+$results = New-Object System.Collections.Generic.List[object]
+$now = Get-Date -Format 'o'
+"$now] bench-batch-stage15 start; rows=$($plan.Count); perRowTimeoutMs=$PerRowTimeoutMs; model=$ModelPath" |
+    Out-File -FilePath $sideLog -Append -Encoding utf8
+
+foreach ($row in $plan) {
+    $rowId = "S15-MTP-$($row.Id)-Joriginal"
+    $outDir = Join-Path $RunRoot $rowId
+    $hybrid = Join-Path $outDir 'hybrid'
+    $rowPort = $row.Port
+    $startIso = (Get-Date).ToString('o')
+    "$startIso] $rowId start port=$rowPort" |
+        Out-File -FilePath $sideLog -Append -Encoding utf8
+
+    Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+
+    $driver = Join-Path $benchDir $row.Driver
+    $splat = @{
+        BuildDir     = $BuildDir
+        OutDir       = $outDir
+        Port         = $rowPort
+        MtpVariant   = 2
+        JinjaVariant = 'original'
+    }
+    if ($row.Id -eq 'B02') {
+        $splat['LargerModel'] = $ModelPath
+        $splat['DraftModel'] = $DraftModelPath
+    } elseif ($row.Id -eq 'B07') {
+        $splat['DraftModelPath'] = $DraftModelPath
+    } else {
+        $splat['ModelPath'] = $ModelPath
+    }
+    foreach ($k in $row.Extra.Keys) { $splat[$k] = $row.Extra[$k] }
+
+    $rowStart = Get-Date
+    try {
+        & $driver @splat 2>&1 | Out-Null
+    } catch {
+        "$startIso] $rowId driver-exception: $($_.Exception.Message)" |
+            Out-File -FilePath $sideLog -Append -Encoding utf8
+    }
+    $rowEnd = Get-Date
+    $elapsed = [int]([math]::Round(($rowEnd - $rowStart).TotalSeconds))
+
+    $esPath  = Join-Path $hybrid 'evidence-summary.md'
+    $bjPath  = Join-Path $hybrid 'baseline.json'
+    $verdict = 'PENDING'
+    $notes   = ''
+    if (Test-Path $esPath) {
+        $rs = Select-String -Path $esPath -Pattern '^Result:\s*(\S+)' | Select-Object -First 1
+        if ($rs) { $verdict = ($rs.Line -split ':')[-1].Trim() }
+        $ns = Select-String -Path $esPath -Pattern '^Notes:\s*(.+)$' | Select-Object -First 1
+        if ($ns) { $notes = ($ns.Line -split ':',2)[-1].Trim() }
+    }
+    $baseVerdict = ''
+    if (Test-Path $bjPath) {
+        try { $bj = Get-Content $bjPath -Raw | ConvertFrom-Json -ErrorAction Stop
+              $baseVerdict = [string]$bj.correctness_verdict } catch {}
+    }
+    $k6pmr = ''
+    if ($row.Id -in @('B01')) {
+        $k6 = Join-Path $hybrid 'k6-results.json'
+        if (Test-Path $k6) {
+            $lines = Get-Content $k6 -ErrorAction SilentlyContinue
+            $pm = $lines | Where-Object { $_ -match '"metric":"prefix_match_rate"' } | Select-Object -Last 1
+            if ($pm) {
+                $vals = ([regex]::Matches($pm, '"value":\s*([0-9.]+)') | ForEach-Object { [double]$_.Groups[1].Value })
+                if ($vals.Count -gt 0) { $k6pmr = ('{0:F4}' -f ($vals | Measure-Object -Average).Average) }
+            }
+        }
+    }
+    $results.Add([pscustomobject]@{
+        Row = $rowId
+        Port = $rowPort
+        ElapsedSec = $elapsed
+        SummaryVerdict = $verdict
+        BaseVerdict = $baseVerdict
+        K6PrefixMatchRate = $k6pmr
+        Notes = $notes
+    })
+    $endIso = (Get-Date).ToString('o')
+    "$endIso] $rowId end elapsed=${elapsed}s verdict=$verdict base=$baseVerdict pmr=$k6pmr" |
+        Out-File -FilePath $sideLog -Append -Encoding utf8
+}
+
+$results | Export-Csv -NoTypeInformation -Path $csvOut -Encoding utf8
+"$( Get-Date -Format 'o' )] bench-batch-stage15 end; csv=$csvOut" |
+    Out-File -FilePath $sideLog -Append -Encoding utf8
+
+$results | Format-Table -AutoSize -Property Row, ElapsedSec, SummaryVerdict, BaseVerdict, K6PrefixMatchRate | Out-String -Width 200
+"--- per-row notes ---"
+$results | ForEach-Object { "$($_.Row): $($_.Notes)" }

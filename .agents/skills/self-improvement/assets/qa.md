@@ -1,5 +1,13 @@
 # QA improvement memory
 
+## Improvement: reissue partial report for truncated prior sub-session
+
+Condition:
+- A prior sub-session is described as started, started-then-truncated, or returned without producing the expected output files (JSON, CSV, log, k6, baseline.json), and the state check confirms no output exists on disk
+
+Action:
+- Do reissue a PARTIAL durable report at the path the brief specifies. Mark every row with verdict `BLOCKED-prior-sub-session-truncated` and evidence `prior sub-session did not produce extractable output`. Record the prior sub-session start time, the current time, and the wall-clock delta. Recommend a re-run in a fresh sub-session and defer the per-metric and legacy comparison columns to the next re-issue. Do not fabricate values or attempt to back-fill from a different tree.
+
 ## Improvement: scan split-plan siblings
 
 Condition:
@@ -310,6 +318,14 @@ Action:
 - Pair BLOCKED with Developer handoff scoping coverage-eligible rebuild (e.g. `RelWithDebInfo` with `/Zi /Ob1 /O2 /EHsc /DEBUG:FULL`, or add `/Zi /DEBUG` to Release flags) so next session can run coverage against patched code.
 - Cite prior-run numbers from build with debug symbols (e.g. `test-report-20260604-06.md` T114=0.8553, T114a=0.7035) as reference baseline and note which source files patch touched so reviewer can confirm prior numbers are still representative.
 
+## Improvement: verify cited source contains the cited text
+
+Condition:
+- Reviewing a test plan (or any QA-authored doc) that cites a specific line range in another document as the verbatim source for a quoted block
+
+Action:
+- Don't trust the citation without verification. Open the cited document at the cited line range and confirm the quoted text actually appears there. If the cited source lacks the text but the content matches a different doc (e.g. design instead of tracker), record the citation drift as an INFO finding and note which doc actually holds the text. Do not block the review if the substance is correct and the drift is pre-existing and inherited from an already-approved upstream doc (e.g. design gate already PASSED). When the cited line number itself is off by 1 (e.g. tracker line 42 cited but Stage 15 row is at line 41), record the line number drift in the same INFO finding.
+
 ## Improvement: rewrite new markdown with LF endings before git diff --check
 
 Condition:
@@ -422,3 +438,57 @@ Condition:
 
 Action:
 - Don't trust \/quit\ is registered on the current \llama-server\ build. Send the request and capture status first. If 404, fall back to \	askkill /pid\ (no \/F\). If the process was started with \-NoNewWindow\ and is detached, \	askkill /pid\ may not exit the process within 5-10s; record the fallback and use \Stop-Process -Id <pid> -Force\ only after confirming the log file already contains the full request phase (line count, last line content, or both diagnostic lines present for E13-14). The kill mechanism does not lose evidence when the log was complete before the kill. Cite \/quit\ 404 response and force fallback in the test report's process inventory so the next session knows the endpoint is not available and the kill chain.
+
+
+## Improvement: .test_reports .gitignore ignores new test reports when ! rules precede * rule
+
+Condition:
+- Creating a new 	est-report-YYYYMMDD-NN.md in ._design_docs/.test_reports/ and git add rejects the file with "The following paths are ignored by one of your .gitignore files"
+
+Action:
+- The current .gitignore at ._design_docs/.test_reports/.gitignore has !test-report-*.md (and three other ! re-include rules) BEFORE the trailing * ignore rule, which causes the * to win (last matching rule wins in gitignore). New test reports cannot be committed without git add -f. Existing tracked test reports were added before the .gitignore change took effect and remain tracked. Don't add the file with -f in the QA session; record the pre-existing gitignore ordering issue in the test report under a handoff or "pre-existing known issues" section, cite git check-ignore -v evidence, and hand off to the Manager to fix the .gitignore ordering (! rules must appear AFTER * to re-include). Verify file content with git diff --check --no-index /dev/null <file> and LF-only byte check before final handoff.
+
+## Improvement: extract B-row values from llama-server /metrics in 5-minute focused re-run
+
+Condition:
+- A focused benchmark re-run has a strict time budget (5 min) and the test plan names metric families like `cache_exact_blob_hits_total`, `cache_checkpoint_hits_total`, `cache_cold_transitions_total`, token throughput, restore latency, total hits+misses, and per-request CPU time
+
+Action:
+- Do start llama-server with the MTP fixture, hybrid cache mode, and `--metrics`; issue 5-10 chat-completion requests with a shared prefix; capture `/metrics` once before and once after; map the brief's metric names to actual counters by grep on `/metrics` raw text. The build exposes `llamacpp_cache_hits_total`, `llamacpp_cache_misses_total`, `llamacpp_cache_payload_demotions_total`, `llamacpp_cache_payload_promotions_total`, `llamacpp_cache_payload_cold_evictions_total`, `llamacpp:tokens_predicted_total`, `llamacpp:tokens_predicted_seconds_total`, and `llamacpp_cache_promotion_latency_bucket_*`; per-request `total time` and `eval time` come from `slot print_timing` in server stderr, not from /metrics. Classify restore latency p50/p99 as `BLOCKED-no-successful-restores` when zero successful restores occurred, and require a follow-up workload with repeated identical prompts to clear the row.
+- Don't trust the test plan's metric names verbatim; verify the actual counter name and document the mapping in the report. Don't fabricate values for restore latency rows when the workload produced zero successful restores; mark BLOCKED with the exact log line family that proves the absence.
+
+## Improvement: reclassify prior BLOCKED with new hard evidence, do not trust infra-resolved claims
+
+Condition:
+
+- A prior QA sub-session marked rows BLOCKED for an environment reason (no metric exposed, no successful restores, no fixture, no tool) and a follow-up re-run is launched with the claim that the blocker is now resolved
+
+Action:
+
+- Do not trust the infra-resolved claim. Run the re-run on the same fixture/build and capture hard evidence: counter names from /metrics, save/restore log line counts, response-body cache_n values, and per-request timings. When the prior BLOCKED reason was factually wrong (e.g. cache_checkpoint_* rows ARE in /metrics), cite the prior report's error and reclassify to PASS-observed-zero with the four-row presence plus a non-zero admission_failures counter as evidence the path is exercised. When the workload produces 0 successful restores even after expanding to 50 identical /completion requests, do not soften the verdict to PASS; mark BLOCKED-no-successful-restores with the new structural evidence (entry length vs task length, LCP-found-match count vs exact-match-found count, sim_best=1.000 distribution) and recommend a Manager plan-level decision (V2 fixture swap, MTP probe with checkpoint-admitting workload, or NOT-IN-SCOPE reclassification). Cite both /metrics raw text and server stderr log line counts so the next session can verify.
+
+## Improvement: separate length-mismatch from checkpoint-admission with token-count probes
+
+Condition:
+- A prior QA report classifies B05/B06 as BLOCKED-no-successful-restores citing a token-length mismatch between the stored entry and the request task (e.g. `entry 30 tokens, task 27 tokens, prefix 27`) and the user asks for a focused rerun that matches the suggested token count (e.g. 30-token prompt) to clear the blocker
+
+Action:
+- Do not assume the prior report's structural cause is correct. Run at least two length-matched probes at different token counts (e.g. 29 and 36) using the same fixture and server flags. Build the prompt via `/tokenize` iteratively, send a warmup with `n_predict=0` and `cache_prompt:true`, then run 50 identical requests. If both length-matched probes still produce 0 successful restores AND the LCP log line shows `task N tokens, entry N tokens, prefix N` (perfect prefix match) on every restore attempt, the length-mismatch hypothesis is REFUTED. The real cause is almost always the save path producing entries without checkpoint boundary metadata, which makes the stored entry a regular (non-checkpoint) entry and causes the exact-blob restore check to reject every identical request. Cite the `checkpoint admission skipped (missing checkpoint boundary metadata)` warning from server stderr, the 0 `cache_checkpoint_admissions_total` metric, the 1 `cache_checkpoint_admission_failures_total` metric, and the LCP-found-match count vs no-exact-match count in the report. Reclassify BLOCKED-structural-not-infra (not BLOCKED-no-successful-restores, since the cause is now known) and propose a Manager plan-level decision (reclassify to NOT-IN-SCOPE for the MTP fixture, or Developer task to add checkpoint boundary metadata to the save path). Don't soften the verdict to PASS on the basis of length-matched probe data alone; the absence of a successful restore is the evidence, not the length match. The BPE tokenizer may not land exactly on the suggested token count (e.g. 30 unreachable; 29 closest); record the actual token count and continue.
+- Don't claim the prior report was wrong without the second independent probe. One length-matched probe at one token count could in theory hit a BPE edge case. Two probes at different token counts that both fail with the same structural pattern is strong evidence.
+
+
+## Improvement: llama.cpp /completion timings JSON does not expose total_ms
+
+Condition:
+- A bench report or harness collects per-request latency for B05/B06 and the task brief names a 	otal_duration_ms field name to read from the server's 	imings JSON
+
+Action:
+- Don't trust that the /completion response has a 	imings.total_ms field. The current llama.cpp server exposes only prompt_ms and predicted_ms in the timings struct, and 	otal_ms is absent (or zero if deserialized as a default). Compute 	otal_ms = prompt_ms + predicted_ms in the harness or recompute step, and label the per-request column explicitly as "total_ms (prompt+predicted)" so the next session does not chase a phantom missing field. Cite the prior smoke-test summary (where total_ms was 0 across all rows) as evidence of the missing field, not as a product bug.
+
+## Improvement: git diff --check skips untracked new files; use --no-index
+
+Condition:
+- Task brief requires running git diff --check <new-untracked-md-path> and reporting the exit code, and the file was just created with create_file
+
+Action:
+- Don't trust exit 0 from git diff --check <untracked-path> as proof the file is whitespace-clean. Untracked files are not inspected by plain git diff --check, so even a CRLF-only new file returns exit 0. After the file is LF-only, run git diff --check --no-index /dev/null <path> to inspect the actual content; zero lines of warning output and exit 1 (differ) is the clean state. Combine with byte-level CR count check via [System.IO.File]::ReadAllBytes to be certain.

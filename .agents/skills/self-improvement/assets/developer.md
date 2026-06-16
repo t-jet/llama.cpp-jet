@@ -280,6 +280,16 @@ Action:
 
 - Do compare the local tracking branch tip to the actual upstream default branch tip via a `GET https://api.github.com/repos/<owner>/<repo>/compare/<local-tip>...master` call or the `commits?per_page=1` endpoint, record the SHA and date of both tips, the ahead/behind count, and the subject and date of each side; surface any non-zero gap as a new Manager decision in the pre-merge report's "Manager decisions requested" section (the design's D1-D5 may not cover it) and as a numbered risk; don't open the pre-merge triage on a range that quietly misses upstream commits, because the merge log will then have a known gap that the Architect review cannot recover from.
 
+## Improvement: Resolve design-review non-blocking findings in the plan
+
+Condition:
+
+- When a design or plan-review document records a non-blocking finding (N1, N2, ...) that points to a real but cosmetic issue (a subrange typo, a duplicated row, a missing reference) and the closure decision is "QA resolves at execution"
+
+Action:
+
+- Do record the resolution path explicitly in the implementation plan, not just cite the finding. The plan should name (a) the source of the canonical data (test plan matrix, design part, etc.) that QA consults, (b) the row or table where the QA owner records the resolution, and (c) the condition under which the finding is closed at execution. Verified 2026-06-12 (Stage 15 plan, N1 finding): the design review flagged the C-regression row subrange `R10..R23, R20..R23` as fully contained; the implementation plan part-01 Step 2.4 names the test plan matrix at part-03 as the canonical R-numbering, names the QA per-row table as the resolution surface, and states the closure condition (QA table matches the test plan matrix). Don't just link to the finding; record the resolution path so the next reviewer can see how the finding closes at execution.
+
 ## Improvement: Plain ASCII scan on humanizer-cleaned report tables
 
 Condition:
@@ -289,6 +299,32 @@ Condition:
 Action:
 
 - Do run a `[regex]::Matches($content, '[^\x00-\x7F]')` scan on the file before handoff and replace em dashes with ` - ` (space-hyphen-space) or commas inside the table cells; em dashes are not flagged by `git diff --check` on untracked files, so the scan is the only defense; the scan also catches smart quotes, non-breaking spaces, and BOM bytes that the humanizer would otherwise miss.
+
+## Internal Post-Task Record (2026-06-12, Stage 15 implementation plan)
+
+Task completed: Yes (documentation-only).
+
+Effectiveness assessment: The plan honors the design's D1-D5 and the user's 13 plan-content requirements, splits into entry doc + 4 part files all under 300 lines (max 225), keeps the Architect review slot (part-05) un-authored per the brief, resolves the N1 non-blocking finding in part-01 Step 2.4 against the test plan matrix, and runs a scoped `git diff --check` plus ASCII + trailing-whitespace scan. The pre-recorded P1-P5 plan decisions stay decisions, not pre-approvals, matching the design's D-series pattern. No code, tests, fixes, or commits were authorized.
+
+Improvement outcome candidate:
+- Condition: When a planning brief says a specific part file is authored by a fresh sibling session (Architect, Manager, QA) and the planning agent must not author it
+- Action: Do record the sibling slot in the entry doc's Contents section with explicit "not authored by this session" wording; do not create an empty placeholder file
+
+Similar memory check: Similar improvement found: No. Existing improvements cover untracked-doc verification, near-limit splits, scoped whitespace, and index alignment, but none cover the "sibling agent owns this part slot" pattern.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Plan author must not author a sibling agent's review slot".
+
+Improvement outcome candidate 2:
+- Condition: When a design or plan review records a non-blocking finding that QA resolves at execution
+- Action: Do record the resolution path explicitly in the implementation plan, not just cite the finding
+
+Similar memory check: Similar improvement found: No. The existing "Resolve stale test-report references" improvement covers report cross-references, not design-review non-blocking findings.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Resolve design-review non-blocking findings in the plan".
 
 ## Improvement: T114a .h inline coverage lift is not reachable on MSVC
 
@@ -479,6 +515,16 @@ Action:
   found defects, don't defer anything" applies to all
   exposed defects, not just the current crash point.
 
+## Improvement: Plan author must not author a sibling agent's review slot
+
+Condition:
+
+- When a user brief for a planning deliverable (entry doc + part files) explicitly says a specific part (e.g. `part-05`) is authored by a different fresh agent session (Architect, Manager, or QA) and the planning agent must not author it
+
+Action:
+
+- Do record the sibling slot in the entry doc's `## Contents` section with explicit "not authored by this session" wording (e.g. "part-05: ... - created by a fresh Architect session after the plan is otherwise complete. Not authored by this Developer session.") so a reader sees the slot exists, knows what goes there, and is not surprised that the part file is absent. Do not create an empty placeholder file; the absence of the part file is the signal that the sibling session owns it. Verified 2026-06-12 (Stage 15 implementation plan): the user brief said part-05 is the Architect plan review; the entry doc's Contents section records the slot with the "not authored" wording and no part-05 file is created in the worktree, matching the prior pattern from the design where part-08 (Architect design review) and part-09 (Manager design gate) are referenced in the Contents but not authored by the design session.
+
 ## Improvement: PowerShell path-separator normalization vs git ls-files
 
 Condition:
@@ -488,3 +534,59 @@ Condition:
 Action:
 
 - Do normalize the tracked-path keys to backslashes (e.g., ( -replace '/', '\\')) OR build the comparison prefix with forward slashes (e.g., ( -replace '\\', '/') + '/') before the StartsWith check; don't compare Windows-side backslash paths to git ls-files forward-slash paths directly. The bug defaults every item to the non-git mv branch and silently loses git rename history on bulk moves. Verified 2026-06-12 (Stage 14 cleanup): my move script built $relSrc + '\' from Get-ChildItem and compared it to git ls-files keys that always use /; the StartsWith never matched, so all 128 subfolders containing 1269 tracked files were Move-Item-ed instead of git mv-ed. The cleanup commit 4f434897e therefore shows 1270 files as 1269 deletes + 1 .gitignore modification with no rename detection. The end state matched the user's accepted "show as deleted" plan, but the same bug in a code-introducing move would lose real history. When this is detected post-hoc, the cheapest recovery is git add -A + commit (current files in dest are gone from index, old files are gone from disk) plus an explicit note in the commit message.
+
+## Internal Post-Task Record (2026-06-13, Stage 15 plan REWORK, I1 fix)
+
+Task completed: Yes (documentation-only file-hygiene fix).
+
+Effectiveness assessment: The I1 BLOCKING finding (CRLF line endings on 5 plan files) was resolved by a single PowerShell pass that read each file, replaced \r\n with \n, and wrote back with UTF8Encoding($false) (no BOM). All 5 files now show CR=0 LF=168/225/177/97/180 BOM=False, line counts unchanged from pre-conversion, first/last lines intact, trailing whitespace = 0, non-ASCII = 0. The 4 design files in the sibling directory remain untouched (CR=0, BOM=False), the Architect review file is untouched, and `git status --short` shows the same tracked/untracked set as before the fix. The scoped `git diff --check -- <5 plan files>` exits 0. No content was modified; only CR bytes were stripped. The existing memory entry "Preserve local line endings in patch edits" already covers the BOM + CRLF hazards of `[System.IO.File]::WriteAllText` with default UTF8, so the conversion used UTF8Encoding($false) explicitly to avoid the BOM regression; the existing entry "Verify untracked documentation edits" covered the byte-level verification pattern used here. No new improvement was identified.
+
+Improvement outcome candidate: None. The fix is a one-time application of an already-documented convention; adding a new improvement would duplicate "Preserve local line endings in patch edits".
+
+Memory update: No new entry. The post-task record above documents the run.
+
+## Improvement: Handoff H2 collision in multi-gate stage implementation logs
+
+Condition:
+
+- When appending a new gate-evidence section to a stage implementation log that already contains a `## Handoff` H2 heading (typical for the post-plan handoff section written by the planning author) and the new section is also required to be `## Handoff` (typical for a post-readiness, post-execution, or post-closure handoff section)
+
+Action:
+
+- Do rename the existing `## Handoff` to a more specific variant (e.g. `## Handoff to execution` for the post-plan handoff) so the new `## Handoff` H2 is unique; MD024 disallows duplicate H2 headings and the existing markdownlint configuration will flag the duplicate. Don't try to disable MD024 for the file; the rename is a one-line, non-substantive change that preserves the existing content. The rename is also a useful reader cue: the original Handoff section talks about post-plan handoff, and the new Handoff section talks about post-readiness handoff, so the more specific name reflects the actual content.
+
+## Internal Post-Task Record (2026-06-13, Stage 15 pre-execution readiness gate)
+
+Task completed: Yes (documentation-only evidence section, no test execution).
+
+Effectiveness assessment: The Step 1-3 pre-execution readiness gate ran cleanly. Step 1 captured branch (`work-branch`), HEAD SHA (`13d3cd863`), and the 5 M / 4 untracked `git status --short` summary that matched the expected pre-existing M set (tracker, document-index, three self-improvement asset files) and the new Stage 15 design and implementation file groups. Step 2 ran a non-destructive incremental `cmake --build build-cov --config Release --target llama-server -j 4` (27.264 s, exit 0, fresh binary at `build-cov/bin/Release/llama-server.exe` with `LastWriteTime = 2026-06-13 00:13:52`) and recorded the build log at `tmp/stage15-prebuild.log`. Step 3 verified P1 (cmake 4.3.2), P2 (build/CMakeCache.txt and build-cov/CMakeCache.txt both exist), P3 (pytest on Python 3.11.9), P4 (V2 driver 8308 bytes), P5 (Qwen3.5-4B-MTP-GGUF/Qwen3.5-4B-Q4_K_M.gguf, the same fixture used in Stage 10 T121 closure), P6 (k6 v2.0.0-rc1), P7 (OpenCppCoverage 0.9.9.0; --version is unsupported but the version is in the --help banner), P8 (benchmark report target does not exist), P9 (longrun/stress/bench subdirs do not exist), P10 (Stage 13 precedent test-report-20260610-04.md exists). The OpenCppCoverage version is recorded via `--help` banner line `OpenCppCoverage Version: 0.9.9.0` because `--version` is not a supported option for that tool. The MTP fixture name in the plan part-04 is the family name `Qwen3.5-MTP or Qwen3.6-MTP`; the on-disk directory is `Qwen3.5-4B-MTP-GGUF` (Qwen3.5 family, 4B parameter size, MTP capable) and matches the Stage 10 T121 closure fixture, so P5 is satisfied on the family match. The build command chosen was the non-destructive incremental path; the plan's destructive clean-build rule (`Remove-Item -Recurse -Force build-cov` plus `cmake -S . -B build-cov`) is the Step 1 of the execution plan and is reserved for the test session start, not the pre-execution readiness verification. The implementation log file is LF-only (CR=0, LF=263, BOM=False) before and after the edit, no trailing whitespace, no non-ASCII, line count 263 (well under the 300-line cap). The `## Handoff` H2 collision with the existing post-plan handoff section was resolved by renaming the existing section to `## Handoff to execution`; this is a non-substantive rename that preserves the prior content. `git diff --check -- ._design_docs/cache-handling-phase15-implementation.md` exits 0 (file is untracked, so the diff-check output is empty; the manual `Select-String -Pattern '[ \t]+$'` trailing-whitespace scan and the `[regex]::Matches($content, '[^\x00-\x7F]')` non-ASCII scan covered the untracked-file check per the existing "Verify untracked documentation edits" memory).
+
+Improvement outcome candidate:
+
+- Condition: When appending a new gate-evidence `## Handoff` section to a stage implementation log that already has a `## Handoff` H2 heading
+- Action: Do rename the existing `## Handoff` to a more specific variant (e.g. `## Handoff to execution`); don't try to disable MD024
+
+Similar memory check: Similar improvement found: No. The existing "Keep document index state aligned" and "Verify untracked documentation edits" cover different patterns. The MD024 collision is specific to multi-gate stage logs.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Handoff H2 collision in multi-gate stage implementation logs".
+
+## Internal Post-Task Record (2026-06-13, Stage 15 test-results review of B05/B06 structural probe)
+
+Task completed: Yes (documentation-only Developer review).
+
+Effectiveness assessment: The review at ._design_docs/.test_reports/test-report-20260613-02-developer-review.md reclassified B02 from BLOCKED-environment to BLOCKED-structural-not-infra based on the 20260613-02 metrics-end.txt evidence showing cache_checkpoint_hits_total=0 (metric path exposed via /metrics, value 0 because MTP save path skips checkpoint admission). B05 and B06 were reclassified from BLOCKED-workload to BLOCKED-structural-not-infra based on the 20260613-02 refutation of the 20260613-01 length-mismatch hypothesis (b56 36=36 and rerun30 29=29 both produced 0 successful restores with LCP prefix 100% match). All three rows now share a single root cause and a single Manager plan-level decision. The verdict was set to REWORK because the closure is blocked on Manager plan-change decisions per the bug-fix loop termination rule B (part-04), and two verbatim Manager decision texts were included (reclassify B02/B05/B06 to NOT-IN-SCOPE for the MTP fixture, and mark S01..S08 / L01..L03 as DEFERRED-OUT-OF-SCOPE-FOR-SESSION). Product bug count: 0. Counts: 0 BLOCKING, 3 non-blocking (B02, B05, B06), 5 INFO (S/L deferred, pre-existing policy-lru, 4 out-of-scope E13). File is 145 lines, 0 non-ASCII, 0 trailing whitespace, 0 lint errors. The file is untracked, so git diff --check returns exit 3 (no diff for untracked path); the equivalent Select-String and non-ASCII scans confirmed clean. The prior review's B02, B05, B06 classifications were explicitly superseded in the new review's Handoff state; all other prior review rows stand. No product, test plan, design, or implementation files were modified. No commit was made.
+
+Improvement outcome candidate: None. The reclassification rationale (metric-exposure-vs-structural-zero) is a specific instance of the existing "Test-results review gate classification" pattern; the cross-reference to a same-day follow-up QA report is the existing "Cross-reference same-day QA follow-up sessions" pattern; the untracked-file verification and the git diff --check on untracked path are the existing "Verify untracked documentation edits" and "Scope whitespace checks in dirty worktrees" patterns. The em-dash and trailing-whitespace scans are the existing "Plain ASCII scan on humanizer-cleaned report tables" and trailing-whitespace patterns. Adding a new improvement would duplicate existing entries.
+
+Memory update: No new entry. The post-task record above documents the run.
+## Improvement: Spec example data may not match the actual runtime data
+
+Condition:
+
+- When a bug-fix spec gives example data structures (boundary spans, token counts, field values) for the runtime code path that the fix targets, and the spec's smoke test plan asks you to issue requests that should produce that data structure
+
+Action:
+
+- Do capture the actual runtime data structure with temporary debug logging in the production code (e.g., add `SRV_DBG` lines that print the actual span_start, span_end, n_boundaries, and per-boundary start/end/checksum) and rebuild before running the smoke; don't trust the spec's example data as a substitute for the real data because the example may describe a hypothetical case (e.g., "system turn [0,15], user turn [15,29]") that the actual fixture never produces (e.g., MTP /completion with n_predict=4 builds the metadata after generation, so the fallback boundary is [0, 78] not [0, 74]). Add the debug logging, rebuild, run the smoke, and read the actual data before declaring the fix complete. If the actual data does not match the spec's example, the fix may be correct for the spec's example but not for the real case; either escalate that the spec's smoke is the wrong validation or extend the fix to handle the real case. Verified 2026-06-13 (Stage 15 B05/B06 bug fix): the spec's two-diff fix was correct for the V2 separate-draft fixture (9/10 cache hits verified) but the MTP /completion smoke showed 0/10 because the MTP fixture's metadata uses tokens.size() AFTER generation (78) while the checkpoint's n_tokens is the prompt length (74); the spec's `token_end == span_end` exact-match check failed because 78 != 74, not because of the `token_start` mismatch the spec described.

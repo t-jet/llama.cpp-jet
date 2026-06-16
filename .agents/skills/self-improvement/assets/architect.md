@@ -460,3 +460,122 @@ Condition:
 
 Action:
 - Scan the source file's raw bytes for the named UTF-8 pattern plus adjacent patterns (em dash `E2 80 94`, en dash `E2 80 93`, BOM `EF BB BF`, emoji) before editing, and report the actual character set in the return summary. Plan text often names em dash as a guess when the file actually has en dashes or emoji. Count with `[System.IO.File]::ReadAllBytes` and a `for` loop over byte triplets, or use a regex against the decoded string with `[char]0x2013`, `[char]0x2014`, `[char]0xFE0F`. Apply the new section as plain ASCII regardless of which UTF-8 form is present in the existing file.
+
+### Post-Task Review -- 2026-06-12 (Stage 15 design review gate 01)
+
+**Task:** Architect independent design review of Stage 15 (full test suite validation, bug-fix loop, benchmark report). 34 checklist items across A/B/C/D/E sections. No prior stage design or implementation docs modified. Review file created at `._design_docs/cache-handling-phase15-design/part-08-design-review-gate-01.md`.
+
+**Outcome:** PASS -- 0 BLOCKING, 1 non-blocking observation (N1: R10..R23, R20..R23 duplicate subrange typo in part-02 C-regression row), 0 INFO.
+
+**What went well:** Independent check of all 34 checklist items against fresh file reads. Verified 0 CRLF, 0 BOM, 0 non-ASCII, 0 trailing whitespace on every design file via PowerShell. Verified git status shows only M on tracker.md and document-index.md (no prior stage design/impl docs touched). Verified stress/longrun/bench scripts already exist on disk so C8 no-new-test-code holds. Verified the 1000 hits+misses threshold rule citation matches manager memory line 188.
+
+**What to improve:** New review file on Windows was created with CRLF line endings by the file-creation tool, requiring a normalize-LF pass. The create_file tool does not normalize line endings, so the post-write LF conversion step is now mandatory. The linter also flags table-column padding style on new files (MD060); compact style (single space padding) satisfies the rule, while the existing design files use padded style without complaint, suggesting the linter rule is applied per-file or to new files only. Both constraints are now part of the new-file workflow below.
+
+**Files changed:**
+
+- `._design_docs/cache-handling-phase15-design/part-08-design-review-gate-01.md` (created, LF-only, 102 lines)
+- `/memories/repo/architect.md` (updated with this post-task record and a new improvement)
+
+## Improvement: New review files on Windows need LF-normalize and compact table style
+
+Condition:
+
+- Creating a new markdown file under `._design_docs/` on Windows using the file-creation tool (create_file, replace_string_in_file, or equivalent) and the file is to be checked by `git diff --check` and the project linter
+
+Action:
+
+- Do convert the file to LF-only UTF-8 (no BOM) immediately after creation using `[System.IO.File]::ReadAllText` followed by a CRLF-to-LF replace and `WriteAllText` with `UTF8Encoding($false)`; do verify 0 CRLF, no BOM, 0 non-ASCII, no trailing whitespace before running `git diff --check`; do use compact table-column style (single space padding around cell content) to satisfy MD060 on new files; do count raw CR/LF bytes and check first three bytes for BOM; don't trust the file-creation tool's default line endings; don't use `Set-Content -NoNewline` because that collapses the file to a single line; don't reuse the padded table-column style found in older design files on new files if the linter is flagging it
+## Improvement: Plan files created on Windows by Developer session have CRLF, not LF
+
+Condition:
+- Reviewing implementation plan files (entry doc + part files under `._design_docs/cache-handling-phaseN-implementation/`) authored in a Developer session on Windows, and the plan files have CRLF line endings while the corresponding design files in `._design_docs/cache-handling-phaseN-design/` are LF-only
+
+Action:
+- Verify LF-only convention by reading the design files first (0 CRLF, bare_LF equals line count). Then check the implementation plan files the same way. Record CRLF on the plan files as BLOCKING on I1, not as non-blocking observation. The `git diff --check` exit 0 on untracked plan files is expected (no diff to check), so don't rely on I4 to catch this. Don't accept the plan on I1 when the design baseline is LF-only. Cite the specific 5 files, the line-ending count, and the LF-only design convention. Specify the exact conversion procedure (`ReadAllText` then `-replace "\r\n", "\n"` then `WriteAllText` with `UTF8Encoding($false)`) and the verification commands (CRLF regex count, BOM check, `git diff --check`). Don't mark I1 PASS just because `git diff --check` exits 0; the LF-only convention is a content requirement, not a diff requirement.
+
+## Improvement: Plan risk-table mirror vs checklist-required risk categories
+
+Condition:
+- Reviewing implementation plan whose risk table mirrors the design's risk table faithfully, and the user's review checklist lists specific required risk categories (e.g., "flaky tests") that are not in either the design or the plan
+
+Action:
+- Record the missing risk category as non-blocking observation (N-class), not blocking finding. The plan faithfully extends the design's risk table and the design review (part-08) passed without the missing category. The gap is a design-level observation, not a plan-level gap. Verify the plan's existing items cover related concepts (e.g., "Pre-existing test bug becomes a hard fail" partially covers "flaky tests"). Don't FAIL the plan on a checklist item that the design baseline also doesn't meet. Record the absence with a one-line note and let the Manager decide whether to amend the design in a future stage.
+
+## Improvement: Carry-forward contract preservation pattern in entry doc
+
+Condition:
+- Reviewing implementation plan whose entry doc has a `Carry-forward contracts from prior stages` section listing all closure contracts from the design's traceability table (T114, T114a, T115, T121, E13-01..E13-16, S01..S08, L01..L03, B01..B08, MTMD placeholder, diagnostic-source namespace isolation, bounded cache metadata format)
+
+Action:
+- Verify the entry doc lists each contract name and points to the source part file. Verify the per-category evidence capture section in part-02 cites the relevant contract for each category (e.g., C-public-http cites E13-01..E13-16, C-closure cites T114/T114a/T115/T121). Record PASS on F3 when the carry-forward list is complete and the evidence capture section references the contracts. Don't require the plan to repeat the full closure contract details; pointing to the design's traceability table is sufficient.
+
+## Improvement: Brief R-item wording imprecision vs actual code behavior in bug-fix review
+
+Condition:
+
+- Reviewing a bug-fix against a brief with specific R-items, and an R-item uses slightly imprecise wording that conflates related but distinct cases (e.g., brief says "fallback path is taken when no boundary ends at token_span_end" but the code only takes the fallback when there are NO boundaries at all, not when boundaries exist but none end at the target; or brief says "multi-turn prompts" but the actual test fixture is single-message)
+
+Action:
+
+- Verify each R-item claim against the actual code in the touched file, not just the brief's interpretation. Distinguish the overall claim (e.g., "no regression introduced by the fix") from the specific code behavior claim (e.g., "fallback path is taken in case X"). Read the touched function's if/else branches to confirm which case triggers which behavior. Record wording imprecision as INFO, not BLOCKING, when the overall claim holds but the specific code behavior is narrower than the brief describes. Cite the exact code branch. Don't reject the fix on wording imprecision alone; don't accept the R-item as PASS without checking the actual code path.
+
+### Post-Task Review -- 2026-06-12 (Stage 15 implementation-plan review gate 01)
+
+**Task:** Architect independent implementation-plan review of Stage 15 (full test suite validation, bug-fix loop, benchmark report). 31 checklist items across F/G/H/I sections. Review file created at `._design_docs/cache-handling-phase15-implementation/part-05-architect-plan-review-gate-01.md`.
+
+**Outcome:** REWORK -- 1 BLOCKING (I1: plan files have CRLF line endings instead of LF-only), 1 non-blocking observation (N1: plan risk table does not list "flaky tests" as a category, design baseline also omits it), 0 INFO.
+
+**What went well:** Independent check of all 31 checklist items against fresh file reads. Verified 0 non-ASCII, 0 trailing whitespace, 0 BOM, 0 CRLF on the review file after LF conversion. Verified git status shows only the new review file as untracked (no prior stage design/impl docs touched). Verified all referenced scripts and test plan parts exist on disk. Verified the carry-forward contracts list in the entry doc covers all required items. Verified the N1 finding from the design review is addressed in part-01 step 2 and part-02 C-regression.
+
+**What to improve:** The 5 implementation plan files (entry doc + parts 01-04) were authored in a previous Developer session on Windows and have CRLF line endings throughout (CRLF count equals line count for all 5 files). The design files are LF-only. This is a clear hygiene violation on I1. The `git diff --check` exit 0 on untracked files does not catch CRLF, so I4 passed while I1 failed. The LF-only check must be done by reading the raw bytes and counting CRLF patterns, not by relying on `git diff --check`.
+
+**Files changed:**
+
+- `._design_docs/cache-handling-phase15-implementation/part-05-architect-plan-review-gate-01.md` (created, LF-only, 124 lines)
+- `/memories/repo/architect.md` (updated with this post-task record and 3 new improvements)
+
+### Post-Task Review -- 2026-06-12 (Stage 15 implementation-plan re-review, I1 fix verification)
+
+**Task:** Architect re-review of Stage 15 implementation plan after Developer addressed the single BLOCKING I1 (CRLF line endings on all 5 plan files). Re-review was a focused verification, not a full 31-item re-check. Re-review section appended to the same review file
+`._design_docs/cache-handling-phase15-implementation/part-05-architect-plan-review-gate-01.md` under a `## Re-review (REWORK I1 fix verification)` heading.
+
+**Outcome:** PASS -- 0 BLOCKING, 0 non-blocking, 0 INFO. I1 fix verified: all 5 plan files CR=0 LF>0 BOM=False matching the LF-only design baseline. `git diff --check` on the 5 plan files and on the review file both exit 0 with no output. LF count after conversion (168, 225, 177, 97, 180) matches the line counts recorded in the original review, confirming no content changes were introduced. `git status --short` shows only the 5 expected modifications (M on tracker.md, document-index.md, and the three repo-memory files; untracked for the four design and implementation trees). No design file, prior-stage implementation file, or other review file was modified.
+
+**What went well:** Byte-level check (raw CR/LF/BOM count, non-ASCII count, trailing-whitespace count) on the 5 plan files confirmed I1 fix matches the design baseline. The LF count match (168/225/177/97/180) against the original review's line counts is a strong signal that no content was lost or added. `git status --short` filtered by `.agents/` and `._design_docs/` confirmed scope of changes was limited to the 5 expected modifications.
+
+**What to improve:** The append edit to the existing review file (using `replace_string_in_file`) preserved LF line endings because the file was already LF-only, so no post-write LF conversion was needed. This is the desired behavior; the create_file / replace_string_in_file tools normalize to LF when the existing file is LF-only, but insert CRLF when the existing file is CRLF. The MD024/no-duplicate-heading lint warning on the new `## Handoff state` heading is expected and accepted: the re-review section is a separate gate with its own handoff state, and the duplicate heading is structurally correct.
+
+**Files changed:**
+
+- `._design_docs/cache-handling-phase15-implementation/part-05-architect-plan-review-gate-01.md` (appended re-review section, LF-only, 219 lines)
+- `/memories/repo/architect.md` (this entry)
+
+### Post-Task Review -- 2026-06-12 (Stage 15 implementation review gate 01)
+
+**Task:** Architect independent review of Stage 15 pre-execution readiness evidence (Step 1-3) authored by the Developer in `cache-handling-phase15-implementation.md` under `## Pre-execution readiness evidence (Step 1-3)`. 34 checklist items across J/K/L/M/N sections. Reviewer did not author the implementation evidence. Verdict reported by Developer is `READY for test execution` with all 10 prerequisites P1-P10 PASS and clean build exit 0 in 27.264 s.
+
+**Outcome:** PASS -- 0 BLOCKING, 1 non-blocking (N1 diff stat drift), 0 INFO. All 34 checklist items verified against fresh file reads and direct PowerShell tests.
+
+**What went well:** Independent verification of all 10 P1-P10 prerequisites via direct `Test-Path` and `Get-Item` calls. MTP fixture `Qwen3.5-4B-Q4_K_M.gguf` cross-checked against Stage 10 implementation log line 98 to confirm the same fixture family. Build log `tmp/stage15-prebuild.log` last 40 lines inspected to confirm `llama-server.vcxproj` link succeeded. Implementation log verified LF-only (0 CRLF, no BOM, 0 non-ASCII, 0 trailing whitespace), 263 lines (under 300), `git diff --check` exit 0. P8 benchmark report target and P9 longrun/stress/bench subdirs verified as clean targets (Test-Path returns False on all 4). P10 precedent closing test report `test-report-20260610-04.md` verified to exist.
+
+**What to improve:** The implementation log cites a diff stat of `178 insertions, 3 deletions across 5 files` for the 5 M entries; the current `git diff --stat` shows 205 insertions and 3 deletions. The 27-insertion drift is consistent with a self-improvement memory file update after the readiness run was captured (the developer memory 85-line update is a plausible source). The 5-file set, the deletion count, and the readiness verdict are unaffected. Recorded as non-blocking N1. Candidate improvement: when reviewing pre-execution readiness evidence, run `git diff --stat` at review time and note any drift from the captured snapshot as an informational observation rather than a verdict impact. Decision: do not add a new memory entry; the existing "verify test-report counts before applying closure text" and "changed paths for untracked review docs" improvements already cover the cross-check pattern. The LF-only conversion step on the new review file was performed per the existing "New review files on Windows need LF-normalize and compact table style" improvement. The MD060 table-column padding rule was satisfied with single-space padding.
+
+**Files changed:**
+
+- `._design_docs/cache-handling-phase15-implementation/part-06-architect-implementation-review-gate-01.md` (created, LF-only, 88 lines, `git diff --check` exit 0)
+- `.agents/skills/self-improvement/assets/architect.md` (this entry)
+
+### Post-Task Review -- 2026-06-13 (Stage 15 B05/B06 bug-fix review)
+
+**Task:** Architect focused bug-fix review of the two-diff spec for Stage 15 B05/B06 BLOCKED rows. 9 checklist items (R1-R9) covering the two hunks in `tools/server/server-cache-hybrid.cpp`, build verification, V2 smoke test, MTP behavior, and `git diff --check`. Review file created at `._design_docs/cache-handling-phase15-implementation/part-07-b05-b06-fix-review.md`.
+
+**Outcome:** PASS -- 0 BLOCKING, 0 non-blocking, 2 INFO.
+
+**What went well:** Independent verification of both git diff hunks against the actual code in the touched file (lines 2988-2994 and 3064-3068). Confirmed only two hunks in the diff (R3). Rebuilt `llama-server` to verify exit 0 and no new warnings (R5). Read V2 smoke summary JSON directly to confirm 9/10 cache_hits with Req 1 warmup (R6). Read MTP smoke summary JSON to confirm 0/10 cache_hits (R7). Ran `git diff --check` on the touched file (exit 0) and on the new review file (exit 0) (R9). Verified boundary identity preservation through type+id+checksum fields in both attach and validate functions (R4). Verified exact-blob restore path is in a separate code path, not touched by the fix (R8).
+
+**What to improve:** Two of the brief's R-item descriptions used slightly imprecise wording that needed code-level verification to resolve. R6 said "multi-turn prompts" but the V2 fixture is single-message plain-text (the V2 evidence confirms the basic case works; the multi-turn case is the MTP /v1/chat/completions path which is a separate structural issue). R7 said "fallback path is taken when no boundary ends at token_span_end" but the code only takes the fallback when there are NO boundaries at all (the `else` branch); when boundaries exist but none end at the target, the `if (!attached_boundary)` branch sets `checkpoint_boundary_required=true` and validate fails. Both overall claims (9/10 hits, no regression) hold; the specific code behavior claims needed precise reading. This is now recorded as a new improvement "Brief R-item wording imprecision vs actual code behavior in bug-fix review".
+
+**Files changed:**
+
+- `._design_docs/cache-handling-phase15-implementation/part-07-b05-b06-fix-review.md` (created, LF-only, 90 lines, `git diff --check` exit 0)
+- `.agents/skills/self-improvement/assets/architect.md` (updated with this post-task record and a new improvement)
