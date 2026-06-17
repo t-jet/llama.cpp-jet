@@ -1,5 +1,13 @@
 # QA improvement memory
 
+## Improvement: distinguish D17-IP-* from Manager design-gate decisions in test-plan review
+
+Condition:
+- Reviewing a Stage N test plan that lists binding decisions with prefixes like `D17-IP-*` alongside design-gate decisions like `D17-*` (or analogous stage-scoped decision prefixes)
+
+Action:
+- Do treat the `D{N}-IP-*` (or `IP-*` stage-prefixed) decisions as implementation-plan binding rules, not Manager design-gate decisions; the `IP` prefix denotes implementation plan. When the test plan header groups them under "Manager decisions (binding)", record a non-blocking finding noting the label imprecision; the substance is correct (the plan honors all six) but the label should distinguish Manager-gate from implementation-plan decisions. Do not block the review on a label-only issue when the decisions are all honored in the rows.
+
 ## Improvement: reissue partial report for truncated prior sub-session
 
 Condition:
@@ -128,6 +136,14 @@ Condition:
 Action:
 - Check `git status --short` for reviewed and edited paths. Distinguish pre-existing plan/source changes from files changed in review. Report only review-owned edits as own handoff changes.
 
+## Improvement: blank line between single-line label and following list
+
+Condition:
+- Authoring markdown in `._design_docs/...` with a section that uses a single-line label ending in a colon (e.g. `Design:`, `In scope:`, `Out of scope:`, `Implementation:`, `Prior test plan parts:`) followed by a bulleted list on the next line
+
+Action:
+- Do insert a blank line between the label line and the first list item. The pattern `Label:\n- item` triggers markdownlint MD032 "Lists should be surrounded by blank lines" on the first list item, even when the list itself is internally well-formed. The fix is `Label:\n\n- item`. Use a `multi_replace_string_in_file` to add the blank line after every such label; `get_errors` to confirm zero lint errors before handoff. Verified pattern in part-26 (`Inputs (read in order, all durable):` followed by blank line then list).
+
 ## Improvement: wait for model-specific readiness in public probes
 
 Condition:
@@ -135,6 +151,22 @@ Condition:
 
 Action:
 - Treat `/health` as process readiness only. Wait for model-specific log marker when build emits one, or make first behavior request guarded readiness/admission probe. Require direct secondary-resource evidence such as `draft_n > 0` before accepting later restore or hit claims. Preserve marker-less setup attempts separately from product evidence. Keep startup log verbosity low unless diagnostics require it.
+
+## Improvement: run config-validation tests via integration tier, not just unit tier, when side effects precede validation
+
+Condition:
+- Stage test plan has both a unit row and an integration row for the same config-validation rule (e.g. `cache_prompt_evidence = raw` requires `--log-prompts-dir`; `--cache-cold-max-mib` must be >= -1), and the validation lives in server-context.cpp or similar file inside load_model() after slot init
+
+Action:
+- Do not assume the unit-row PASS proves the config is rejected at startup. The integration row catches the case where validation runs after model warmup or slot init and a precondition crash (e.g. STATUS_STACK_BUFFER_OVERRUN) bypasses the validation. Map the integration-row verdict independently of the unit-row verdict; if integration crashes, the unit row is not evidence of clean rejection. Document the crash site in the test report's findings section with the exit code, the last log line, and the offset between the last log line and the validation block in source.
+
+## Improvement: map focused test functions to test plan UT rows before PASS-classifying
+
+Condition:
+- A test plan's unit tier (TP-NN-UTx) lists N rows, and the focused test binary has fewer test functions, but the existing test functions cover multiple UT row assertions in aggregate
+
+Action:
+- Read the test source diff (`git diff HEAD tests/test-*.cpp`) and map each test function to the UT row assertions it covers. A test function with multiple asserts can cover multiple UT rows. PASS only the rows whose assertion is in the test function; mark uncovered rows BLOCKED-pending-test-code even if other rows in the same test function PASS. Do not collapse a multi-assert test function into a single PASS for one UT row when it covers assertions for several rows. The test plan's row contract is the source of truth; the test function's asserts are evidence per row.
 
 ## Improvement: classify available fixture no-evidence runs
 

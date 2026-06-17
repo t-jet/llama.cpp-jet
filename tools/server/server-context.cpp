@@ -1378,6 +1378,53 @@ private:
         // Necessary similarity of prompt for slot selection
         slot_prompt_similarity = params_base.slot_prompt_similarity;
 
+        // Validate cache configuration before allocating slots. A misconfigured
+        // --cache-prompt-evidence must exit before any slot/spec work so the
+        // bounded error prints and the server exits with a non-zero status
+        // (Stage 17 F-17-EXEC-01 fix 2026-06-17).
+        if (params_base.cache_ram_mib != 0) {
+            if (params_base.cache_cold_max_mib < -1) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib must be -1, 0, or positive\n");
+                throw std::runtime_error("--cache-cold-max-mib must be -1, 0, or positive");
+            }
+            if (params_base.cache_prompt_evidence != "off" &&
+                params_base.cache_prompt_evidence != "redacted" &&
+                params_base.cache_prompt_evidence != "raw") {
+                SRV_ERR(" - cache: invalid --cache-prompt-evidence mode: %s\n",
+                        params_base.cache_prompt_evidence.c_str());
+                throw std::runtime_error("invalid --cache-prompt-evidence mode");
+            }
+            if (params_base.cache_prompt_evidence != "off") {
+                if (params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-mode hybrid\n");
+                    throw std::runtime_error("--cache-prompt-evidence requires --cache-mode hybrid");
+                }
+                if (params_base.cache_prompt_evidence_dir.empty()) {
+                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-prompt-evidence-dir\n");
+                    throw std::runtime_error("--cache-prompt-evidence requires --cache-prompt-evidence-dir");
+                }
+                if (params_base.cache_prompt_evidence == "raw" && params_base.path_prompts_log_dir.empty()) {
+                    SRV_ERR("%s", " - cache: raw prompt evidence requires --log-prompts-dir\n");
+                    throw std::runtime_error("raw prompt evidence requires --log-prompts-dir");
+                }
+            }
+            if (params_base.cache_cold_max_mib != -1 &&
+                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-mode hybrid\n");
+                throw std::runtime_error("--cache-cold-max-mib requires --cache-mode hybrid");
+            }
+            if (params_base.cache_cold_max_mib != 0 &&
+                !params_base.cache_cold_path.empty() &&
+                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
+                throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
+            }
+            if (params_base.cache_cold_max_mib > 0 && params_base.cache_cold_path.empty()) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-cold-path for enabled cold writes\n");
+                throw std::runtime_error("--cache-cold-max-mib requires --cache-cold-path");
+            }
+        }
+
         // setup slots
         SRV_INF("initializing slots, n_slots = %d\n", params_base.n_parallel);
 
@@ -1509,6 +1556,13 @@ private:
                     throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
                 }
                 SRV_INF(" - cache: cold store path: %s\n", params_base.cache_cold_path.c_str());
+                if (params_base.cache_cold_max_mib == 0) {
+                    SRV_INF("%s", " - cache: cold writes disabled by --cache-cold-max-mib 0\n");
+                } else if (params_base.cache_cold_max_mib < 0) {
+                    SRV_INF("%s", " - cache: cold budget: unlimited\n");
+                } else {
+                    SRV_INF(" - cache: cold budget: %d MiB\n", params_base.cache_cold_max_mib);
+                }
             }
         } else {
             SRV_INF("%s", "prompt cache is disabled - use `--cache-ram N` to enable it\n");
@@ -5097,6 +5151,75 @@ void server_routes::init_routes() {
             write_cache_metric("counter", "llamacpp_cache_promotion_queue_full_total", "Promotion queue-full events by mode.", json_value(cache_stats, "n_promotion_queue_full", 0));
             write_cache_metric("gauge",   "llamacpp_cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
             write_cache_metric("gauge",   "llamacpp_cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
+            write_cache_metric("gauge",   "cache_cold_bytes", "Current descriptor-owned cold payload bytes.", json_value(cache_stats, "cache_cold_bytes", 0));
+            write_cache_metric("gauge",   "cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", -1));
+            write_cache_metric("counter", "cache_cold_demotions_skipped_total", "Cold demotions skipped before write.", json_value(cache_stats, "cache_cold_demotions_skipped_total", 0));
+            const json cold_eviction_rows = cache_stats.contains("cache_cold_evictions_by_shape") ?
+                cache_stats["cache_cold_evictions_by_shape"] : json::array();
+            if (cold_eviction_rows.empty()) {
+                write_cache_metric_with_two_labels("counter", "cache_cold_evictions_total", "Cold payload evictions by reason and kind.", "reason", "none", "payload_kind", "none", 0);
+            } else {
+                for (const auto & row : cold_eviction_rows) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_cold_evictions_total", "Cold payload evictions by reason and kind.",
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json cold_skip_rows = cache_stats.contains("cache_cold_demotions_skipped_by_shape") ?
+                cache_stats["cache_cold_demotions_skipped_by_shape"] : json::array();
+            if (cold_skip_rows.empty()) {
+                write_cache_metric_with_two_labels("counter", "cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.", "reason", "none", "payload_kind", "none", 0);
+            } else {
+                for (const auto & row : cold_skip_rows) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.",
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json restore_miss_rows = cache_stats.contains("cache_restore_misses_by_shape") ?
+                cache_stats["cache_restore_misses_by_shape"] : json::array();
+            if (restore_miss_rows.empty()) {
+                write_cache_metric_with_three_labels("counter", "cache_restore_misses_total", "Restore lookup misses by bounded reason.", "reason", "none", "profile", "none", "pair_state", "none", 0);
+            } else {
+                for (const auto & row : restore_miss_rows) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_restore_misses_total", "Restore lookup misses by bounded reason.",
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        "profile", json_value(row, "profile", std::string("unknown")),
+                        "pair_state", json_value(row, "pair_state", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json evidence_rows = cache_stats.contains("cache_prompt_evidence_records_by_shape") ?
+                cache_stats["cache_prompt_evidence_records_by_shape"] : json::array();
+            if (evidence_rows.empty()) {
+                write_cache_metric_with_two_labels("counter", "cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.", "mode", "off", "result", "none", 0);
+            } else {
+                for (const auto & row : evidence_rows) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.",
+                        "mode", json_value(row, "mode", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
+            const json prefix_rows = cache_stats.contains("cache_prefix_candidates_by_shape") ?
+                cache_stats["cache_prefix_candidates_by_shape"] : json::array();
+            if (prefix_rows.empty()) {
+                write_cache_metric_with_two_labels("counter", "cache_prefix_candidates_total", "Prefix candidates by result and reason.", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : prefix_rows) {
+                    write_cache_metric_with_two_labels(
+                        "counter", "cache_prefix_candidates_total", "Prefix candidates by result and reason.",
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
             write_cache_metric("counter", "llamacpp_cache_protected_root_demotions_total", "Protected root demotions by mode.", json_value(cache_stats, "n_protected_root_demotions", 0));
             // Step 10: Promotion latency histogram
             write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_0_1ms", "Promotion latency bucket 0-1ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_0_1ms", 0));
@@ -5225,6 +5348,24 @@ void server_routes::init_routes() {
             write_checkpoint_hits();
             write_cache_metric("counter", "cache_checkpoint_admissions_total", "Checkpoint payload admissions by mode.", json_value(cache_stats, "cache_checkpoint_admissions_total", 0));
             write_cache_metric("counter", "cache_checkpoint_admission_failures_total", "Checkpoint payload admission failures by mode.", json_value(cache_stats, "cache_checkpoint_admission_failures_total", 0));
+            const json checkpoint_admission_rows = cache_stats.contains("cache_checkpoint_admissions_by_shape") ?
+                cache_stats["cache_checkpoint_admissions_by_shape"] : json::array();
+            if (checkpoint_admission_rows.empty()) {
+                write_cache_metric_with_three_labels(
+                    "counter", "cache_checkpoint_admissions_by_shape_total",
+                    "Checkpoint admissions under Stage 17 policy.",
+                    "policy", "none", "result", "none", "reason", "none", 0);
+            } else {
+                for (const auto & row : checkpoint_admission_rows) {
+                    write_cache_metric_with_three_labels(
+                        "counter", "cache_checkpoint_admissions_by_shape_total",
+                        "Checkpoint admissions under Stage 17 policy.",
+                        "policy", json_value(row, "policy", std::string("unknown")),
+                        "result", json_value(row, "result", std::string("unknown")),
+                        "reason", json_value(row, "reason", std::string("unknown")),
+                        json_value(row, "value", 0));
+                }
+            }
         } catch (const std::exception & e) {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
@@ -6365,6 +6506,11 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
 bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const server_task & task) {
     const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
     const cache_workload_profile profile = detect_workload_profile();
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const bool runtime_has_draft = need_dft;
+    const payload_pair_state pair_state = runtime_has_draft ?
+        payload_pair_state::target_and_draft :
+        payload_pair_state::target_only;
     record_workload_profile(profile);
     
     SRV_DBG(" - hybrid cache: try_restore - looking up %zu tokens in namespace %s\n",
@@ -6421,17 +6567,29 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     if (it_best == entries.end()) {
         SRV_INF("%s", " - hybrid cache: try_restore - no exact match found\n");
         n_misses++;
+        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
+        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
+        const cache_restore_miss_reason reason = prefix_candidate ?
+            cache_restore_miss_reason::unsafe_prefix_rejected :
+            classify_restore_miss(task.tokens, lookup_namespace_id);
+        record_restore_miss(reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
         return false;
     }
     n_branch_lookup_hits++;
+
+    if (it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
+        SRV_INF(" - hybrid cache: try_restore - prefix candidate rejected by Stage 17 policy (entry tokens: %d, task tokens: %zu)\n",
+                it_best->n_tokens(), task.tokens.size());
+        n_misses++;
+        record_restore_miss(cache_restore_miss_reason::unsafe_prefix_rejected, profile, pair_state, task, lookup_namespace_id, &(*it_best));
+        return false;
+    }
 
     // Exact match found - restore state
     int match_len = it_best->n_tokens();
     SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
             match_len, it_best->namespace_id.c_str(), it_best->use_count);
 
-    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-    const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
     payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
@@ -6443,6 +6601,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             n_fallback_restores++;
             SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent restore rejected (%s)\n",
                     checkpoint_path_failure.c_str());
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         selected_payload_kind = payload_kind::checkpoint;
@@ -6460,12 +6619,14 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         n_misses++;
         SRV_WRN(" - hybrid cache: try_restore - metadata-only validation mismatch (namespace: %s, selected node: %" PRIu64 ")\n",
                 lookup_namespace_id.c_str(), selected_node_id);
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     if (metadata_source_unavailable || restore_source == entries.end()) {
         n_misses++;
         SRV_DBG(" - hybrid cache: try_restore - metadata-only source payload is unavailable (namespace: %s, selected node: %" PRIu64 ")\n",
                 lookup_namespace_id.c_str(), selected_node_id);
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     if (restore_source != it_best) {
@@ -6480,6 +6641,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
                 n_fallback_restores++;
                 SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent source rejected (%s)\n",
                         checkpoint_path_failure.c_str());
+                record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
                 return false;
             }
             selected_payload_kind = payload_kind::checkpoint;
@@ -6502,6 +6664,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             }
             // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::demoting) {
@@ -6511,6 +6674,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::promoting) {
@@ -6520,6 +6684,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6534,6 +6699,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
                 n_checkpoint_restore_failures++;
             }
         }
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
@@ -6554,6 +6720,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot target state\n");
             n_restore_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6564,6 +6731,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot draft state\n");
             n_restore_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6576,12 +6744,14 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore target state\n");
         n_restore_failures++;
         n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
         SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore draft state\n");
         n_restore_failures++;
         n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     const auto rollback_restore = [&]() {
@@ -6624,6 +6794,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             n_restore_failures++;
             n_restore_target_apply_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored target state (%zu bytes)\n", n_tgt);
@@ -6644,6 +6815,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             n_restore_failures++;
             n_restore_draft_apply_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
@@ -6674,6 +6846,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             n_checkpoint_restore_successes++;
         }
     }
+    record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, profile, pair_state, task, lookup_namespace_id);
 
     SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d (hits: %zu, misses: %zu)\n",
             restored_token_count, slot.id, n_hits, n_misses);
@@ -6682,12 +6855,24 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
 }
 
 bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & task) {
+    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
     auto it_best = find_best_match(task.tokens, task.prompt_metadata);
     const cache_workload_profile profile = detect_workload_profile();
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const bool runtime_has_draft = need_dft;
+    const payload_pair_state pair_state = runtime_has_draft ?
+        payload_pair_state::target_and_draft :
+        payload_pair_state::target_only;
 
     if (it_best == entries.end()) {
         SRV_INF("%s", " - hybrid cache: no match found\n");
         n_misses++;
+        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
+        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
+        const cache_restore_miss_reason reason = prefix_candidate ?
+            cache_restore_miss_reason::unsafe_prefix_rejected :
+            classify_restore_miss(task.tokens, lookup_namespace_id);
+        record_restore_miss(reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
         return false;
     }
 
@@ -6695,15 +6880,14 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     SRV_INF(" - hybrid cache: found match with %d tokens (matched: %d/%zu, namespace: %s)\n",
             it_best->n_tokens(), match_len, task.tokens.size(), it_best->namespace_id.c_str());
 
-    if (match_len != it_best->n_tokens()) {
-        SRV_WRN(" - hybrid cache: rejecting partial exact-blob match (%d/%d tokens)\n",
-                match_len, it_best->n_tokens());
+    if (match_len != it_best->n_tokens() || it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
+        SRV_WRN(" - hybrid cache: rejecting non-exact restore candidate (%d/%d tokens, task tokens: %zu)\n",
+                match_len, it_best->n_tokens(), task.tokens.size());
         n_misses++;
+        record_restore_miss(cache_restore_miss_reason::unsafe_prefix_rejected, profile, pair_state, task, lookup_namespace_id, &(*it_best));
         return false;
     }
 
-    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-    const bool runtime_has_draft = need_dft;
     const hot_payload_record * payload = nullptr;
     std::string restore_failure;
     payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
@@ -6715,6 +6899,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             n_fallback_restores++;
             SRV_WRN(" - hybrid cache: load_slot - checkpoint-dependent restore rejected (%s)\n",
                     checkpoint_path_failure.c_str());
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         selected_payload_kind = payload_kind::checkpoint;
@@ -6732,6 +6917,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::demoting) {
@@ -6741,6 +6927,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         if (descriptor_it->second.residency == payload_residency_state::promoting) {
@@ -6750,6 +6937,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6764,6 +6952,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
                 n_checkpoint_restore_failures++;
             }
         }
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
@@ -6784,6 +6973,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             SRV_ERR("%s", " - hybrid cache: failed to snapshot target state\n");
             n_restore_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6794,6 +6984,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             SRV_ERR("%s", " - hybrid cache: failed to snapshot draft state\n");
             n_restore_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
     }
@@ -6806,12 +6997,14 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
         SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore target state\n");
         n_restore_failures++;
         n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
         SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore draft state\n");
         n_restore_failures++;
         n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
         return false;
     }
     const auto rollback_restore = [&]() {
@@ -6853,6 +7046,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             n_restore_failures++;
             n_restore_target_apply_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
@@ -6872,6 +7066,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             n_restore_failures++;
             n_restore_draft_apply_failures++;
             n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
         }
         SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
@@ -6899,6 +7094,7 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             n_checkpoint_restore_successes++;
         }
     }
+    record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, profile, pair_state, task, lookup_namespace_id);
 
     SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
             restored_token_count, slot.id, it_best->use_count);

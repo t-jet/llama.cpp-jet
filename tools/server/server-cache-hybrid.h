@@ -82,6 +82,16 @@ enum class payload_residency_state {
     evicted,
 };
 
+enum class cache_restore_miss_reason {
+    namespace_mismatch,
+    token_count_mismatch,
+    checksum_mismatch,
+    exact_entry_absent,
+    unsafe_prefix_rejected,
+    payload_unavailable,
+    unsupported_route_or_profile,
+};
+
 // Residency state transition table (Stage 6):
 //
 //   hot      -> demoting    : demotion initiated by residency policy
@@ -401,6 +411,12 @@ public:
     bool debug_demote_first_checkpoint_for_tests();
     int debug_select_stage9_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id, cache_workload_profile profile);
     bool debug_request_stage9_checkpoint_promotion_for_tests(server_tokens tokens, const std::string & namespace_id);
+    void debug_record_stage17_prefix_miss_for_tests(
+        const server_tokens & tokens,
+        const prepared_prompt_metadata & metadata);
+    cache_restore_miss_reason debug_classify_stage17_miss_for_tests(
+        const server_tokens & tokens,
+        const prepared_prompt_metadata & metadata) const;
 
     // Phase 6 Step 6: Demotion protocol test hooks
     void debug_set_cold_store_for_tests(const std::string & path) {
@@ -610,6 +626,10 @@ private:
     size_t n_promotion_queue_full = 0;
     size_t n_cold_payload_bytes = 0;              // Total bytes in cold store (incremented on demotion success)
     size_t n_protected_root_demotions = 0;         // Protected roots that were demoted
+    int64_t cold_budget_bytes = -1;                // -1 = unlimited, 0 = cold writes disabled
+    size_t n_cold_demotions_skipped = 0;
+    std::map<std::string, size_t> n_cold_evictions_by_shape;
+    std::map<std::string, size_t> n_cold_demotions_skipped_by_shape;
 
     // Phase 6 Step 10: Promotion latency histogram
     // Buckets: 0-1ms, 1-5ms, 5-10ms, 10-50ms, 50-100ms, 100-500ms, 500ms-1s, 1s+
@@ -653,6 +673,10 @@ private:
     std::map<std::string, size_t> n_stage10_protected_root_decisions_by_shape;
     std::map<std::string, size_t> n_stage10_fallback_restores_by_shape;
     std::map<std::string, size_t> n_stage10_diagnostics_by_shape;
+    std::map<std::string, size_t> n_restore_misses_by_shape;
+    std::map<std::string, size_t> n_prompt_evidence_records_by_shape;
+    std::map<std::string, size_t> n_prefix_candidates_by_shape;
+    std::map<std::string, size_t> n_checkpoint_admissions_by_shape;
     size_t n_workload_profile_plain = 0;
     size_t n_workload_profile_checkpoint_dependent = 0;
     size_t n_workload_profile_unsupported = 0;
@@ -778,6 +802,32 @@ private:
         const std::vector<uint64_t> & forest_candidates,
         const server_tokens & tokens_new,
         cache_workload_profile profile);
+    std::list<hybrid_cache_entry>::iterator find_prefix_candidate(
+        const server_tokens & tokens_new,
+        const std::string & namespace_id,
+        cache_workload_profile profile);
+    cache_restore_miss_reason classify_restore_miss(
+        const server_tokens & tokens_new,
+        const std::string & namespace_id) const;
+    void record_restore_miss(
+        cache_restore_miss_reason reason,
+        cache_workload_profile profile,
+        payload_pair_state pair_state,
+        const server_task & task,
+        const std::string & lookup_namespace_id,
+        const hybrid_cache_entry * prefix_candidate = nullptr);
+    void record_prompt_evidence(
+        bool hit,
+        cache_restore_miss_reason reason,
+        cache_workload_profile profile,
+        payload_pair_state pair_state,
+        const server_task & task,
+        const std::string & lookup_namespace_id,
+        const hybrid_cache_entry * prefix_candidate = nullptr);
+    void record_prefix_candidate(const char * result, const char * reason);
+    bool cold_budget_allows_write(size_t bytes) const;
+    bool cold_budget_make_room(size_t bytes, const payload_descriptor & descriptor);
+    void record_cold_demotion_skipped(const payload_descriptor & descriptor, const char * reason);
     payload_kind select_restore_payload_kind(const hybrid_cache_entry & entry, cache_workload_profile profile) const;
     llama_state_seq_flags restore_state_flags_for_payload(payload_kind kind) const;
     int restored_token_count_for_payload(const hybrid_cache_entry & entry, payload_kind kind) const;

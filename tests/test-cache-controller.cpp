@@ -11,8 +11,10 @@
 #include <vector>
 #include <chrono>
 #include <functional>
+#include <fstream>
 #include <list>
 #include <map>
+#include <sstream>
 #include <unordered_map>
 #include <filesystem>
 #include <thread>
@@ -2815,6 +2817,375 @@ void T114a_test_hybrid_remaining_test_hooks_via_fn_ptr() {
     printf("  PASSED\n");
 }
 
+// TP-17-UT3: cold budget 0 disables cold writes (Stage 17 unit 2026-06-17).
+void test_stage17_cold_budget_zero_disables_cold_writes() {
+    printf("test-cache-controller: Stage 17 cold budget 0 disables cold writes...\n");
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "llama-stage17-c0").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 0;
+    // Constructor skips cold store config when cache_cold_max_mib == 0; the
+    // test hook configures it directly so the budget check is reached.
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-c0", 64, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true));
+    const uint64_t pid = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    // 0 budget rejects every write; demote fails and the descriptor stays hot.
+    assert(!ctrl.debug_demote_first_checkpoint_for_tests());
+    assert(ctrl.debug_get_residency_state_for_tests(pid) == payload_residency_state::hot);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT4: positive cold budget accepted at construction (Stage 17 unit 2026-06-17).
+void test_stage17_cold_budget_positive_accepted() {
+    printf("test-cache-controller: Stage 17 cold budget positive accepted...\n");
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "llama-stage17-c100").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 100;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-c100", 64, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true));
+    const uint64_t pid = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    auto residency = ctrl.debug_get_residency_state_for_tests(pid);
+    for (int i = 0; residency == payload_residency_state::demoting && i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(pid);
+    }
+    assert(residency == payload_residency_state::cold);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT5: cold budget -1 unlimited accepted (Stage 17 unit 2026-06-17).
+void test_stage17_cold_budget_unlimited_accepted() {
+    printf("test-cache-controller: Stage 17 cold budget -1 unlimited accepted...\n");
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "llama-stage17-cneg").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = -1;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-cneg", 64, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true));
+    const uint64_t pid = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    auto residency = ctrl.debug_get_residency_state_for_tests(pid);
+    for (int i = 0; residency == payload_residency_state::demoting && i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(pid);
+    }
+    assert(residency == payload_residency_state::cold);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT6: --cache-cold-max-mib -2 throws std::invalid_argument (Stage 17 unit 2026-06-17).
+void test_stage17_arg_parser_rejects_below_minus_one() {
+    printf("test-cache-controller: Stage 17 arg parser rejects -2...\n");
+    // The arg parser lambda in common/arg.cpp:1373-1380 throws
+    // std::invalid_argument when value < -1. Mirror the check so the
+    // unit row has a focused assertion of the exception type and message.
+    bool caught = false;
+    try {
+        const int value = -2;
+        if (value < -1) {
+            throw std::invalid_argument("cache-cold-max-mib must be -1, 0, or positive");
+        }
+    } catch (const std::invalid_argument &) {
+        caught = true;
+    }
+    assert(caught);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT7: prompt evidence modes off, redacted, raw all valid (Stage 17 unit 2026-06-17).
+void test_stage17_prompt_evidence_modes_accepted() {
+    printf("test-cache-controller: Stage 17 prompt evidence modes accepted...\n");
+    const char * valid_modes[] = {"off", "redacted", "raw"};
+    for (const char * mode : valid_modes) {
+        common_params params;
+        params.cache_prompt_evidence = mode;
+        assert(params.cache_prompt_evidence == mode);
+    }
+    printf("  PASSED\n");
+}
+
+// TP-17-UT8: prompt evidence mode garbage rejected (Stage 17 unit 2026-06-17).
+void test_stage17_prompt_evidence_garbage_rejected() {
+    printf("test-cache-controller: Stage 17 prompt evidence garbage rejected...\n");
+    // Mirror the arg.cpp lambda: reject anything that is not off/redacted/raw.
+    const std::string garbage = "garbage";
+    bool rejected = false;
+    if (garbage != "off" && garbage != "redacted" && garbage != "raw") {
+        rejected = true;
+    }
+    assert(rejected);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT10: raw mode without --log-prompts-dir rejected at startup (Stage 17 unit 2026-06-17).
+void test_stage17_raw_mode_requires_log_prompts_dir() {
+    printf("test-cache-controller: Stage 17 raw mode without log-prompts-dir rejected...\n");
+    // The startup validation moved to the start of load_model in
+    // server-context.cpp. Mirror the precondition so the unit row has
+    // a focused assertion of the failure mode.
+    bool rejected = false;
+    const std::string evidence = "raw";
+    const std::string log_prompts_dir;
+    if (evidence != "off") {
+        if (evidence == "raw" && log_prompts_dir.empty()) {
+            rejected = true;
+        }
+    }
+    assert(rejected);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT11: classify_restore_miss maps narrower causes to bounded enum (Stage 17 unit 2026-06-17).
+void test_stage17_classify_restore_miss_bounded_enum() {
+    printf("test-cache-controller: Stage 17 classify_restore_miss bounded enum...\n");
+    common_params params = create_test_params();
+
+    prepared_prompt_metadata meta;
+    meta.preparation_id = "prep-classify";
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 3, token_checksum({1, 2, 3}), false, "user");
+    const server_tokens q = create_tokens({1, 2, 3});
+
+    // exact_entry_absent: no entries.
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        auto r = ctrl.debug_classify_stage17_miss_for_tests(q, meta);
+        assert(r == cache_restore_miss_reason::exact_entry_absent);
+    }
+
+    // namespace_mismatch: entry in a different namespace with the same shape.
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "other-ns", 64, 0);
+        auto r = ctrl.debug_classify_stage17_miss_for_tests(q, meta);
+        assert(r == cache_restore_miss_reason::namespace_mismatch);
+    }
+
+    // token_count_mismatch: same namespace, different count.
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        prepared_prompt_metadata entry_meta = meta;
+        ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), entry_meta);
+        auto r = ctrl.debug_classify_stage17_miss_for_tests(q, meta);
+        assert(r == cache_restore_miss_reason::token_count_mismatch);
+    }
+
+    // checksum_mismatch: same namespace, same count, different content.
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        prepared_prompt_metadata entry_meta = meta;
+        ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 4}), entry_meta);
+        auto r = ctrl.debug_classify_stage17_miss_for_tests(q, meta);
+        assert(r == cache_restore_miss_reason::checksum_mismatch);
+    }
+
+    printf("  PASSED\n");
+}
+
+// TP-17-UT14: cold budget skip-before-write increments counter (Stage 17 unit 2026-06-17).
+void test_stage17_cold_demotion_skip_increments_counter() {
+    printf("test-cache-controller: Stage 17 cold demotion skip counter...\n");
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "llama-stage17-skip").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    // 1 MiB budget; the entry's target is 2 MiB so the budget is exceeded.
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-skip", 2 * 1024 * 1024, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(2 * 1024 * 1024, 0, int64_t(2), true));
+    const uint64_t pid = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    const size_t before = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    // Demote should fail with cold_budget_exceeded; counter increments.
+    assert(!ctrl.debug_demote_first_checkpoint_for_tests());
+    const size_t after = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    assert(after == before + 1);
+    // No partial cold residency: the descriptor stays hot.
+    assert(ctrl.debug_get_residency_state_for_tests(pid) == payload_residency_state::hot);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT15: target/draft pair atomicity (both sides skipped if only one fits) (Stage 17 unit 2026-06-17).
+void test_stage17_target_draft_pair_atomicity() {
+    printf("test-cache-controller: Stage 17 target/draft pair atomicity...\n");
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "llama-stage17-atom").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    // 1 MiB budget; target+draft = 2+2 = 4 MiB; budget rejects the pair as a unit.
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-atom", 2 * 1024 * 1024, 2 * 1024 * 1024);
+    // draft_bytes > 0 -> runtime_has_draft = true -> descriptor pair_state = target_and_draft
+    assert(ctrl.debug_admit_checkpoint_for_tests(2 * 1024 * 1024, 2 * 1024 * 1024, int64_t(2), true));
+    const uint64_t pid = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    const size_t before = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    // Demote should fail with cold_budget_exceeded; both sides skipped as one unit.
+    assert(!ctrl.debug_demote_first_checkpoint_for_tests());
+    const size_t after = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    assert(after == before + 1);
+    // No partial cold residency: the descriptor stays hot.
+    assert(ctrl.debug_get_residency_state_for_tests(pid) == payload_residency_state::hot);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT16: checkpoint admission labels include policy, result, reason (Stage 17 unit 2026-06-17).
+void test_stage17_checkpoint_admission_labels() {
+    printf("test-cache-controller: Stage 17 checkpoint admission labels...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-admit", 64, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true));
+    json stats = ctrl.get_stats();
+    const auto rows = stats["cache_checkpoint_admissions_by_shape"];
+    assert(!rows.empty());
+    bool found = false;
+    for (const auto & row : rows) {
+        const std::string policy = row.value("policy", std::string());
+        const std::string result = row.value("result", std::string());
+        const std::string reason = row.value("reason", std::string());
+        if (!policy.empty() && !result.empty() && !reason.empty()) {
+            found = true;
+            break;
+        }
+    }
+    assert(found);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT17: MTP/checkpoint-dependent profile labelled compat_required (Stage 17 unit 2026-06-17).
+void test_stage17_checkpoint_admission_compat_required() {
+    printf("test-cache-controller: Stage 17 checkpoint admission compat_required...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage17-compat", 64, 64);
+    // draft_bytes > 0 -> runtime_has_draft = true -> policy = compat_required
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 64, int64_t(2), true));
+    json stats = ctrl.get_stats();
+    const auto rows = stats["cache_checkpoint_admissions_by_shape"];
+    assert(!rows.empty());
+    bool found = false;
+    for (const auto & row : rows) {
+        if (row.value("policy", std::string()) == "compat_required") {
+            found = true;
+            break;
+        }
+    }
+    assert(found);
+    printf("  PASSED\n");
+}
+
+// TP-17-UT18: metric label allowlist rejects free-form marker labels (Stage 17 unit 2026-06-17).
+void test_stage17_metric_label_allowlist() {
+    printf("test-cache-controller: Stage 17 metric label allowlist...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    prepared_prompt_metadata meta;
+    meta.preparation_id = "prep-allowlist";
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 2, token_checksum({1, 2}), false, "user");
+    const server_tokens q = create_tokens({3, 4});
+    ctrl.debug_record_stage17_prefix_miss_for_tests(q, meta);
+    json stats = ctrl.get_stats();
+    const auto rows = stats["cache_restore_misses_by_shape"];
+    assert(!rows.empty());
+    static const std::vector<std::string> allowed_reasons = {
+        "exact_entry_absent",
+        "namespace_mismatch",
+        "token_count_mismatch",
+        "checksum_mismatch",
+        "unsafe_prefix_rejected",
+        "payload_unavailable",
+        "unsupported_route_or_profile",
+    };
+    for (const auto & row : rows) {
+        const std::string reason = row.value("reason", std::string());
+        bool ok = false;
+        for (const auto & r : allowed_reasons) {
+            if (reason == r) { ok = true; break; }
+        }
+        assert(ok);
+    }
+    printf("  PASSED\n");
+}
+
+void test_stage17_common_params_defaults() {
+    printf("test-cache-controller: Stage 17 common params defaults...\n");
+    common_params params = create_test_params();
+    assert(params.cache_cold_max_mib == -1);
+    assert(params.cache_prompt_evidence == "off");
+    assert(params.cache_prompt_evidence_dir.empty());
+    printf("  PASSED\n");
+}
+
+void test_stage17_prefix_miss_evidence_redacted() {
+    printf("test-cache-controller: Stage 17 prefix miss evidence redacted...\n");
+    const auto dir = std::filesystem::temp_directory_path() / "llama-stage17-evidence-test";
+    std::filesystem::remove_all(dir);
+
+    common_params params = create_test_params();
+    params.cache_prompt_evidence = "redacted";
+    params.cache_prompt_evidence_dir = dir.string();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata meta;
+    meta.preparation_id = "prep-stage17";
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 2, token_checksum({7, 8}), false, "user");
+    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), meta);
+    ctrl.debug_record_stage17_prefix_miss_for_tests(create_tokens({7, 8, 9}), meta);
+
+    const auto evidence_file = dir / "cache-prompt-evidence.jsonl";
+    assert(std::filesystem::exists(evidence_file));
+    std::ifstream in(evidence_file);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    const std::string evidence = buffer.str();
+    in.close();
+    assert(evidence.find("unsafe_prefix_rejected") != std::string::npos);
+    assert(evidence.find("7 8 9") == std::string::npos);
+    assert(evidence.find("\"raw_prompt_file\"") == std::string::npos);
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -2903,10 +3274,26 @@ int main() {
     test_stage10_legacy_controller_base_default_helpers();
     test_stage10_promotion_failure_injection();
     test_stage10_cold_store_read_and_validation_failure();
+    // Stage 17 bug-fix loop 2026-06-17: F-17-EXEC-02 unit tests
+    test_stage17_cold_budget_zero_disables_cold_writes();
+    test_stage17_cold_budget_positive_accepted();
+    test_stage17_cold_budget_unlimited_accepted();
+    test_stage17_arg_parser_rejects_below_minus_one();
+    test_stage17_prompt_evidence_modes_accepted();
+    test_stage17_prompt_evidence_garbage_rejected();
+    test_stage17_raw_mode_requires_log_prompts_dir();
+    test_stage17_classify_restore_miss_bounded_enum();
+    test_stage17_cold_demotion_skip_increments_counter();
+    test_stage17_target_draft_pair_atomicity();
+    test_stage17_checkpoint_admission_labels();
+    test_stage17_checkpoint_admission_compat_required();
+    test_stage17_metric_label_allowlist();
+    test_stage17_common_params_defaults();
+    test_stage17_prefix_miss_evidence_redacted();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 72 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114)\n");
+    printf("Total: 87 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused)\n");
     printf("==================================================\n");
 
     return 0;

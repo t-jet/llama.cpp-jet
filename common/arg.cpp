@@ -1370,6 +1370,33 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_CACHE_COLD_PATH").set_examples({LLAMA_EXAMPLE_SERVER}));
     add_opt(common_arg(
+        {"--cache-cold-max-mib"}, "N",
+        "set the maximum cold cache payload size in MiB (default: -1, -1 = no limit, 0 = disable cold writes)",
+        [](common_params & params, int value) {
+            if (value < -1) {
+                throw std::invalid_argument("cache-cold-max-mib must be -1, 0, or positive");
+            }
+            params.cache_cold_max_mib = value;
+        }
+    ).set_env("LLAMA_ARG_CACHE_COLD_MAX_MIB").set_examples({LLAMA_EXAMPLE_SERVER}));
+    add_opt(common_arg(
+        {"--cache-prompt-evidence"}, "MODE",
+        "prompt cache evidence mode: off, redacted, or raw (default: off)",
+        [](common_params & params, const std::string & value) {
+            if (value != "off" && value != "redacted" && value != "raw") {
+                throw std::invalid_argument("invalid cache prompt evidence mode: " + value);
+            }
+            params.cache_prompt_evidence = value;
+        }
+    ).set_env("LLAMA_ARG_CACHE_PROMPT_EVIDENCE").set_examples({LLAMA_EXAMPLE_SERVER}));
+    add_opt(common_arg(
+        {"--cache-prompt-evidence-dir"}, "PATH",
+        "directory for hybrid cache prompt evidence JSONL output",
+        [](common_params & params, const std::string & value) {
+            params.cache_prompt_evidence_dir = value;
+        }
+    ).set_env("LLAMA_ARG_CACHE_PROMPT_EVIDENCE_DIR").set_examples({LLAMA_EXAMPLE_SERVER}));
+    add_opt(common_arg(
         {"-kvu", "--kv-unified"},
         {"-no-kvu", "--no-kv-unified"},
         "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)",

@@ -78,7 +78,7 @@ Condition:
 
 Action:
 
-- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. Do separate task-local edits from pre-existing dirty paths. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
+- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
 
 ## Improvement: CRLF and trailing whitespace on Windows tool-inserted content
 
@@ -239,6 +239,16 @@ Condition:
 Action:
 
 - Do mark authored design as ready for independent review while leaving design review, manager gate, implementation planning, implementation, and QA gates unstarted. Don't use new design doc to approve later gates or imply implementation authorization.
+
+## Improvement: Design-review PASS with Manager gate pending
+
+Condition:
+
+- Independent design review passes and task asks to advance tracker or handoff toward implementation planning while Manager design gate is still pending
+
+Action:
+
+- Do record independent design review as PASS in the review report, entry doc, index, and tracker; do keep Manager design gate explicitly pending and name Manager as next owner. Do not imply code work is authorized until Manager gate passes, even if tracker status moves to implementation-planning per task instruction.
 
 ## Improvement: Operational stage design keeps architecture scope verbatim
 
@@ -604,6 +614,16 @@ Action:
 
 - Do verify the test report's root cause claim against the actual code in the touched file (read the function, trace the branches). Do record wording imprecision as non-blocking finding when the test report's overall claim holds but the specific code-behavior claim is slightly off. Do not let test report root cause analysis block the review if the bug-fix code itself is correct. Do not try to debug the original test failure during the bug-fix review; focus on whether the new fix is correct. Don't accept test report root cause as gospel; don't reject fix on test report wording alone.
 
+## Improvement: Bug-fix review with environmental verification blocker
+
+Condition:
+
+- Reviewing a bug-fix where verification is blocked by a system-level crash or environmental issue that reproduces on baselines with no fix-related flags, and the fix is a pure reordering or relocation with byte-identical moved logic
+
+Action:
+
+- Do distinguish between fix-introduced blockers and environmental blockers. Do verify the blocker reproduces on baselines (no cache flags, default settings) before classifying as environmental. Do check fit_params projection, memory accounting, or other environmental indicators for system state change. Do approve the fix based on code review alone when the moved logic is byte-identical and the fix is dependency-safe (uses only pre-set fields). Do surface the environmental blocker as a separate Manager decision rather than blocking the bug-fix review. Do not require re-execution of the repro in the same system state. Do verify the fix is positioned to produce the expected clean behavior on the next clean-state execution (e.g., bounded error message text, expected exit code). Don't conflate environmental blockers with fix correctness. Don't block sign-off on a correct fix when the blocker is reproducible on baselines with no fix-related flags.
+
 ## Improvement: Brief R-item claim about matching loop first-match behavior
 
 Condition:
@@ -613,3 +633,33 @@ Condition:
 Action:
 
 - Do trace the actual matching loop iteration order. Do record the brief's wording as non-blocking finding when the overall fix works (the new boundary is added to the list and is reachable) but the specific first-match claim is slightly off. Do verify the fix works end-to-end by checking the strict validator's re-iteration of boundaries after the matching loop sets descriptor fields. Don't reject fix on first-match wording imprecision alone when end-to-end behavior correct.
+
+## Improvement: Standalone model-log analysis as durable architecture evidence
+
+Condition:
+
+- Advising or authoring a separate model-log analysis report for cache behavior after a stage has created implementation parts and test reports
+
+Action:
+
+- Do place durable Markdown analysis in the active stage implementation tree as the next numbered part when it drives architecture, Manager decisions, or cache behavior questions; keep raw logs under `._analysis` or `._test_output` and reference them. Do update `document-index.md` for the new durable part, and update the stage tracker only if the report changes gate state, classification, or handoff. Don't put new durable model-log conclusions only in raw log folders or transient test artifacts.
+
+## Improvement: Architecture part filenames from entry docs
+
+Condition:
+
+- When a task asks for specific architecture part numbers and the architecture entry document lists full part filenames
+
+Action:
+
+- Do read the entry document links and use those exact filenames for part reads. Don't guess shortened part filenames from part numbers or section titles.
+
+## Improvement: Implementation-review deferral honoring
+
+Condition:
+
+- Reviewing an implementation whose implementation evidence (e.g., part-04) explicitly lists deferred or partial items, and the plan accepts those deferrals as the stage contract for the implementation-review gate
+
+Action:
+
+- Do verify each deferred item is recorded in the implementation evidence and that the design baseline does not require it for this gate. Do record checklist verdict as DEFERRED-ACCEPTABLE when deferral is contract-accepted, not BLOCKING. Do note the manager decision or design exclusion that authorizes the deferral. Don't re-surface implementor-recorded deferrals as new blocking findings when the contract already accepts them. Don't fold deferral evaluation into the main PASS/FAIL verdict; carry it as a separate per-row verdict and a short overall note.

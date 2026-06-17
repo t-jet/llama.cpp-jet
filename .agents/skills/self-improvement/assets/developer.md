@@ -1,5 +1,15 @@
 # Developer improvement memory
 
+## Improvement: Reconcile test report prose summary count against per-row sums
+
+Condition:
+
+- When reviewing a parent test report that contains both a prose summary line (e.g., "Total 11 PASS / 1 FAIL / 28 BLOCKED / 0 SKIP across 40 rows") and a per-row verdict table (or tier summary) that lists each row's verdict
+
+Action:
+
+- Do sum the per-row verdicts yourself (count PASS, FAIL, BLOCKED, SKIP across all tier tables) and compare the sums to the prose summary line; if the prose and the per-row sums disagree, the per-row table is authoritative and the prose has a counting typo. Cite the per-row sum in your developer review and note the prose discrepancy as a non-blocking INFO finding for QA to correct in a follow-up edit, not as a FAIL on the gate. Verified 2026-06-17 (Stage 17 test-results review): parent `test-report-20260617-01.md` prose said "Total 11 PASS / 1 FAIL / 28 BLOCKED" but per-row sums were 5 unit PASS + 7 integration PASS = 12 PASS and 13 unit BLOCKED + 4 integration BLOCKED + 5 synthetic + 3 stress + 2 heavy = 27 BLOCKED. The Manager closure decision and downstream handoffs must use the per-row total (12/1/27), not the prose number. Don't propagate the prose number into your own review or the handoff; don't fail the gate over a counting typo when the per-row table is the auditable source.
+
 ## Improvement: Dirty worktree handoff
 
 Condition:
@@ -711,3 +721,51 @@ Improvement outcome candidate: None new. The existing "Verify untracked document
 Similar memory check: Similar improvement found: Yes (existing "Verify untracked documentation edits" covers the trailing-whitespace + non-ASCII + scoped git diff --check pattern; existing "Replace stale test-report references" covers the test-report cross-reference pattern).
 
 Decision: No update.
+
+## Improvement: Close test file handles before Windows cleanup
+
+Condition:
+
+- When a Windows-focused test reads a temporary file and then removes the containing temp directory in the same test
+
+Action:
+
+- Do close the input/output stream before calling `std::filesystem::remove_all`, or use a nested scope so the stream is destroyed first; call the `remove_all(path, std::error_code&)` overload for best-effort cleanup. Windows can keep the file locked while the stream is open, causing `remove_all` to throw after all assertions pass.
+
+## Improvement: System-level model warmup crash blocks product-bug verification
+
+Condition:
+
+- When a Developer bug-fix session applies a targeted code change to a startup path, builds the server binary fresh, and then cannot verify the fix because the server crashes with STATUS_STACK_BUFFER_OVERRUN (0xC0000409) during `common_init_from_params` model warmup, and the same crash happens on a baseline invocation with no cache flags at all (e.g., `llama-server --model <model>`)
+
+Action:
+
+- Do treat this as a system-level verification blocker, not a product-bug regression; do NOT iterate the code fix to "make the crash go away" because the crash is in the model's warmup path that is independent of the startup validation or cache code paths. Do run a baseline invocation (no cache flags) first to confirm the crash is unrelated to the fix; if the baseline also crashes, document the crash with a 3+ trial matrix, the per-trial exit code, the fit_params projection, the system memory state (CimInstance Win32_OperatingSystem FreePhysicalMemory), and the crash-site log line; mark the bug-fix report as REWORK (not PASS) and route the verification to the next session in a fresh system state. Do verify the fix's binary actually contains the new code path by reading the dll as bytes and grepping for the validation string (e.g., `[System.IO.File]::ReadAllBytes` then `-match 'raw prompt evidence requires'`). Verified 2026-06-17 (Stage 17 F-17-EXEC-01): the fix moved the cache validation block before slot init; the binary contained the validation strings; the repro of IT5 (raw without log-prompts-dir) crashed at 0.04.073 during warmup; the IT5-rerun (raw with log-prompts-dir) also crashed at 0.03.735; the IT5 baseline (redacted mode) crashed at 0.03.661; the no-cache baseline (no flags) crashed at 0.03.241; 3/3 trials of the IT1 equivalent (cold budget 100, no flags) all crashed at -1073740791. The fit_params projection was 9933 MiB in this session vs 1466 MiB in the original test report, confirming a different system state. The fix is correct in principle but verification requires a fresh system state.
+
+## Internal Post-Task Record (2026-06-17, Stage 17 implementation plan)
+
+Task completed: Yes (implementation-planning gate only; documentation only).
+
+Effectiveness assessment: Created the Stage 17 implementation log entry and part-01 plan without code, tests, commits, PR text, or reviewer response. The plan carries Manager decisions D17-01 through D17-03, keeps prefix restore out of code scope, maps planned work to real code surfaces, and includes restore-miss enum mapping, JSONL raw/redacted evidence, cold budget validation/accounting/eviction/skip behavior, checkpoint-density policy, bounded metrics, tests, QA hooks, risks, and Architect review handoff. Updated document-index and stage-tracker row 17. Verification: line counts 30/111/105/43, no trailing whitespace, 0 non-ASCII in touched docs, scoped git diff --check exit 0. No tests were run per planning-only scope.
+
+Improvement outcome candidate: None new. Existing "Dirty worktree handoff", "Verify untracked documentation edits", "Split near-limit planning docs early", and "Scope whitespace checks in dirty worktrees" cover the patterns used.
+
+Similar memory check: Similar improvement found: Yes.
+
+Decision: No update.
+
+## Internal Post-Task Record (2026-06-17, Stage 17 bug-fix loop iteration 1)
+
+Task completed: Partial (F-17-EXEC-02 fully resolved; F-17-EXEC-01 fix applied but verification blocked by system-level model warmup crash).
+
+Effectiveness assessment: F-17-EXEC-01 fix: moved the 7-block cache validation from the post-slot-init location to the top of load_model() (before slot init). The fix is a code reordering within a single function; validation uses only `params_base.*` fields set at the top of load_model(). The post-slot-init block now contains only the log lines and the cache controller creation. The fix is correct in principle. Verification was blocked by a system-level model warmup crash (STATUS_STACK_BUFFER_OVERRUN 0xC0000409) that occurred regardless of `--cache-prompt-evidence` setting, including baselines with no cache flags. The crash was deterministic (3/3 trials of the IT1 equivalent all crashed at -1073740791). The fit_params projection in this session was 9933 MiB vs the original test report's 1466 MiB, confirming a different system state. F-17-EXEC-02 fix: added 13 new test functions to tests/test-cache-controller.cpp covering the 13 BLOCKED-pending-test-code rows. All 87 tests pass (74 existing + 13 new). No new warnings or regressions. Build exit code 0 for both test-cache-controller and llama-server targets. Output: ._design_docs/.test_reports/test-report-20260617-01-fixes.md (266 lines, under 300 cap, 0 trailing whitespace, 0 non-ASCII). The worktree's uncommitted changes are tools/server/server-context.cpp (validation block move, 40 lines added) and tests/test-cache-controller.cpp (13 new test functions, ~390 lines added). No source code, design, implementation, architecture, test plan, or other durable docs were modified. No commits or pushes were made.
+
+Improvement outcome candidate:
+
+`Condition:` When a code change is applied to a startup validation or init path, and the verification repro crashes with STATUS_STACK_BUFFER_OVERRUN during model warmup, AND a baseline with no cache flags also crashes
+
+`Action:` Do distinguish the system-level crash from a product-bug regression; do run a baseline invocation with no cache flags first to confirm the crash is unrelated to the fix; do document the crash with a 3+ trial matrix, fit_params projection, system memory state, and per-trial exit code; do mark the bug-fix report as REWORK (not PASS) and route verification to the next session in a fresh system state; do NOT iterate the code fix to make the crash go away because the crash is in the model's warmup path independent of the cache code paths
+
+Similar memory check: Similar improvement found: No. Existing "Check build artifact timestamps against source timestamps before running tests" covers stale-binary crashes, not system-state crashes with a fresh binary. Existing "Verify QA runtime-behavior claims against model log before designing the fix" covers QA claim verification, not system-level verification blockers during a Developer fix session.
+
+Decision: Add new improvement.

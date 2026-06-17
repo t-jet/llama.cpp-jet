@@ -351,3 +351,43 @@ Action:
 - Do treat any undeclared variable reference as BLOCKING, not non-blocking, because the code will not compile
 - Do not accept "logic correct" as PASS when the code has a compile error; compile-clean is the floor for any code review verdict
 
+## Improvement: architect-directed Option B verification deferral at bug-fix review
+
+Condition:
+- Architect bug-fix review cannot verify a fix in the current QA session because of an environmental blocker (e.g., system-level crash on baselines, missing tooling, fixture unavailable) that is OUT OF SCOPE for the fix itself, and the Architect recommends Option B (accept based on code review alone, defer verification to a future clean-state session)
+
+Action:
+- Do record the Option B decision as a numbered Manager decision (D-EXEC-N format) in the implementation log Manager decisions log with: the fix rationale, the verification blocker, the expected post-fix behavior, and the follow-up QA session that will exercise the verification
+- Do require the bug-fix review to explicitly call out the verification path decision (Option A re-run vs Option B deferral) with rationale tied to code-review correctness and environmental cost
+- Do require the Developer test-results review to apply the Option B decision to the per-row classification (RESOLVED, not PASS) so the closure doc sweep records the verification gap explicitly
+- Do not skip the Manager closure doc sweep when verification is deferred; the closure exception must be recorded with the same rigor as a normal closure
+- Don't treat Option B as a workaround for a fix that has unverified product behavior; the fix must be correct per code review before Option B is acceptable
+- Don't let an environmental blocker from another part of the system (e.g., system-level model warmup crash unrelated to the fix) gate the F-NN-EXEC-NN fix review; surface the blocker as a separate Manager decision (D-EXEC-N+1) and continue
+
+## Improvement: verify subagent output file path with leading-dot hidden directories
+
+Condition:
+- Fresh subagent delegation produces a complete text response claiming a deliverable file was created at a path inside a leading-dot hidden directory (e.g. `._design_docs/`, `._test_output/`, `._analysis/`), but file_search or Test-Path shows the file at the wrong path (missing the leading dot, e.g. `_design_docs/` instead of `._design_docs/`)
+
+Action:
+- Do verify the deliverable file path with file_search using the glob pattern before declaring the subagent's gate complete
+- Do run `Test-Path <expected-path>` and `Test-Path <parent-dir>` to confirm the file is in the correct directory, not a typo'd sibling
+- Do check `git status --short` for any untracked directories that match the expected pattern minus the leading dot
+- Do move the file to the correct path with `Move-Item` and clean up the typo'd directory with `Remove-Item -Recurse` if the subagent created it at the wrong location; this is a recovery, not a re-delegation
+- Do record the typo as a non-blocking observation in the next gate's review report so future subagents are aware
+- Don't re-delegate when the artifact exists with correct content at a slightly wrong path; the recovery is cheaper and preserves the subagent's work
+- Don't trust the subagent's text claim of file creation without on-disk verification, especially for hidden directories where Windows shell escaping or copy-paste can drop the leading dot
+
+## Improvement: developer test-results review of bug-fix report when no new test report exists
+
+Condition:
+- Architect bug-fix review accepts the fix via Option B (verification deferred to a future clean-state session) and there is no new full test report (test-report-YYYYMMDD-NN-rerun.md) from a QA rerun
+
+Action:
+- Do delegate the Developer test-results review to a fresh session with the bug-fix report (test-report-YYYYMMDD-NN-fixes.md) as the primary review target, not the original test report
+- Do require the Developer to classify each of the 40 rows as PASS, RESOLVED (per Architect Option B), BLOCKED-acceptable (per test plan session-scope rules), or FAIL
+- Do require the Developer to propose exact Manager closure recommendation text that names each BLOCKED-acceptable category and the Option B disposition
+- Do accept the Developer's verdict without a QA rerun when the Architect's Option B is in force and the Developer has confirmed no new product bugs
+- Don't treat the absence of a new test report as gate-blocking when Architect Option B has been formally accepted via Manager decision
+- Don't skip the Developer test-results review even when there's no new full test report; the Developer still owns the per-row classification and the closure recommendation
+
