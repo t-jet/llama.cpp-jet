@@ -50,7 +50,7 @@ Implementation review: PASS, 0 BLOCKING, 1 non-blocking (F-20-IR-01 line count d
 Test plan execution verdicts:
 - **TP-20-SY1..SY5**: PARTIAL. Small-target smoke (500 tokens, exact-repeat) PASS; chat1 cache_n=0, chat2 cache_n=483 restored. Large-target (12k+) cancelled at 60s timeout on Qwen3-0.6B model; needs bigger model or longer timeout (environment, not implementation defect).
 - **TP-20-ST1..ST3**: PARTIAL. Wrapper DryRun PASS, S01 live launch PASS. Full 11-row S/L matrix deferred (8+ hour wall-clock, BLOCKED-test-session-scope).
-- **TP-20-HV1..HV2**: Deferred per Manager approval (heavy tier, multi-hour session).
+- **TP-20-HV1..HV2**: PASS-INFRASTRUCTURE after post-closure chat-feasible execution. 8/8 Qwen3.6-27B-MTP requests completed in 200 seconds with `cache_n=0`, matching the Stage 16 baseline for the sampled workload class. Full mixed workload remains deferred.
 
 All PARTIAL verdicts are acceptable closure exceptions per Stage 17 part-27 BLOCKED-test-session-scope classification.
 
@@ -58,18 +58,37 @@ All PARTIAL verdicts are acceptable closure exceptions per Stage 17 part-27 BLOC
 
 - Large-target generator (12k+) needs Qwen3-0.6B timeout extension or bigger model. Smoke test confirms generator correctness; runtime fit deferred.
 - Full S/L matrix (8 stress + 3 longrun rows, 8+ hour wall-clock) deferred to multi-hour session or nightly run.
-- Heavy tier (TP-20-HV1/HV2) deferred to nightly or manual run per Stage 17 part-27 row classification.
+- Heavy tier full workload (mixed exact repeats, near-prefix variants, and new prompts) deferred to nightly or manual run per Stage 17 part-27 row classification.
 
-### Code changes (UNCOMMITTED, awaiting user approval per AGENTS.md)
+## Post-closure heavy-tier execution
 
-- `_design_docs/cache-handling-test-scripts/lib/agentic-prompt-generator.ps1` (new, 308 LF, untracked)
-- `_design_docs/cache-handling-test-scripts/kickoff-stage20-stress-longrun.ps1` (new, 249 LF, untracked)
+Date: 2026-06-18
+Durable report: [.test_reports/stage20-heavy-20260618-01.md](.test_reports/stage20-heavy-20260618-01.md)
+Output path: `._test_output/stage20-heavy-real3/20260618-130854`
+
+Result: PASS-INFRASTRUCTURE. The chat-feasible heavy run completed 8/8
+Qwen3.6-27B-MTP requests in 200 seconds with `cache_n=0` on each request.
+That matches the Stage 16 baseline for the sampled agentic workload class.
+The server fit current memory with `-c 2048`, `-np 1`, and
+`--cache-ram 2048`.
+
+The run validated the 27B fixture, hybrid cache launch flags, cold path,
+redacted prompt evidence, save path, restore-miss metrics, and Stage 16
+comparison. It did not run the full mixed workload with exact repeats,
+near-prefix variants, and new prompts.
+
+### Code changes
+
+- `_design_docs/cache-handling-test-scripts/lib/agentic-prompt-generator.ps1` (new, 308 LF)
+- `_design_docs/cache-handling-test-scripts/kickoff-stage20-stress-longrun.ps1` (new, 249 LF)
+- `_design_docs/cache-handling-test-scripts/kickoff-stage20-heavy.ps1` (new)
+- `_design_docs/cache-handling-test-scripts/kickoff-stage20-heavy-v2.ps1` (new prototype for the full mixed workload follow-up)
 
 No production code, test code, or CMake changes.
 
 ## Handoff
 
-Stage 20 closed. Next owner: user. PowerShell scripts awaiting commit approval per AGENTS.md.
+Stage 20 closed. Next owner: user.
 
 All three Stage 17 deferred items are now addressed: agentic prompt generator works (smoke PASS), Qwen3.6-27B-MTP fixture copied and verified, S/L framework wrapper works (DryRun + S01 PASS). Full test matrix execution is deferred per Stage 17 part-27 BLOCKED-test-session-scope classification.
 
