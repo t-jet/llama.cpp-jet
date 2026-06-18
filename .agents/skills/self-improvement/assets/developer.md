@@ -894,3 +894,35 @@ Condition:
 
 Action:
 - Do write explicit dry-run sentinel values such as `DRYRUN` plus `inconclusive` classification for runtime-only fields; don't leave those fields as null, because reviewers need to distinguish intentionally unexecuted evidence from missing runner output.
+
+## Internal Post-Task Record (2026-06-18, Stage 21 runner verdict correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- F-21-IR-01 was corrected in script scope only. The runner now prevents live `PASS-candidate` unless prompt evidence exists and parses, near-prefix rows have bounded miss/rejection evidence, and new-prompt rows have bounded miss evidence. Parser check passed and dry-run passed without server launch. Documentation was updated in part 5, the parent implementation entry, and document-index. No production code, tests, fixtures, CMake, stress scripts, longrun scripts, full heavy execution, commits, or pushes were touched.
+
+Improvement outcome candidate:
+- Condition:
+  - When fixing a runner verdict path that can return PASS from aggregate counters or partial evidence
+- Action:
+  - Do express every required PASS predicate as an explicit negative gate before the PASS branch, split FAIL vs BLOCKED reasons into separate arrays, and add a post-patch read of the changed function to remove stale variables from the previous verdict path before relying on parser/dry-run checks.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Prototype runners need explicit contract gap review in implementation plans.
+- Decision:
+  - Add new. The existing entry covers planning against prototype gaps; this one covers live verdict implementation.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Runner PASS verdicts need explicit evidence gates
+
+Condition:
+- When fixing or writing a runner verdict path that can return PASS from aggregate counters, partial evidence, or default-empty reason arrays
+
+Action:
+- Do encode each required PASS predicate as an explicit gate before the PASS branch, with separate `FAIL-*`, `BLOCKED-metric-unavailable`, and `BLOCKED-runner-contract` reason arrays. After patching, read the changed function or diff before validation to catch stale variables and old reason handling that parser checks may not flag.

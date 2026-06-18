@@ -195,6 +195,7 @@ function Read-PromptEvidence {
         status = if ($files.Count -gt 0) { 'OK' } else { 'BLOCKED-metric-unavailable' }
         files = @($files | ForEach-Object { $_.FullName })
         records = 0
+        record_details = @()
         lookup_outcomes = @{}
         prefix_candidate_records = 0
         redaction_leak = $false
@@ -208,6 +209,13 @@ function Read-PromptEvidence {
             }
             try {
                 $record = $line | ConvertFrom-Json
+                $detail = @{
+                    index = $result.records
+                    lookup_outcome = if ($record.lookup_outcome) { [string]$record.lookup_outcome } else { $null }
+                    has_prefix_candidate = [bool]($record.prefix_candidate -or $record.prefix_candidates -or $record.prefix_candidate_count)
+                    parse_error = $false
+                }
+                $result.record_details += $detail
                 if ($record.lookup_outcome) {
                     $key = [string]$record.lookup_outcome
                     if (-not $result.lookup_outcomes.ContainsKey($key)) { $result.lookup_outcomes[$key] = 0 }
@@ -219,10 +227,30 @@ function Read-PromptEvidence {
             } catch {
                 if (-not $result.lookup_outcomes.ContainsKey('parse_error')) { $result.lookup_outcomes.parse_error = 0 }
                 $result.lookup_outcomes.parse_error++
+                $result.record_details += @{
+                    index = $result.records
+                    lookup_outcome = $null
+                    has_prefix_candidate = $false
+                    parse_error = $true
+                }
             }
         }
     }
     return $result
+}
+
+function Test-BoundedMissOutcome {
+    param([string]$Outcome)
+    $bounded = @(
+        'namespace_mismatch',
+        'token_count_mismatch',
+        'checksum_mismatch',
+        'exact_entry_absent',
+        'unsafe_prefix_rejected',
+        'payload_unavailable',
+        'unsupported_route_or_profile'
+    )
+    return $Outcome -in $bounded
 }
 
 function Get-HV1Verdict {
@@ -234,11 +262,42 @@ function Get-HV1Verdict {
     $nearHits = @($near | Where-Object { $_.cache_n -gt 0 })
     $exactHits = @($exactRepeats | Where-Object { $_.cache_n -gt 0 })
 
-    $reasons = @()
-    if ($httpFailures.Count -gt 0) { $reasons += 'http-failure' }
-    if ($nearHits.Count -gt 0) { $reasons += 'unsafe-prefix-hit' }
-    if ($PromptEvidence.redaction_leak) { $reasons += 'redaction-leak' }
-    if ($Requests.Count -gt 0 -and $exactHits.Count -eq 0) { $reasons += 'exact-repeat-no-hit' }
+    $failReasons = @()
+    $blockedMetricReasons = @()
+    $blockedContractReasons = @()
+    if ($httpFailures.Count -gt 0) { $failReasons += 'http-failure' }
+    if ($nearHits.Count -gt 0) { $failReasons += 'unsafe-prefix-hit' }
+    if ($PromptEvidence.redaction_leak) { $failReasons += 'redaction-leak' }
+    if ($Requests.Count -gt 0 -and $exactHits.Count -eq 0) { $failReasons += 'exact-repeat-no-hit' }
+
+    if ($Requests.Count -gt 0) {
+        if ($PromptEvidence.status -ne 'OK' -or $PromptEvidence.records -le 0) {
+            $blockedMetricReasons += 'prompt-evidence-jsonl-missing'
+        } elseif ($PromptEvidence.lookup_outcomes.ContainsKey('parse_error')) {
+            $blockedContractReasons += 'prompt-evidence-jsonl-parse-error'
+        } elseif ($PromptEvidence.record_details.Count -lt $Requests.Count) {
+            $blockedContractReasons += 'prompt-evidence-record-count-mismatch'
+        } else {
+            for ($i = 0; $i -lt $Requests.Count; $i++) {
+                $req = $Requests[$i]
+                $evidence = $PromptEvidence.record_details[$i]
+                $outcome = [string]$evidence.lookup_outcome
+                if ($req.request_class -eq 'near-prefix') {
+                    if ($req.cache_n -gt 0 -or $outcome -eq 'hit') {
+                        $failReasons += "near-prefix-hit-$($req.request_id)"
+                    } elseif (-not (Test-BoundedMissOutcome -Outcome $outcome)) {
+                        $blockedMetricReasons += "near-prefix-bounded-evidence-missing-$($req.request_id)"
+                    }
+                } elseif ($req.request_class -eq 'new-prompt') {
+                    if ($req.cache_n -gt 0 -or $outcome -eq 'hit') {
+                        $failReasons += "new-prompt-hit-$($req.request_id)"
+                    } elseif (-not (Test-BoundedMissOutcome -Outcome $outcome)) {
+                        $blockedMetricReasons += "new-prompt-bounded-evidence-missing-$($req.request_id)"
+                    }
+                }
+            }
+        }
+    }
 
     $coldEviction = 'not-observed'
     if ($MetricsAfter.status -eq 'OK' -and (Test-Path $MetricsAfter.path)) {
@@ -248,13 +307,35 @@ function Get-HV1Verdict {
         }
     }
 
-    $status = if ($Requests.Count -eq 0 -and $DryRun) { 'DRYRUN' } elseif ($reasons.Count -eq 0) { 'PASS-candidate' } else { 'FAIL-candidate' }
+    $reasons = @($failReasons + $blockedMetricReasons + $blockedContractReasons)
+    $status = if ($Requests.Count -eq 0 -and $DryRun) {
+        'DRYRUN'
+    } elseif ($failReasons.Count -gt 0) {
+        'FAIL-candidate'
+    } elseif ($blockedMetricReasons.Count -gt 0) {
+        'BLOCKED-metric-unavailable'
+    } elseif ($blockedContractReasons.Count -gt 0) {
+        'BLOCKED-runner-contract'
+    } else {
+        'PASS-candidate'
+    }
     return @{
         status = $status
         reasons = $reasons
+        fail_reasons = $failReasons
+        blocked_metric_reasons = $blockedMetricReasons
+        blocked_contract_reasons = $blockedContractReasons
         exact_repeat_hits = $exactHits.Count
         near_prefix_hits = $nearHits.Count
         new_prompt_count = $newPrompts.Count
+        bounded_near_prefix_evidence = @($near | Where-Object {
+            $idx = [array]::IndexOf($Requests, $_)
+            $idx -ge 0 -and $PromptEvidence.record_details.Count -gt $idx -and (Test-BoundedMissOutcome -Outcome ([string]$PromptEvidence.record_details[$idx].lookup_outcome))
+        }).Count
+        bounded_new_prompt_evidence = @($newPrompts | Where-Object {
+            $idx = [array]::IndexOf($Requests, $_)
+            $idx -ge 0 -and $PromptEvidence.record_details.Count -gt $idx -and (Test-BoundedMissOutcome -Outcome ([string]$PromptEvidence.record_details[$idx].lookup_outcome))
+        }).Count
         metrics_before = $MetricsBefore.status
         metrics_after = $MetricsAfter.status
         prompt_evidence = $PromptEvidence.status

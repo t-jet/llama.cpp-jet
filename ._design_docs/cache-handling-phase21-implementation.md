@@ -1,13 +1,13 @@
 # Stage 21 implementation: heavy tier mixed workload verification
 
-Status: implementation review REWORK; runner correction required before full heavy execution
+Status: runner verdict correction ready for Architect implementation re-review; full heavy execution not started
 Date: 2026-06-18
 Stage: 21 (Heavy Tier Mixed Workload Verification)
 Author: Developer (implementation plan, fresh session)
 Source design: [cache-handling-phase21-design.md](cache-handling-phase21-design.md)
 Manager gate: D21-DESIGN-01
-Current gate: implementation
-Scope: implementation plan, gate record, runner patch, and dry-run evidence. Full heavy execution has not started.
+Current gate: implementation re-review
+Scope: implementation plan, gate record, runner patch, Architect review, F-21-IR-01 correction, and dry-run evidence. Full heavy execution has not started.
 
 ## Contents
 
@@ -15,6 +15,7 @@ Scope: implementation plan, gate record, runner patch, and dry-run evidence. Ful
 - [Part 2: Manager implementation-plan gate](cache-handling-phase21-implementation/part-02-manager-implementation-plan-gate.md)
 - [Part 3: Runner patch implementation evidence](cache-handling-phase21-implementation/part-03-runner-patch-implementation-evidence.md)
 - [Part 4: Architect implementation review gate 01](cache-handling-phase21-implementation/part-04-architect-implementation-review-gate-01.md)
+- [Part 5: Runner verdict correction](cache-handling-phase21-implementation/part-05-runner-verdict-correction.md)
 
 ## Gate status
 
@@ -26,7 +27,7 @@ Scope: implementation plan, gate record, runner patch, and dry-run evidence. Ful
 | Stage 21 implementation planning | PASS (this file) |
 | Stage 21 implementation-plan review | PASS (see [part 1](cache-handling-phase21-implementation/part-01-architect-implementation-plan-review-gate-01.md), 0 BLOCKING, 3 non-blocking, 2 INFO) |
 | Stage 21 Manager implementation-plan gate | PASS (see [part 2](cache-handling-phase21-implementation/part-02-manager-implementation-plan-gate.md), D21-IMPLPLAN-01..03) |
-| Stage 21 implementation | REWORK (see [part 4](cache-handling-phase21-implementation/part-04-architect-implementation-review-gate-01.md), 1 BLOCKING, 2 non-blocking, 2 INFO) |
+| Stage 21 implementation | REWORK correction ready for re-review (see [part 4](cache-handling-phase21-implementation/part-04-architect-implementation-review-gate-01.md) and [part 5](cache-handling-phase21-implementation/part-05-runner-verdict-correction.md)) |
 | Stage 21 QA execution | not started |
 
 ## Approved baseline
