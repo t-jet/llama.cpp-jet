@@ -870,7 +870,7 @@ Effectiveness assessment: Item 1 generator with adaptive chunk sizing (phrase/se
 
 Improvement outcome candidate:
 - Condition: When an agentic prompt generator for a /tokenize-measured target must land within +/- 5% of the target on first measurement (no pre-measured chunk size known), and the bank options are paragraph-sized (200-400 tokens)
-- Action: Do add multiple chunk banks sized to the remaining budget (phrase 3-5 tokens, sentence 12-20 tokens, paragraph 80-150 tokens, long-paragraph 200-400 tokens) and select the bank whose typical size matches the remaining budget; the stop condition should be 
+- Action: Do add multiple chunk banks sized to the remaining budget (phrase 3-5 tokens, sentence 12-20 tokens, paragraph 80-150 tokens, long-paragraph 200-400 tokens) and select the bank whose typical size matches the remaining budget; the stop condition should be
  >= target * 0.95 so the last round's chunk (which can be up to 10% of target) lands the result in [target*0.95, target*1.05]. Verified 2026-06-18 (Stage 20 Item 1 smoke): target=100 with 5% tolerance required a phrase bank for remaining <= 5 tokens, sentence bank for <= 100 tokens; the initial 200-400 token paragraph bank overshoots by 47% on a 100-token target, so the multi-bank approach is required when the target is below the smallest paragraph.
 
 Similar memory check: Similar improvement found: No. The existing "Test-helper API changes need runtime verification" and "Spec example data may not match the actual runtime data" improvements cover API and spec mismatches, not chunk-size selection for token-budget-driven generation.
@@ -878,3 +878,11 @@ Similar memory check: Similar improvement found: No. The existing "Test-helper A
 Decision: Add new improvement.
 
 Memory update: Final improvement outcome stored under "Improvement: Token-budget-driven chunk selection for prompt generators".
+
+## Improvement: Prototype runners need explicit contract gap review in implementation plans
+
+Condition:
+- When an accepted design says an existing runner or script is a prototype, may be used only as input, or was not approved as final evidence
+
+Action:
+- Do read the prototype before writing the implementation plan and add a dedicated plan section listing concrete gaps against the accepted evidence contract, including output naming, redaction boundaries, request/response artifacts, summary schema, metric capture, baseline paths, and verdict calculation. Don't say "reuse the prototype" without naming required edits and a dry-run validation step. Verified 2026-06-18 (Stage 21 implementation plan): `kickoff-stage20-heavy-v2.ps1` had Stage 20 output naming, raw inline prompts, response-only artifacts, `._analysis/model_log.txt` baseline default, and default `--chat-template-file`; the plan marked script edits required before execution instead of treating the prototype as approved heavy evidence.
