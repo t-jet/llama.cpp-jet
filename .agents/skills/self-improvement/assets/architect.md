@@ -772,6 +772,16 @@ Action:
 
 - Do cross-check evidence file's path references against actual on-disk listing using Get-ChildItem -Recurse -Force. Do record the discrepancy as non-blocking finding (F-19-IR-01-style) since artifacts exist at correct path. Do note which convention the plan file uses and recommend normalizing evidence file to match. Don't flag as BLOCKING when artifacts are findable via the plan-correct path; this is documentation hygiene, not implementation defect.
 
+## Improvement: Infrastructure pass is not workload coverage
+
+Condition:
+
+- Authoring a follow-up stage design after a prior report passed fixture, launch, script, or infrastructure readiness but explicitly deferred full workload coverage
+
+Action:
+
+- Do separate the prior infrastructure PASS from the new workload PASS criteria. Do define the exact workload classes, fixture limits, time caps, metrics, evidence files, and PASS/FAIL/BLOCKED outcomes needed before the follow-up can close. Don't let a prior launch or smoke report stand in for mixed workload evidence.
+
 
 ## Improvement: Multi-item stage design with per-item Manager decision gating
 
