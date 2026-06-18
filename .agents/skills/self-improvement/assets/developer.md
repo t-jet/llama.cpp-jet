@@ -24,11 +24,13 @@ Action:
 
 Condition:
 
-- When editing a documentation file that is untracked in git, or when the parent documentation directory is untracked
+- When editing or creating a documentation file that is untracked in git, or when the parent documentation directory is untracked
 
 Action:
 
-- Do verify the changed lines, status text, line counts, and trailing-whitespace state directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, and `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed.
+- Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Verified 2026-06-18 (Stage 19 implementation plan): `create_file` produced an LF-with-CRLF file on Windows (CRLF=298, LF=298, no BOM) and the durable-doc convention requires LF-only; the existing "Preserve local line endings in patch edits" improvement gives the fix recipe (replace CRLF with LF, save with `UTF8Encoding($false)` to skip BOM), but a separate byte-level check is needed to detect the issue on newly created untracked files because the lint pass and `Get-Content | Measure-Object -Line` both report a normal line count.
 
 ## Improvement: Windows server pytest path
 
@@ -365,6 +367,20 @@ Condition:
 Action:
 
 - Do run the full incremental compile to the same target after the first duplicate removal, even if the manager's binding decision specified only the first error; the prior build halt at error N may have masked errors N+1, N+2 that the fix exposes. If the build then halts on a second pre-existing duplicate, STOP per the binding "build fails for any other reason" rule, document the second duplicate with `git blame` evidence, and escalate a new Manager decision rather than expanding the authorized scope unilaterally. Don't claim the first fix is "PASS" in the implementation log until the incremental compile to the binding target succeeds. Don't commit a single-fix tree that does not compile, because the next developer would inherit a non-compiling state. Also, do not stop at "build PASS" - the next layer of defects is often a RUNTIME defect, not another compile error: an assertion failure (STATUS_STACK_BUFFER_OVERRUN, exit code 0xc0000409 on Windows / SIGABRT on Linux) in a test that compiles cleanly but exercises the merged production code path differently than the pre-merge code path did. Verified 2026-06-11 (Stage 14 Step 3 test fix): after fixing the C2668/C2838/C2065 compile errors in test-cache-controller.cpp, the build PASSED and ctest then crashed at test_hybrid_rejects_partial_blob_match line 571 because the merged admission code path in server-cache-hybrid.cpp rejects the test's debug_add_entry_for_tests call (logs "descriptor validation failed (admission validation failed)"). The test function was not touched by the test fix; the failure is a pre-existing test defect surfaced by the merge. STOP at this layer too, document the runtime defect with the exact assertion message and the admission code path evidence, and escalate a new Manager decision. Don't expand the authorized scope to modify production code or to "fix" the test by changing its semantics; the right call is a separate Manager decision to either update the test, update the production code, or defer to a follow-up cycle.
+
+## Internal Post-Task Record (2026-06-18, Stage 20 implementation plan)
+
+Task completed: Yes (documentation-only).
+
+Effectiveness assessment: The Stage 20 implementation plan honored all 8 plan-content requirements (status line, author line, scope line, approved baseline, Manager gate decisions, code surfaces, ordered implementation steps, test plan reference, affected files and lines, evidence plan, known risks, handoff) in a single 143-line entry doc well under the 300-line durable-doc cap. Reconciled R-20-DESIGN-MGR-01 (design-side ID) and D20-EXEC-01/02 (Manager-side IDs) in one table per F-20-DR-02 non-blocking finding. Resolved F-20-DR-03 (OQ-20-01/05/06 deferred) inline at the relevant steps. Recorded CR=0 LF=201 BOM=NO trailing-whitespace=0 non-ASCII=0 after a CRLF-to-LF conversion pass on the freshly created untracked file (developer improvement memory on untracked doc verification predicted this exact correction). No code, tests, fixes, commits, or PR actions were authorized; the implementation-plan gate is the next reviewer.
+
+Improvement outcome candidate:
+- Condition: When a fresh untracked planning file is created via create_file on Windows and the durable-doc convention requires LF-only line endings
+- Action: Do run the byte-level CR/LF/BOM/trailing-whitespace/non-ASCII verification pass immediately after create_file and before the lint pass, because the create_file path on Windows defaults to CRLF and the durable-doc convention requires LF-only; convert CRLF to LF with -replace "`r`n", "`n" and save with New-Object System.Text.UTF8Encoding($false) to skip BOM, then re-verify with the same byte-level check (CR=0 confirms LF-only).
+
+Similar memory check: Similar improvement found: Yes. Existing improvement "Verify untracked documentation edits" already covers byte-level CR/CRLF/BOM checks for untracked files and includes the LF-conversion recipe. The new candidate is a refinement that ties the byte-level check to create_file specifically and orders it before the lint pass. The existing improvement is sufficient and the new wording would duplicate it.
+
+Decision: No new memory entry; the existing "Verify untracked documentation edits" improvement covers this scenario. The Stage 20 plan followed the existing improvement recipe correctly.
 
 ## Improvement: QA report Errors list may include errors not addressed by the Cause or Proposed fix sections
 
@@ -828,3 +844,37 @@ Similar memory check: Similar improvement found: Partial. The existing "Throw in
 Decision: Add new improvement.
 
 Memory update: Final improvement outcome stored under "Improvement: Rerun error message text difference is not a regression when test plan substance criterion is met".
+
+## Improvement: Stage 19 Branch C close - 5-successive-launch evidence threshold
+
+Condition:
+- When executing a Stage-style investigation whose closure rule for "no reproduction" requires N successive successful launches with stable peak working set (e.g., Stage 19 design part 1 Branch C closure rule: 5 successive /health HTTP 200, no STATUS_STACK_BUFFER_OVERRUN, memory snapshot shows no accumulation)
+
+Action:
+- Do launch on N+1 different ports when using sequential launches to also cover the port-shift rule in one pass (e.g., Step 1.2 5x uses ports 18220..18224, which covers Step 1.3's port-shift ports 18220/18221/18222 as a subset); do explicitly record the working-set delta across launches (max - min) and compare to the 10% Branch B threshold (e.g., 0.3 MiB vs 515.7 MiB threshold for a 5157 MiB peak), so the verdict rule from the plan is auditable in the evidence file; don't conflate "5/5 healthReached=true" with the closure criteria without the working-set-stability check, because the working-set check is what distinguishes Branch C from a partial Branch B (no crash, but accumulating).
+
+## Improvement: PowerShell Select-Object pipe buffers all output
+
+Condition:
+- When running a build or long-running PowerShell command and piping output to `Select-Object -Last N` or `Select-Object -First N` to filter the tail/head for display
+
+Action:
+- Do use `Tee-Object -Variable <name>` to capture full output to a variable while also passing it through to display, or write to a log file and read the tail with `Get-Content -Tail N`; don't pipe directly to Select-Object -Last N, because the pipe buffers all output and shows nothing until the command completes, which makes long builds/tests look frozen. Verified 2026-06-18 (Stage 19 Step 1.2 5x repeat): the 5x repeat script ran for ~30 seconds with 5 server start/health-probe/stop cycles, and `powershell ... | Select-Object -Last 30` showed nothing until the script finished; the formatted `Format-Table` in the script output ran fine because it was inside the script, not in the host pipe.
+
+
+## Internal Post-Task Record (2026-06-18, Stage 20 implementation)
+
+Task completed: Partial (Items 1, 2, 3 PASS; TP-20-SY1..SY5 partial; TP-20-ST1..ST3 partial; TP-20-HV1..HV2 deferred).
+
+Effectiveness assessment: Item 1 generator with adaptive chunk sizing (phrase/sentence/paragraph/long-paragraph banks) hits +/- 5% tolerance for target=100 (actual=105, iters=5) and target=1000 (actual=962, iters=16). Item 2 chat-template path A works on Qwen3.6-27B-MTP with reduced ctx/n_parallel/cache-ram (OOM at default 8192 MiB cache and 4 parallel slots). Item 3 wrapper launches S01 cleanly with all Stage 17 cache flags. DryRun mode (R-20-03 mitigation) verifies flag presence per row. TP-20-SY1 small-target smoke at 500 tokens demonstrates end-to-end exact-repeat restore (chat1 cache_n=0 cold, chat2 cache_n=483 restored). Larger chat completions (12k/24k/60k) hit 60s timeout on the 0.6B model; full S/L matrix and heavy tier deferred. Final hygiene: 3 created files (generator 308 LF, wrapper 249 LF, evidence 283 LF) all CR=0 BOM=NO, evidence file under 300-line cap. 27B server needs -c 2048 -np 1 --cache-ram 2048 to fit in the current system memory state (23512 MiB projection vs 388 MiB additional buffer needed for default config).
+
+Improvement outcome candidate:
+- Condition: When an agentic prompt generator for a /tokenize-measured target must land within +/- 5% of the target on first measurement (no pre-measured chunk size known), and the bank options are paragraph-sized (200-400 tokens)
+- Action: Do add multiple chunk banks sized to the remaining budget (phrase 3-5 tokens, sentence 12-20 tokens, paragraph 80-150 tokens, long-paragraph 200-400 tokens) and select the bank whose typical size matches the remaining budget; the stop condition should be 
+ >= target * 0.95 so the last round's chunk (which can be up to 10% of target) lands the result in [target*0.95, target*1.05]. Verified 2026-06-18 (Stage 20 Item 1 smoke): target=100 with 5% tolerance required a phrase bank for remaining <= 5 tokens, sentence bank for <= 100 tokens; the initial 200-400 token paragraph bank overshoots by 47% on a 100-token target, so the multi-bank approach is required when the target is below the smallest paragraph.
+
+Similar memory check: Similar improvement found: No. The existing "Test-helper API changes need runtime verification" and "Spec example data may not match the actual runtime data" improvements cover API and spec mismatches, not chunk-size selection for token-budget-driven generation.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Token-budget-driven chunk selection for prompt generators".

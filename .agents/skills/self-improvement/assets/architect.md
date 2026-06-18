@@ -724,3 +724,165 @@ Condition:
 Action:
 
 - Do flag pre-fix line citations in fix report handoff as non-blocking observation (NB-class) when fix itself is correct. Do suggest replacing pre-fix line numbers with post-fix line numbers (e.g., the new return-false lines in the moved block). Do not block gate on stale pre-fix citations when source diff is correct. Don't silently rewrite fix report during review.
+
+## Improvement: Unescaped pipes in markdown review table cells
+
+Condition:
+
+- Authoring review report with markdown table cells that quote PowerShell pipeline commands (e.g., `git show HEAD:path | Select-String -Pattern 'X'`), brace-expansion paths (e.g., `path/{A|B|C}-*.md`), or any text containing `|` characters inside a 4-column table row
+
+Action:
+
+- Do escape every `|` inside table cell content as `\|` before committing. Do scan all table cells for unescaped pipes after writing. Do run the linter (or `markdownlint` equivalent) on the file before declaring done. Do not rely on backtick code-fence protection alone; some linters still treat `|` inside backticks as a column separator. Don't ship a review report with MD056 (table-column-count) or MD060 (table-column-style) errors.
+
+## Post-task: 2026-06-18 Stage 19 implementation-plan review
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Authored Stage 19 implementation-plan review report (part-01-architect-implementation-plan-review-gate-01.md) with 0 BLOCKING, 2 non-blocking, 1 INFO findings. Verdict PASS. Plan file is 298 LF, CR=0, BOM=False, non-ASCII=0, under 300-line cap. Linter initially flagged MD056/MD060 on table cells with unescaped PowerShell pipes; fixed by escaping to `\|`. After fix, ran `git diff --check` and got clean result. The pipe-escape pattern was a new improvement not yet in the memory.
+
+Improvement outcome candidate:
+
+- Condition:
+  - When authoring review report with markdown table cells that quote PowerShell pipeline commands or brace-expansion paths containing `|` characters
+- Action:
+  - Do escape every `|` inside table cell content as `\|` before committing; do run linter on file before declaring done
+
+Similar memory check:
+
+- Similar improvement found: No
+- Existing improvements cover line endings (CRLF), diff readability, format-property self-claims, but none specifically address pipe escape in markdown table cells.
+- Decision: Add new improvement because the unescaped-pipe pattern caused real linter errors that required a fix pass, and a future review report will hit the same trap.
+
+Memory update:
+
+- Final improvement outcome stored: see "Improvement: Unescaped pipes in markdown review table cells" above.
+
+## Improvement: Path-prefix consistency between evidence text and on-disk artifacts
+
+Condition:
+
+- Reviewing implementation evidence that references artifact paths in manifest table or prose; plan file uses one convention (e.g., ._test_output/) but evidence file uses different convention (e.g., _test_output/)
+
+Action:
+
+- Do cross-check evidence file's path references against actual on-disk listing using Get-ChildItem -Recurse -Force. Do record the discrepancy as non-blocking finding (F-19-IR-01-style) since artifacts exist at correct path. Do note which convention the plan file uses and recommend normalizing evidence file to match. Don't flag as BLOCKING when artifacts are findable via the plan-correct path; this is documentation hygiene, not implementation defect.
+
+
+## Improvement: Multi-item stage design with per-item Manager decision gating
+
+Condition:
+
+- Authoring stage design with multiple items where one or more items require a binding Manager decision (e.g., fixture acquisition path, integration branch choice, deferred-item disposition) and other items do not depend on that decision
+
+Action:
+
+- Do list in the entry-doc handoff section which items may proceed in parallel with the Manager decision and which items MUST wait for the decision record. Do not block all items on a single decision when only one item depends on it. Do not let items proceed when the decision is binding for them. Do record the dependency direction explicitly per item. Do put the binding items in a separate gate-status row that names the Manager decision ID. Do keep the design authored-state wording for non-binding items so implementation planning can open for them independently. Don't invent a fallback path in the design when the user prompt explicitly forbids it; surface the gap as a Manager decision and stop.
+
+### Post-Task Review - 2026-06-18 (Stage 20 design authoring)
+
+Task: Author Stage 20 design (Stage 17 Test Infrastructure Additions) covering three deferred items from Stage 17 closure: agentic prompt generator (TP-17-SY1..SY5), Qwen3.6-27B-MTP fixture (TP-17-HV1/HV2), and S/L framework re-invocation (TP-17-ST1..ST3). Manager decision R-20-DESIGN-MGR-01 required for Item 2.
+
+Task completed: Yes.
+
+Effectiveness assessment: Authored five LF-only UTF-8 no-BOM files: entry doc (93 lines), part 1 Item 1 generator design (192 lines), part 2 Item 2 fixture + R-20-DESIGN-MGR-01 (177 lines), part 3 Item 3 S/L framework (194 lines), part 4 traceability/risks/handoff (114 lines). All under 300-line cap. CR=0, BOM=False, non-ASCII=0 across all five. Trailing newline OK on all five. Verified via byte-level ReadAllBytes per the existing improvement `Verify review file output line endings before declaring document quality PASS`. Manager decision R-20-DESIGN-MGR-01 listed with four options (A: HuggingFace, B: local copy, C: Qwen3.5-4B-MTP substitute, D: defer) and Architect did NOT pick a fallback. Item 1 and Item 3 may proceed in parallel with the Manager decision; Item 2 must wait.
+
+Improvement outcome candidate: Multi-item stage design with per-item Manager decision gating - the existing improvements cover plan-review handoff prerequisites and one-gate stage design authoring, but do not specifically address the case where a multi-item stage design has one item gated on a Manager decision while the other items can proceed in parallel. The new improvement above captures this pattern.
+
+Similar memory check: Similar improvement found: partial. `Handoff prerequisites in plan reviews` covers "wait for manager handoff" but applies to plan reviews, not design authoring. `One-gate stage design authoring` covers leaving unstarted gates as unstarted but does not address per-item gating within a single design. The new improvement is specific to design authoring for multi-item stages with binding Manager decisions.
+
+Decision: Add new improvement because the pattern surfaced explicitly in this task (user prompt: "Architect must NOT pick a fallback... must surface this as a Manager decision") and the entry-doc handoff had to clearly partition Item 1+3 (parallel) from Item 2 (gated). Future multi-item stage designs will hit the same trap.
+
+Memory update: New improvement `Multi-item stage design with per-item Manager decision gating` stored above; this post-task review appended below.
+
+
+## Improvement: Parallel decision IDs across design and tracker
+
+Condition:
+
+- Reviewing a stage design authored before Manager records their binding decision; design uses a design-side decision ID like R-NN-DESIGN-MGR-01 and tracker records the Manager-side decision ID like DNN-EXEC-01; both refer to same fixture acquisition path or substitute choice
+
+Action:
+
+- Do record both IDs as non-blocking observation in the design review findings table. Do require implementation plan to reference both IDs in a single decision table row so future audits reconcile them. Don't reject design on parallel IDs when design correctly defers to Manager and Manager already recorded a parallel decision; the reconciliation is implementation-plan-time work.
+## Post-task review 2026-06-18 (Stage 20 design review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 20 design in a fresh Architect session; produced part-05-design-review-gate-01.md with verdict PASS, 0 BLOCKING, 3 non-blocking, 0 INFO.
+- Successfully verified all 23 checklist items using byte-level format checks (LF/BOM/unicode/line-count) and shell verification commands (Get-ChildItem, Test-Path, git status, git diff --check).
+- Used Manager decision D20-EXEC-01 from tracker alongside design-side R-20-DESIGN-MGR-01; documented parallel IDs as non-blocking observation.
+- Encountered read_file tool failure on dot-prefixed paths (._design_docs/...) on Windows; recovered by routing through cmd /c type and PowerShell Get-Content with explicit path. Worktree-readable alternative works.
+
+Improvement outcome candidate:
+- Condition: Reviewing design authored before Manager decision; design uses R-NN-DESIGN-MGR-01, tracker uses DNN-EXEC-01.
+- Action: Record both IDs as non-blocking observation; require implementation plan to reconcile.
+
+Similar memory check:
+- Existing: Handoff prerequisites in plan reviews, One-gate stage design authoring, Closure doc sweep part-file split and CRLF normalization.
+- Decision: Add new improvement (already appended above as "Parallel decision IDs across design and tracker").
+
+Memory update:
+- Added improvement: Parallel decision IDs across design and tracker.
+
+Note on read_file tool:
+- read_file tool reports "Unable to resolve nonexistent file" on Windows paths under dot-prefixed directories like ._design_docs/. cmd /c type works. Future architect tasks should expect to route reads through cmd /c type and stage outputs in chat session resources for further inspection.
+
+## Post-task review 2026-06-18 (Stage 20 implementation-plan review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 20 implementation plan in a fresh Architect session; produced part-01-architect-implementation-plan-review-gate-01.md in newly-created `_design_docs/cache-handling-phase20-implementation/` subdirectory. Verdict PASS, 0 BLOCKING, 2 non-blocking, 4 INFO.
+- The 30-item user-supplied checklist mapped cleanly to substantive plan evidence; no rework loops. Found one user-brief line-count mismatch (143 vs actual 201), two user-brief param-count mismatches (5+3 vs design 5+2; 6 vs plan 7) - all recorded as INFO, not blockers, because plan matches approved design exactly.
+- Plan under review was LF-only and clean (CR=0, BOM=False, no unicode, no trailing whitespace). My own review deliverable was NOT clean on first write: create_file on Windows inserted CRLF (CR=139) and I introduced one em-dash (U+2014) in my own prose. Caught both via byte-level check on own output and fixed by replacing em-dash with ASCII hyphen, then rewriting via WriteAllText after stripping CR.
+
+Improvement outcome candidate:
+- Condition: Authoring any review deliverable (architect review report, design review, implementation review, code review) on Windows.
+- Action: Do run byte-level format verification on own output before declaring done (CR=0, BOM=False, nonAscii=0, no trailing whitespace). Do replace em-dash with comma or " - " before write; create_file on Windows preserves both CRLF and any U+2014 character in the input string. The same CRLF rule already covers the technical fix; the new wrinkle is that the Architect itself authored the violations.
+
+Similar memory check:
+- Existing "CRLF and trailing whitespace on Windows tool-inserted content" already says "Do convert to LF-only by reading raw bytes, filtering out 0x0D, and writing with [System.IO.File]::WriteAllBytes". Existing "Self-claim format verification in review subjects" already says verify format claims on review subjects. The gap: neither rule explicitly says "do this on your OWN review deliverable too, not only on subjects you review."
+- Decision: Strengthen the existing CRLF rule with an explicit self-application clause rather than add a duplicate improvement.
+
+Memory update:
+- Existing CRLF rule strengthened below with self-application clause.
+
+## Improvement: CRLF/em-dash verification applies to own deliverables too
+
+Condition:
+
+- Architect author just authored a review report, design review, implementation review, or other durable doc on Windows; create_file and Set-Content on Windows insert CRLF even when the author wrote prose intending LF; author may also have inserted em-dash (U+2014) in their own prose
+
+Action:
+
+- Do apply the CRLF rule (strip 0x0D, write via WriteAllBytes/WriteAllText with UTF8-no-BOM after byte strip) to OWN durable deliverables before declaring done, not only to subjects under review. Do replace any U+2014 in own prose with comma or " - " before write. Do verify own output byte-level: CR=0, BOM=False, nonAscii=0, no trailing whitespace, line count under cap. Do expect linter MD041 warning on verdict-first-line format; task instruction takes precedence. Don't trust create_file to produce LF; the same Windows default applies to my own writes.
+
+## Post-task review 2026-06-18 (Stage 20 implementation review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 20 implementation evidence in a fresh Architect session; produced part-04-architect-implementation-review-gate-01.md. Verdict PASS, 0 BLOCKING, 1 non-blocking, 0 INFO.
+- 35-item user-supplied checklist mapped cleanly to substantive evidence; no rework loops. Verified all three items (agentic-prompt-generator.ps1, 27B fixture, S/L wrapper) against byte-level format, parameter contract, and per-item smoke evidence.
+- Caught one non-blocking self-claim discrepancy in the subject: implementation evidence file claims `agentic-prompt-generator.ps1` has 274 lines but actual file has 308 lines. Script itself is LF-only, no BOM, no unicode, no trailing whitespace, fully functional. Other format properties (CR=0, BOM=False, no non-ASCII) are correctly stated.
+- My own review deliverable was NOT clean on first write: create_file on Windows inserted CRLF (CR=141). Caught via the existing byte-level check and fixed via WriteAllBytes after stripping 0x0D. MD041 warning was expected per task contract (verdict line at top).
+- All evidence artifacts spot-checked (smoke JSONs, side logs, extracted chat template). Implementation matches approved design and plan; verdict PASS.
+
+Improvement outcome candidate:
+- Condition: Reviewing implementation evidence file that records a line-count claim for a code artifact (script, helper) the review must also byte-check.
+- Action: Do not trust the subject's line-count claim; do verify by LF byte count (or Get-Content count) on the actual file. Do flag as non-blocking when subject's other format claims hold but the LF count number is wrong. Do not flag as blocking unless the script content is wrong.
+
+Similar memory check:
+- Existing "Self-claim format verification in review subjects" already says "Do verify each format claim with byte-level check regardless of what the subject's own text says." This case reinforces the existing rule - the implementation evidence's claim "LF=274" was incorrect but the underlying file was correct, and the existing rule's separation of format violations from code correctness held up. No update needed.
+
+Memory update:
+- No new improvement; existing "Self-claim format verification in review subjects" was reinforced and correctly applied.
