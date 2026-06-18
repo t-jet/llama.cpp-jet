@@ -803,6 +803,16 @@ Action:
 
 - Do compare current prototype constants against both the approved design and the plan's ordered execution steps. Do flag checklist omissions as non-blocking when the execution step already carries the binding value and implementation can apply it during the planned patch. Do make it blocking only when the omission leaves no enforceable step or evidence point for the required value.
 
+## Improvement: Runner verdict must enforce design PASS criteria
+
+Condition:
+
+- Reviewing a runner script or harness that produces PASS, FAIL, BLOCKED, or PASS-candidate verdicts for a staged workload gate
+
+Action:
+
+- Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them. Don't accept dry-run flag checks as proof that live verdict logic enforces bounded miss, redaction, metric, or artifact requirements.
+
 ### Post-Task Review - 2026-06-18 (Stage 20 design authoring)
 
 Task: Author Stage 20 design (Stage 17 Test Infrastructure Additions) covering three deferred items from Stage 17 closure: agentic prompt generator (TP-17-SY1..SY5), Qwen3.6-27B-MTP fixture (TP-17-HV1/HV2), and S/L framework re-invocation (TP-17-ST1..ST3). Manager decision R-20-DESIGN-MGR-01 required for Item 2.
@@ -929,3 +939,26 @@ Similar memory check:
 
 Memory update:
 - No new improvement; existing navigation-state rules were reinforced and applied.
+
+## Post-task review 2026-06-18 (Stage 21 implementation review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 21 runner patch and dry-run evidence without running full heavy execution. Produced `part-04-architect-implementation-review-gate-01.md` with verdict REWORK, 1 BLOCKING, 2 non-blocking, 2 INFO. Updated Stage 21 implementation entry status and gate row. Verified own review output and entry edit as LF-only, no BOM, ASCII, no trailing whitespace, under 300 lines, and `git diff --check` clean.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner script or harness that produces PASS, FAIL, BLOCKED, or PASS-candidate verdicts for a staged workload gate
+- Action:
+  - Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only summary fields
+
+Similar memory check:
+- Similar improvement found: partial
+- Existing improvement:
+  - Infrastructure pass is not workload coverage
+- Decision: Add new improvement because this review found a script-specific live verdict gap, not just a workload-scope mismatch.
+
+Memory update:
+- Added `Runner verdict must enforce design PASS criteria`.
