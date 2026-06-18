@@ -793,6 +793,16 @@ Action:
 
 - Do list in the entry-doc handoff section which items may proceed in parallel with the Manager decision and which items MUST wait for the decision record. Do not block all items on a single decision when only one item depends on it. Do not let items proceed when the decision is binding for them. Do record the dependency direction explicitly per item. Do put the binding items in a separate gate-status row that names the Manager decision ID. Do keep the design authored-state wording for non-binding items so implementation planning can open for them independently. Don't invent a fallback path in the design when the user prompt explicitly forbids it; surface the gap as a Manager decision and stop.
 
+## Improvement: Prototype edit checklist drift in plan reviews
+
+Condition:
+
+- Reviewing an implementation plan that patches a prototype script, and the plan states a design-required runtime value in ordered execution steps but omits that value from the prototype edit checklist
+
+Action:
+
+- Do compare current prototype constants against both the approved design and the plan's ordered execution steps. Do flag checklist omissions as non-blocking when the execution step already carries the binding value and implementation can apply it during the planned patch. Do make it blocking only when the omission leaves no enforceable step or evidence point for the required value.
+
 ### Post-Task Review - 2026-06-18 (Stage 20 design authoring)
 
 Task: Author Stage 20 design (Stage 17 Test Infrastructure Additions) covering three deferred items from Stage 17 closure: agentic prompt generator (TP-17-SY1..SY5), Qwen3.6-27B-MTP fixture (TP-17-HV1/HV2), and S/L framework re-invocation (TP-17-ST1..ST3). Manager decision R-20-DESIGN-MGR-01 required for Item 2.

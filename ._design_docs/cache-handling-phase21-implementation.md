@@ -1,13 +1,31 @@
 # Stage 21 implementation: heavy tier mixed workload verification
 
-Status: authored; pending Architect implementation-plan review
+Status: Manager implementation-plan gate PASS; implementation open
 Date: 2026-06-18
 Stage: 21 (Heavy Tier Mixed Workload Verification)
 Author: Developer (implementation plan, fresh session)
 Source design: [cache-handling-phase21-design.md](cache-handling-phase21-design.md)
 Manager gate: D21-DESIGN-01
-Current gate: implementation planning
-Scope: implementation plan only. No code, script, test execution, or commit.
+Current gate: implementation
+Scope: implementation plan and gate record. No script edit or test execution has started.
+
+## Contents
+
+- [Part 1: Architect implementation-plan review gate 01](cache-handling-phase21-implementation/part-01-architect-implementation-plan-review-gate-01.md)
+- [Part 2: Manager implementation-plan gate](cache-handling-phase21-implementation/part-02-manager-implementation-plan-gate.md)
+
+## Gate status
+
+| Gate | Status |
+| --- | --- |
+| Stage 21 design authoring | PASS (see [design entry](cache-handling-phase21-design.md)) |
+| Stage 21 design review | PASS (see [design part 1](cache-handling-phase21-design/part-01-design-review-gate-01.md), 0 BLOCKING, 3 non-blocking, 1 INFO) |
+| Stage 21 Manager design gate | PASS (see [design part 2](cache-handling-phase21-design/part-02-manager-design-gate.md), D21-DESIGN-01..03) |
+| Stage 21 implementation planning | PASS (this file) |
+| Stage 21 implementation-plan review | PASS (see [part 1](cache-handling-phase21-implementation/part-01-architect-implementation-plan-review-gate-01.md), 0 BLOCKING, 3 non-blocking, 2 INFO) |
+| Stage 21 Manager implementation-plan gate | PASS (see [part 2](cache-handling-phase21-implementation/part-02-manager-implementation-plan-gate.md), D21-IMPLPLAN-01..03) |
+| Stage 21 implementation | not started |
+| Stage 21 QA execution | not started |
 
 ## Approved baseline
 
