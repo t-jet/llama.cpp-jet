@@ -1,12 +1,28 @@
 # Stage 21 design: heavy tier mixed workload verification
 
-Status: authored; pending Architect design review
+Status: Manager design gate PASS; implementation planning open
 Date: 2026-06-18
 Stage: 21 (Heavy Tier Mixed Workload Verification)
 Author: Architect (design, fresh session)
 Source: [Stage 17 test plan part 27](cache-handling-test-plan/part-27-stage17-agentic-cache-reuse.md) TP-17-HV1/HV2; [Stage 20 implementation](cache-handling-phase20-implementation.md); [Stage 20 heavy report](.test_reports/stage20-heavy-20260618-01.md)
 Scope: Stage 21 design only. No code, script, or test execution changes.
-Current gate: Design
+Current gate: implementation planning
+
+## Contents
+
+- [Part 1: design review gate 01](cache-handling-phase21-design/part-01-design-review-gate-01.md)
+- [Part 2: Manager design gate](cache-handling-phase21-design/part-02-manager-design-gate.md)
+
+## Gate status
+
+| Gate | Status |
+| --- | --- |
+| Stage 21 design authoring | PASS (this file) |
+| Stage 21 design review | PASS (see [part 1](cache-handling-phase21-design/part-01-design-review-gate-01.md), 0 BLOCKING, 3 non-blocking, 1 INFO) |
+| Stage 21 Manager design gate | PASS (see [part 2](cache-handling-phase21-design/part-02-manager-design-gate.md), D21-DESIGN-01) |
+| Stage 21 implementation planning | not started |
+| Stage 21 implementation | not started |
+| Stage 21 QA execution | not started |
 
 ## Scope
 

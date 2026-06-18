@@ -896,3 +896,26 @@ Similar memory check:
 
 Memory update:
 - No new improvement; existing "Self-claim format verification in review subjects" was reinforced and correctly applied.
+
+## Post-task review 2026-06-18 (Stage 21 design review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 21 design in a fresh Architect session and produced `part-01-design-review-gate-01.md` with verdict PASS, 0 BLOCKING, 3 non-blocking, 1 INFO. Updated the Stage 21 entry doc with Contents and Gate status. Verified modified deliverables with LF byte count, CR=0, BOM=False, non-ASCII=0, no trailing whitespace, under 300 lines, and clean `git diff --check`. Local markdownlint was unavailable without package install.
+
+Improvement outcome candidate:
+- Condition:
+  - When authoring an independent design review part and the entry doc has no Contents or stale pending-review gate state
+- Action:
+  - Do update entry-doc Contents and Gate status in the same task while keeping Manager gate pending
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - One-gate stage design authoring and Narrow re-reviews still update navigation state already require recording independent design review PASS in the review report and entry doc while leaving Manager gate pending.
+- Decision: No update
+
+Memory update:
+- No new improvement; existing navigation-state rules were reinforced and applied.
