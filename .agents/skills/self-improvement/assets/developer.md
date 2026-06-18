@@ -886,3 +886,11 @@ Condition:
 
 Action:
 - Do read the prototype before writing the implementation plan and add a dedicated plan section listing concrete gaps against the accepted evidence contract, including output naming, redaction boundaries, request/response artifacts, summary schema, metric capture, baseline paths, and verdict calculation. Don't say "reuse the prototype" without naming required edits and a dry-run validation step. Verified 2026-06-18 (Stage 21 implementation plan): `kickoff-stage20-heavy-v2.ps1` had Stage 20 output naming, raw inline prompts, response-only artifacts, `._analysis/model_log.txt` baseline default, and default `--chat-template-file`; the plan marked script edits required before execution instead of treating the prototype as approved heavy evidence.
+
+## Improvement: Dry-run summaries should use explicit sentinel values
+
+Condition:
+- When a runner dry-run writes the same summary or comparison schema that live execution will later fill with runtime-only metrics
+
+Action:
+- Do write explicit dry-run sentinel values such as `DRYRUN` plus `inconclusive` classification for runtime-only fields; don't leave those fields as null, because reviewers need to distinguish intentionally unexecuted evidence from missing runner output.
