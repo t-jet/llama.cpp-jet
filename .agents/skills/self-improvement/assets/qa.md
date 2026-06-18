@@ -358,6 +358,30 @@ Condition:
 Action:
 - Don't trust the citation without verification. Open the cited document at the cited line range and confirm the quoted text actually appears there. If the cited source lacks the text but the content matches a different doc (e.g. design instead of tracker), record the citation drift as an INFO finding and note which doc actually holds the text. Do not block the review if the substance is correct and the drift is pre-existing and inherited from an already-approved upstream doc (e.g. design gate already PASSED). When the cited line number itself is off by 1 (e.g. tracker line 42 cited but Stage 15 row is at line 41), record the line number drift in the same INFO finding.
 
+## Improvement: verify Select-String count for cross-line patterns
+
+Condition:
+- Reviewing a test plan row that expects a specific count from `Select-String` (or grep with default line-by-line behavior) for a string that spans multiple adjacent source lines (e.g. SRV_ERR on one line, throw on the next line, or two consecutive lines of a multi-line literal)
+
+Action:
+- Do not trust the count claim in the test plan row without running the actual `Select-String` command. By default `Select-String` returns one match per line containing the pattern, not one match per logical block; if the pattern appears on N adjacent lines (e.g. canonical check at lines 1419 and 1420 with the same substring in SRV_ERR and throw), the count is N, not 1. If the test plan row says "exactly 1 match" but the actual Select-String returns N matches, record a non-blocking finding noting the wording drift. Cite the actual count and lines in the finding. Do not block the review if the substance is correct (canonical block intact, duplicate gone) and the wording drift is inherited from an already-approved upstream doc. If the drift is fixable with a more specific pattern (e.g. one that matches only the throw line), suggest the fix as the recommended action; otherwise note that the count wording is imprecise but the row is still verifiable.
+
+## Improvement: avoid `+ N` or `* N` at start of continuation line in parenthetical text
+
+Condition:
+- Authoring markdown test plan prose with a parenthetical that begins a continuation line with `+ N` (e.g. `(74 pre-Stage 17` on one line, `+ 15 Stage 17 test_stage17_* functions). Count the actual` on the next line)
+
+Action:
+- Do not put `+`, `*`, or `-` followed by a digit at the start of a continuation line inside a parenthetical. markdownlint MD004 interprets the leading `+ N` as a list marker that does not match the dash style used by surrounding lists, and reports `MD004/ul-style: Unordered list style [Expected: dash; Actual: plus]`. Reword the parenthetical to avoid the leading `+ N` pattern, e.g. `(74 pre-Stage 17 tests plus 15 Stage 17 test_stage17_* functions)` or split the parenthetical across fewer lines. The pattern is common when describing test counts like `(N existing + M new)` in a bullet list. Run `get_errors` on the touched markdown file before final handoff to confirm zero lint errors.
+
+## Improvement: expand row count to honor post-design Manager amendments
+
+Condition:
+- Authoring a Stage N test plan from a design-proposal row list (e.g. 13 rows) when a post-design Manager plan-amendment gate decision (e.g. D{N}-IMPL-01) moves contract flags to additional locations (e.g. from compile flags to three linker flags) that the design proposal did not enumerate
+
+Action:
+- Do not silently drop the amendment's new contract locations from the row table. Add a focused row (or expand an existing row) to cover the new locations, document the row-count deviation from the design proposal in the test plan header, and cite the Manager plan-amendment gate decision as the reason. The row-count deviation is a non-blocking finding at test-plan review, not a blocker, because the alternative is a test plan that does not fully cover the binding decision. The amendment always post-dates the design proposal by definition; the test plan must reflect the post-amendment state, not the pre-amendment state.
+
 ## Improvement: rewrite new markdown with LF endings before git diff --check
 
 Condition:
@@ -562,3 +586,15 @@ Action:
 - When the second exec reuses the first exec's folder (because the build was not re-cleaned), record this explicitly in the second report's evidence column with a note like "shared with first exec"
 - Don't reference old -rerun folder names in test-report evidence columns; update them when the convention is applied
 
+
+
+## Improvement: cache validation position matters for bounded-error exit
+
+Condition:
+- A test plan's integration row expects a ounded-error exit from a config-validation block in load_model() or similar, and the validation block is positioned AFTER the model load / warmup step
+
+Action:
+- Don't trust the design's claim that "the validation block rejects the configuration". The crash site can be in the warmup path itself, BEFORE the validation can throw. Reproduce the row empirically in the QA session, not by code inspection. If the server exits with  0xC0000409 STATUS_STACK_BUFFER_OVERRUN (or any non-bounded-error exit) instead of printing the validation's SRV_ERR / throw message, the validation block is unreachable and the row is FAIL even if the validation source is correct.
+- Verify the validation block runs BEFORE the warmup step in the source. If it does not, record the structural finding (validation is positioned wrong) and route to Developer for a position fix.
+- The design's "F-XX-IMPL-02" closure citing "this check at line N" must be verified empirically; the check at the cited line may not fire for the actual sub-case the row exercises (e.g. when a sibling check with stricter condition is the one that would fire, but a different invalid configuration hits the warmup path first).
+- When a single test plan row produces a STATUS_STACK_BUFFER_OVERRUN and a sibling row with a different invalid config produces the same crash, both rows likely share a single root cause: a buffer overrun in the warmup path that fires before any validation block. Document the shared root cause once and link the second row as a sibling of the first.

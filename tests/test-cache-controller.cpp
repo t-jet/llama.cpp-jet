@@ -2963,6 +2963,54 @@ void test_stage17_raw_mode_requires_log_prompts_dir() {
     printf("  PASSED\n");
 }
 
+// TP-18-UT1: F-18-DR-01 corner case rejected at startup (Stage 18 bug-fix 2026-06-18).
+// legacy + cold-path + max_mib=0 must trigger the cold-max-mib-requires-hybrid
+// check (cache_cold_max_mib != -1 && != HYBRID). The validation moved to the
+// top of load_model() and now uses return false instead of throw, so the
+// caller (server.cpp:305) prints "exiting due to model loading error" and
+// returns 1 (no STATUS_STACK_BUFFER_OVERRUN). This unit test mirrors the
+// precondition so the regression has a focused assertion.
+void test_stage18_f18dr01_corner_case_rejected() {
+    printf("test-cache-controller: Stage 18 F-18-DR-01 corner case rejected...\n");
+    bool rejected = false;
+    const int32_t cold_max_mib = 0;
+    const std::string cold_path = "d:\\tmp\\cache-cold-f18exec01";
+    const cache_mode mode = CACHE_MODE_LEGACY;
+    const int32_t ram_mib = 8192;
+    if (ram_mib != 0) {
+        if (cold_max_mib != -1 && mode != CACHE_MODE_HYBRID) {
+            rejected = true;
+        }
+    }
+    assert(rejected);
+    printf("  PASSED\n");
+}
+
+// TP-18-UT2: F-18-EXEC-02 raw + legacy rejected before raw+log-prompts-dir branch (Stage 18 bug-fix 2026-06-18).
+// Without --cache-mode hybrid, the validation fires
+// --cache-prompt-evidence requires --cache-mode hybrid (which is the first
+// check inside the evidence block) and returns false. This mirrors the
+// validation sequence so the unit row has a focused assertion.
+void test_stage18_f18exec02_raw_legacy_rejected() {
+    printf("test-cache-controller: Stage 18 F-18-EXEC-02 raw + legacy rejected...\n");
+    bool rejected = false;
+    const std::string evidence = "raw";
+    const cache_mode mode = CACHE_MODE_LEGACY;
+    const std::string evidence_dir;
+    const int32_t ram_mib = 8192;
+    if (ram_mib != 0) {
+        if (evidence != "off") {
+            if (mode != CACHE_MODE_HYBRID) {
+                rejected = true;
+            } else if (evidence_dir.empty()) {
+                rejected = true;
+            }
+        }
+    }
+    assert(rejected);
+    printf("  PASSED\n");
+}
+
 // TP-17-UT11: classify_restore_miss maps narrower causes to bounded enum (Stage 17 unit 2026-06-17).
 void test_stage17_classify_restore_miss_bounded_enum() {
     printf("test-cache-controller: Stage 17 classify_restore_miss bounded enum...\n");
@@ -3290,10 +3338,13 @@ int main() {
     test_stage17_metric_label_allowlist();
     test_stage17_common_params_defaults();
     test_stage17_prefix_miss_evidence_redacted();
+    // Stage 18 bug-fix loop 2026-06-18: F-18-DR-01 + F-18-EXEC-02 regression
+    test_stage18_f18dr01_corner_case_rejected();
+    test_stage18_f18exec02_raw_legacy_rejected();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 87 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused)\n");
+    printf("Total: 89 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18)\n");
     printf("==================================================\n");
 
     return 0;

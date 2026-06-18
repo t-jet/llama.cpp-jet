@@ -1239,6 +1239,56 @@ private:
             }
         }
 
+        // Validate cache configuration before model load/warmup. A
+        // misconfigured --cache-prompt-evidence or --cache-cold-* flag must
+        // throw a bounded error before llama_init_from_params runs, otherwise
+        // the model warmup path can crash with STATUS_STACK_BUFFER_OVERRUN
+        // (0xC0000409) before validation can fire (Stage 18 F-18-EXEC-01 and
+        // F-18-EXEC-02 fix 2026-06-18; Stage 17 F-17-EXEC-01 move was
+        // incomplete -- the block sat after the warmup step).
+        if (params_base.cache_ram_mib != 0) {
+            if (params_base.cache_cold_max_mib < -1) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib must be -1, 0, or positive\n");
+                return false;
+            }
+            if (params_base.cache_prompt_evidence != "off" &&
+                params_base.cache_prompt_evidence != "redacted" &&
+                params_base.cache_prompt_evidence != "raw") {
+                SRV_ERR(" - cache: invalid --cache-prompt-evidence mode: %s\n",
+                        params_base.cache_prompt_evidence.c_str());
+                return false;
+            }
+            if (params_base.cache_prompt_evidence != "off") {
+                if (params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-mode hybrid\n");
+                    return false;
+                }
+                if (params_base.cache_prompt_evidence_dir.empty()) {
+                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-prompt-evidence-dir\n");
+                    return false;
+                }
+                if (params_base.cache_prompt_evidence == "raw" && params_base.path_prompts_log_dir.empty()) {
+                    SRV_ERR("%s", " - cache: raw prompt evidence requires --log-prompts-dir\n");
+                    return false;
+                }
+            }
+            if (params_base.cache_cold_max_mib != -1 &&
+                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-mode hybrid\n");
+                return false;
+            }
+            if (params_base.cache_cold_max_mib != 0 &&
+                !params_base.cache_cold_path.empty() &&
+                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
+                SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
+                return false;
+            }
+            if (params_base.cache_cold_max_mib > 0 && params_base.cache_cold_path.empty()) {
+                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-cold-path for enabled cold writes\n");
+                return false;
+            }
+        }
+
         llama_init = common_init_from_params(params_base);
 
         model_tgt = llama_init->model();
@@ -1378,53 +1428,6 @@ private:
         // Necessary similarity of prompt for slot selection
         slot_prompt_similarity = params_base.slot_prompt_similarity;
 
-        // Validate cache configuration before allocating slots. A misconfigured
-        // --cache-prompt-evidence must exit before any slot/spec work so the
-        // bounded error prints and the server exits with a non-zero status
-        // (Stage 17 F-17-EXEC-01 fix 2026-06-17).
-        if (params_base.cache_ram_mib != 0) {
-            if (params_base.cache_cold_max_mib < -1) {
-                SRV_ERR("%s", " - cache: --cache-cold-max-mib must be -1, 0, or positive\n");
-                throw std::runtime_error("--cache-cold-max-mib must be -1, 0, or positive");
-            }
-            if (params_base.cache_prompt_evidence != "off" &&
-                params_base.cache_prompt_evidence != "redacted" &&
-                params_base.cache_prompt_evidence != "raw") {
-                SRV_ERR(" - cache: invalid --cache-prompt-evidence mode: %s\n",
-                        params_base.cache_prompt_evidence.c_str());
-                throw std::runtime_error("invalid --cache-prompt-evidence mode");
-            }
-            if (params_base.cache_prompt_evidence != "off") {
-                if (params_base.cache_mode_val != CACHE_MODE_HYBRID) {
-                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-mode hybrid\n");
-                    throw std::runtime_error("--cache-prompt-evidence requires --cache-mode hybrid");
-                }
-                if (params_base.cache_prompt_evidence_dir.empty()) {
-                    SRV_ERR("%s", " - cache: --cache-prompt-evidence requires --cache-prompt-evidence-dir\n");
-                    throw std::runtime_error("--cache-prompt-evidence requires --cache-prompt-evidence-dir");
-                }
-                if (params_base.cache_prompt_evidence == "raw" && params_base.path_prompts_log_dir.empty()) {
-                    SRV_ERR("%s", " - cache: raw prompt evidence requires --log-prompts-dir\n");
-                    throw std::runtime_error("raw prompt evidence requires --log-prompts-dir");
-                }
-            }
-            if (params_base.cache_cold_max_mib != -1 &&
-                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
-                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-mode hybrid\n");
-                throw std::runtime_error("--cache-cold-max-mib requires --cache-mode hybrid");
-            }
-            if (params_base.cache_cold_max_mib != 0 &&
-                !params_base.cache_cold_path.empty() &&
-                params_base.cache_mode_val != CACHE_MODE_HYBRID) {
-                SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
-                throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
-            }
-            if (params_base.cache_cold_max_mib > 0 && params_base.cache_cold_path.empty()) {
-                SRV_ERR("%s", " - cache: --cache-cold-max-mib requires --cache-cold-path for enabled cold writes\n");
-                throw std::runtime_error("--cache-cold-max-mib requires --cache-cold-path");
-            }
-        }
-
         // setup slots
         SRV_INF("initializing slots, n_slots = %d\n", params_base.n_parallel);
 
@@ -1549,12 +1552,7 @@ private:
                 SRV_INF("%s", "cache mode: hybrid (LRU, non-destructive hits)\n");
             }
 
-            // Phase 6: Validate cold path configuration
             if (!params_base.cache_cold_path.empty()) {
-                if (cache_mode_active != CACHE_MODE_HYBRID) {
-                    SRV_ERR("%s", " - cache: --cache-cold-path requires --cache-mode hybrid\n");
-                    throw std::runtime_error("--cache-cold-path requires --cache-mode hybrid");
-                }
                 SRV_INF(" - cache: cold store path: %s\n", params_base.cache_cold_path.c_str());
                 if (params_base.cache_cold_max_mib == 0) {
                     SRV_INF("%s", " - cache: cold writes disabled by --cache-cold-max-mib 0\n");

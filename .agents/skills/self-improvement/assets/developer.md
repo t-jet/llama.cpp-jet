@@ -573,6 +573,16 @@ Action:
 
 - Do rename the existing `## Handoff` to a more specific variant (e.g. `## Handoff to execution` for the post-plan handoff) so the new `## Handoff` H2 is unique; MD024 disallows duplicate H2 headings and the existing markdownlint configuration will flag the duplicate. Don't try to disable MD024 for the file; the rename is a one-line, non-substantive change that preserves the existing content. The rename is also a useful reader cue: the original Handoff section talks about post-plan handoff, and the new Handoff section talks about post-readiness handoff, so the more specific name reflects the actual content.
 
+## Improvement: MD024 collision in multi-item implementation plans (H3 "### Steps" duplication)
+
+Condition:
+
+- When authoring an implementation plan that covers multiple distinct design items (e.g., Item 1, Item 2) in the same file and each item's "ordered implementation steps" section uses the same generic H3 heading (e.g., `### Steps` for both)
+
+Action:
+
+- Do rename each item's H3 to be context-specific (e.g., `### Item 1 steps`, `### Item 2 steps`) so the H3 heading is unique; MD024 disallows duplicate headings at any level and the existing markdownlint configuration will flag the duplicate. Don't try to disable MD024 for the file; the rename is a one-line, non-substantive change that preserves the content. The rename is also a useful reader cue: the renamed H3 immediately identifies which item's steps are below it, and the body text still starts at the same line. Verified 2026-06-18 (Stage 18 implementation plan): the plan for D17-EXEC-03 (Item 1) and D17-CLOSURE-02 / F-16-TR-03 (Item 2) initially had two `### Steps` H3 headings; renaming to `### Item 1 steps` and `### Item 2 steps` resolved the MD024 collision without changing the body text. The same principle applies to any H2/H3/H4 generic heading (`### Steps`, `### Handoff`, `### Risks`, `### Evidence`) repeated across multi-item or multi-section plans.
+
 ## Internal Post-Task Record (2026-06-13, Stage 15 pre-execution readiness gate)
 
 Task completed: Yes (documentation-only evidence section, no test execution).
@@ -769,3 +779,52 @@ Improvement outcome candidate:
 Similar memory check: Similar improvement found: No. Existing "Check build artifact timestamps against source timestamps before running tests" covers stale-binary crashes, not system-state crashes with a fresh binary. Existing "Verify QA runtime-behavior claims against model log before designing the fix" covers QA claim verification, not system-level verification blockers during a Developer fix session.
 
 Decision: Add new improvement.
+
+## Improvement: CMAKE_CXX_FLAGS_RELEASE on VS generator does not propagate to linker flags
+
+Condition:
+- When adding `/Zi /DEBUG:FULL` to `CMAKE_CXX_FLAGS_RELEASE` for the Visual Studio generator with the goal of producing PDBs for OpenCppCoverage line-data, and linker flag variables are not updated separately
+
+Action:
+- Do also update `CMAKE_EXE_LINKER_FLAGS_RELEASE`, `CMAKE_SHARED_LINKER_FLAGS_RELEASE`, `CMAKE_MODULE_LINKER_FLAGS_RELEASE` with `/debug /DEBUG:FULL`; VS generator keeps compile flags and linker flags in separate vcxproj sections, and the Link section's `<GenerateDebugInformation>false</GenerateDebugInformation>` default for Release blocks PDB emission. Also do NOT pass `/DEBUG:FULL` through `CMAKE_CXX_FLAGS_RELEASE` because the VS generator mis-translates it into a `/D` preprocessor define for `EBUG:FULL` (drops the leading `/D`). Verified 2026-06-18 (Stage 18): cmake CXX flag change alone produced no PDB, OpenCppCoverage emitted 111-byte header-only .cov.
+
+
+## Internal Post-Task Record (2026-06-18, Stage 18 implementation)
+
+Task completed: Partial (Item 1 PASS, Item 2 PARTIAL with substantive issue flagged).
+
+Effectiveness assessment: Item 1 deletion applied cleanly: 5 lines removed (1 comment + 4 inner if-block), test-cache-controller and llama-server rebuilt exit 0, 89/89 PASS (74 + 15 Stage 17 tests verified by direct count of test function definitions AND test invocations; the binary's trailing summary "Total: 87 tests" is stale cosmetic text from the test main and is not the authoritative count). F-18-DR-01 corner case empirically resolved: with --cache-cold-path X --cache-cold-max-mib 0 --cache-mode legacy, the server exits with non-zero code and prints "--cache-cold-max-mib requires --cache-mode hybrid" because the moved block at lines 1411-1414 (`cache_cold_max_mib != -1 && cache_mode_val != HYBRID`) fires before the post-slot-init block; the deleted duplicate is not needed for this corner case.
+
+Item 2 cmake reconfigure applied as the plan specified: -DCMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi /DEBUG:FULL" and -DCMAKE_C_FLAGS_RELEASE="...". CmakeCache.txt updated correctly. However, the Visual Studio generator does not propagate the flag to the Link section, so /debug is not passed to link.exe, and PDB is not generated. OpenCppCoverage emitted a 111-byte header-only .cov with "No modules were selected" warning. This is a substantive issue requiring plan amendment: linker flag variables (CMAKE_EXE_LINKER_FLAGS_RELEASE, CMAKE_SHARED_LINKER_FLAGS_RELEASE, CMAKE_MODULE_LINKER_FLAGS_RELEASE) need separate /debug /DEBUG:FULL specification for the VS generator; ALSO /DEBUG:FULL must NOT be passed through CMAKE_CXX_FLAGS_RELEASE because the VS generator mis-translates it into a /D preprocessor define for EBUG:FULL (drops the leading slash).
+
+Improvement outcomes captured under "Improvement: CMake CMAKE_CXX_FLAGS_RELEASE alone does not propagate to linker flags on VS generator", "Improvement: /DEBUG:FULL in CMAKE_CXX_FLAGS_RELEASE corrupts to /D preprocessor define", "Improvement: VS generator platform mismatch on reconfigure", "Improvement: OpenCppCoverage --modules takes an exe path, not a directory", "Improvement: Test binary trailing summary text can be stale vs actual test count".
+
+The substantive issue (F-18-IMPL-03 BLOCKING Item 2) was documented in the implementation evidence file part-03 and STOP was called per the role's "If any required build or test fails, document and STOP. Do not push past a broken build" rule. The OpenCppCoverage smoke test is BLOCKED-line-data (binary exit 0, tests pass, but no line coverage data), not BLOCKED-tooling in the strict sense - the tooling ran but the cmake invocation was incomplete. This is reported in the evidence with a concrete remediation: extend the cmake invocation to include linker flag variables.
+
+The replacement_string_in_file call converted the evidence file to CRLF on Windows (PowerShell tool default), but the CR->LF fix used the [System.Text.UTF8Encoding($false)] + "`r`n" -> "`n" pattern from the existing "Preserve local line endings in patch edits" memory. The BOM check confirms no BOM. Trailing whitespace: 0. Non-ASCII: 0. Total lines: 257 (under 300 cap).
+
+## Improvement: Throw in startup validation reproduces STATUS_STACK_BUFFER_OVERRUN when call chain has no try/catch
+
+Condition:
+- When a startup validation or init path uses `throw std::runtime_error("...")` to signal an invalid configuration, and the call chain from main through `llama_server()` to the throw site has no `try/catch` block
+
+Action:
+- Do not rely on `throw` for bounded-error exits in startup paths unless the entire call chain catches the exception. On Windows, an uncaught `std::runtime_error` triggers `std::terminate` which calls `__fastfail(FAST_FAIL_FATAL_APP_EXIT)`, producing the exit code 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN) - the SAME exit code as the model warmup crash the bug fix is trying to avoid. Do check whether `bool load_model(...)` (or any bool-returning init function) is the right signal channel; if the function already returns bool and the caller already handles `false` with `clean_up(); return N;`, use `return false` instead of `throw`. Verified 2026-06-18 (Stage 18 F-18-EXEC-01/02 fix): moving the validation block to BEFORE `llama_init = common_init_from_params` made the SRV_ERR message print at 12.624ms (good), but the exit code was still 0xC0000409 because `throw std::runtime_error` propagated up through `load_model` -> `llama_server` -> `main` without any try/catch wrapper, and `std::terminate` -> `__fastfail` produced the same STATUS_STACK_BUFFER_OVERRUN. Replacing `throw std::runtime_error("...")` with `return false` made `load_model` return false, the caller's `if (!ctx_server.load_model(params))` at `tools/server/server.cpp:305` triggered `clean_up(); SRV_ERR("exiting due to model loading error"); return 1;`, and the process exited with code 1 (clean) and the expected SRV_ERR message. Don't add try/catch wrappers across multiple files just to keep the throw semantics; the bool-returning pattern is consistent with the existing `return false` at the other failure points in the same function (null model, null context, etc.). Don't trust that a "bounded error message printed" is enough for the bug-fix; verify the exit code is NOT 0xC0000409 before declaring the fix PASS.
+
+## Internal Post-Task Record (2026-06-18, Stage 18 test-results review of rerun report)
+
+Task completed: Yes (test-results review only; no code, tests, fixes, or commits).
+
+Effectiveness assessment: Reviewer verdict PASS. Both blocking failures (F-18-EXEC-01, F-18-EXEC-02) confirmed FIXED at the rerun: exit code 1, bounded error before model warmup, no STATUS_STACK_BUFFER_OVERRUN. 12 prior PASS rows preserved. Source code byte-identical to bug-fix review iter 2 (git diff -w --numstat 50/52 server-context.cpp, 52/1 test-cache-controller.cpp). Coverage MEASURABLE (1.4 MB .cov, 8.4 MB Cobertura XML). No new product bugs. R-18-RUN-01 correctly classified as Stage 17 prefix policy working as designed, not a product bug from the Stage 18 fix path. R-18-RUN-02 correctly classified as positive finding (broader module coverage). N-18-RUN-03 correctly classified as harness observation (Start-Process stderr flush for fast-exit cases).
+
+Key observation: F-18-EXEC-02's rerun message text ("--cache-prompt-evidence requires --cache-mode hybrid") differed from the parent report's expected text ("raw prompt evidence requires --log-prompts-dir"). This was a validation block ordering consequence: the hybrid-required check at server-context.cpp:1259 fires before the raw+log-prompts-dir check at 1264 when default cache mode is legacy. The test plan's Pass/fail criteria for IT3 is "bounded-error exit; non-zero exit; no STATUS_STACK_BUFFER_OVERRUN" (substance), not the exact text. The QA explicitly addressed this in the rerun report's "Note on error message wording" section. The bug-fix report's f18exec02b-hybrid-direct.ps1 confirms the exact parent-expected message fires with hybrid+raw+no-log-prompts-dir, validating the validation block ordering is correct.
+
+Improvement outcome candidate:
+- Condition: When reviewing a QA re-execution report where the error message text differs from the parent report's expected text, but both confirm the same fix is working
+- Action: Do verify the test plan's Pass/fail criteria (substance vs exact text) before flagging the message difference as a regression. Cite the test plan's row-specific criteria (e.g., "bounded-error exit; non-zero exit; no STATUS_STACK_BUFFER_OVERRUN") and confirm the rerun satisfies it. Cross-reference the bug-fix report's evidence (e.g., f18exec02b-*.ps1 repros) to confirm the exact parent-expected message still fires under the conditions the parent assumed. Don't propagate the parent's exact-text expectation into the review's verdict when the test plan's criterion is substance-based.
+
+Similar memory check: Similar improvement found: Partial. The existing "Throw in startup validation reproduces STATUS_STACK_BUFFER_OVERRUN" improvement covers the underlying root cause (uncaught throw -> __fastfail) for the bug fix, but does not cover the reviewer's responsibility to distinguish substance vs exact-text in rerun messages. The existing "Reconcile test report prose summary count against per-row sums" improvement covers count discrepancies, not message-text discrepancies. The existing "Test-results review gate classification" improvement is general. No prior improvement covers the substance-vs-text pattern for rerun messages specifically.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Rerun error message text difference is not a regression when test plan substance criterion is met".

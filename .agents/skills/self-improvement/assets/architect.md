@@ -90,6 +90,16 @@ Action:
 
 - Do convert to LF-only by reading raw bytes, filtering out `0x0D`, and writing with `[System.IO.File]::WriteAllBytes` (or `[System.IO.File]::WriteAllText` with explicit UTF8-no-BOM but only AFTER a byte-level CR strip). Do NOT trust `ReadAllText` + `WriteAllText` alone; on Windows the read preserves CR and the write preserves CR. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't trust `Measure-Object -Line` for line count; it counts only non-empty lines and can return a number much smaller than actual line count (e.g. 60 for an 86-line file). Do use `(Get-Content path).Count` or LF byte count for true line count. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
 
+## Improvement: Self-claim format verification in review subjects
+
+Condition:
+
+- Reviewing bug-fix report, fixes handoff, or any review subject that makes a self-claim about its own format properties (LF line endings, no unicode, under 300 lines, no trailing whitespace)
+
+Action:
+
+- Do verify each format claim with byte-level check (`[System.IO.File]::ReadAllBytes` + `0x0D` membership, BOM check, unicode scan) regardless of what the subject's own text says. Don't trust the subject's self-description; on Windows, `create_file` and `Set-Content` insert CRLF even when the author writes `\n` mentally and the file text claims "LF line endings". Do compare against a sibling durable doc in the same directory as a sanity reference (e.g., parent test report should be LF-only; if fixes file has CR=True and parent has CR=False, the deviation is real). Do flag as BLOCKING when a user-listed checklist item like "LF-only" is violated, even if the underlying code change is correct; documentation hygiene is a gate per Stage 15+ governance. Do record format-property violations as separate findings from code-correctness findings so re-review can fix just the doc.
+
 ## Improvement: Design correction vs new stage for post-closure follow-ups
 
 Condition:
@@ -388,7 +398,17 @@ Condition:
 
 Action:
 
-- Do count columns in new row text against table header (split on unescaped `|` with surrounding whitespace stripped) before applying. If new row has fewer columns than header, do add missing column with one-line description rather than leaving row short. Do record column-count fix in post-task improvement rather than as blocking finding. Don't reject user-supplied text on column count alone. Don't add filler text to description column to reach header count.
+- Do count columns in new row text against table header (split on unescaped `|` with surrounding whitespace stripped) before applying. If new row has fewer columns than header, do add missing column with one-line description rather than leaving row short. Do record column-count fix in post-task improvement rather than as blocking finding. Don't reject user-supplied text on column count alone. Don't add filler text to description column to reach header count. Don't add padding rows to balance tables when only one row is short; instead, do fix the row's column count directly.
+
+## Improvement: Authoring review-file tables with long cells
+
+Condition:
+
+- Authoring implementation review or design review file with markdown tables; one cell has a long string (multi-clause sentence with backticks and code references) and other rows are short
+
+Action:
+
+- Do count pipes in every row before writing the file, not just header. Do treat long cell content as reason to move that content out of the table and into a follow-up paragraph or sub-section, keeping the table cell short (one line, one finding). Don't let one row's cell-content length cause you to forget the closing pipe. Don't add padding rows to balance column count; do fix the row itself. Do verify with a pipe count test (e.g., `$line.ToCharArray() | Where-Object { $_ -eq '|' } | Measure-Object -Count`) on each row before declaring the file done. Do expect MD056 linter warning as a real defect, not a false positive, and fix the cell or move the long content. Do distinguish MD041 (verdict-line first, expected per task contract) from MD056 (real column-count defect that must be fixed).
 
 ## Improvement: Speculative decode-batch sizing needs call-site flow trace
 
@@ -663,3 +683,44 @@ Condition:
 Action:
 
 - Do verify each deferred item is recorded in the implementation evidence and that the design baseline does not require it for this gate. Do record checklist verdict as DEFERRED-ACCEPTABLE when deferral is contract-accepted, not BLOCKING. Do note the manager decision or design exclusion that authorizes the deferral. Don't re-surface implementor-recorded deferrals as new blocking findings when the contract already accepts them. Don't fold deferral evaluation into the main PASS/FAIL verdict; carry it as a separate per-row verdict and a short overall note.
+
+## Improvement: MD040 and MD024 in multi-item design docs
+
+Condition:
+
+- Authoring stage design that contains multiple items (e.g., two distinct fix items) where each item has its own "Context" or "Behavior change analysis" subsection, and design includes code snippets
+
+Action:
+
+- Do add language tag to every fenced code block (for example cpp for C++ snippets, powershell for PowerShell, text for plain). Do disambiguate repeated subsection titles across items with item-specific qualifiers (for example Item 1: Context vs Item 2: Coverage build context; Item 1: Behavior change analysis vs Item 2: Coverage-build behavior change analysis). Do run markdown linter after writing to catch MD040/MD024 before finalizing. Don't use bare fences; linter reports MD040. Don't reuse exact H3 heading text across items; linter reports MD024.
+
+## Improvement: Stage-17 follow-up line numbers drift from earlier review
+
+Condition:
+
+- Authoring follow-up design for a closed stage where an earlier-stage review (e.g., bug-fix review part) cited specific line numbers for a code artifact, and the artifact has been edited or shifted since the review
+
+Action:
+
+- Do verify the actual current line numbers with Select-String or read_file before specifying the deletion or modification scope in the new design. Do cite both the older review's quoted line range (as historical reference) and the verified current line range. Don't copy line numbers from earlier-stage reviews without re-verifying; line numbers drift when neighboring code is added or moved.
+
+
+## Improvement: create_file on Windows produces CRLF
+
+Condition:
+
+- Using create_file tool to author a new markdown durable doc on Windows host; verifying line endings with raw byte inspection after creation
+
+Action:
+
+- Do NOT assume create_file produces LF-only line endings on Windows; the file may be CRLF from the moment of creation (system default). Do run raw byte inspection (CR/LF count) on the file right after create_file, not only after edits. Do convert to LF-only with [System.IO.File]::WriteAllBytes after byte-level CR strip when CR > 0. Do re-verify with raw byte count after conversion. Do not trust LF-only authoring assumption for new files on Windows. Don't waste turns reading the file content expecting LF when bytes are CRLF; check bytes first.
+
+## Improvement: Pre-fix line citations in post-fix handoff text
+
+Condition:
+
+- Reviewing bug-fix report where Handoff or Rationale section cites specific line numbers for the return-false pattern or other code shape that existed in pre-fix file; post-fix source has those exact lines pointing to different code after the fix's move
+
+Action:
+
+- Do flag pre-fix line citations in fix report handoff as non-blocking observation (NB-class) when fix itself is correct. Do suggest replacing pre-fix line numbers with post-fix line numbers (e.g., the new return-false lines in the moved block). Do not block gate on stale pre-fix citations when source diff is correct. Don't silently rewrite fix report during review.
