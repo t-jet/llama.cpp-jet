@@ -222,7 +222,7 @@ Action:
 
 - Do update `._design_docs/cache-handling-stage-tracker.md` row for the affected stage in the same handoff (status, manager gate decision date, notes)
 - Do reference the tracker file by relative link in the next handoff to the user so the user can verify the row state
-- Do follow the eight-column format (Stage, Title, Status, Design doc, Implementation log, Latest test report, Manager gate decision, Notes) and the copyable template under "Future stages and new tasks"
+- Do follow the eight-column format (Stage, Title, Status, Design doc, Implementation log, Latest test report, Manager gate decision, Notes) and the copyable template under "Future stages and new tasks"; if a stage row is accidentally appended after the template or out of numeric order, call it out as tracker-format/stale-doc debt and do not treat the misplaced row as fully reconciled until Architect fixes the tracker placement
 - Do not invent rows for stages that are not yet planned; pending tasks get a fresh row with Status `pending` and a stub Title
 - Don't duplicate tracker content in the architecture, design, or implementation entry docs; the tracker is the summary, the entry docs are the detail
 
@@ -277,6 +277,38 @@ Action:
 - Do run a small cherry-pick smoke test on one debug-helper commit before committing to the full cherry-pick; the smoke test reveals signature mismatches and missing methods early
 - Do expect 5-10 conflict resolutions when cherry-picking cycle work onto a divergent feature branch; budget the Developer session for that
 - Don't assume test fixes written against branch A apply cleanly to branch B; the debug helpers reference existing methods that may differ between branches
+
+## Improvement: detect cascade bug pattern and brief user for decision
+
+Condition:
+- Bug-fix loop iteration N+1 reveals a NEW bug in the same code area (same module, same subsystem, same family of operations) that was not the original target. The fix at iteration N PASSED its review and was confirmed PASS at unit test level, but the QA rerun exposed a follow-on bug at the next level down in the same subsystem. Each fix unmasks the next bug rather than resolving the work.
+
+Action:
+- Do recognize the cascade pattern after 2+ consecutive bug-fix iterations that each unmask a deeper bug in the same area
+- Do record the cascade in the implementation log as a numbered Manager decision (D-EXEC-NN) with the pattern documented: bug A -> fix -> bug B -> fix -> bug C
+- Do brief the user with a handoff that names the cascade explicitly and offers 2-3 options: continue bug-fix loop, scope-refactor the subsystem, or close the stage with documented BLOCKED-structural and defer
+- Do NOT continue the bug-fix loop indefinitely without user confirmation; cascade patterns suggest the subsystem has a fundamental design issue that may not be addressable by sequential small fixes
+- Do NOT call the stage complete with open bugs unless the user explicitly directs closure
+- Do preserve all durable artifacts (fix plans, code changes, test additions, QA reports) for future reference even if the cascade continues
+- Don't block on the cascade indefinitely without user input
+- Don't combine multiple cascading bugs into a single large refactor without user approval
+
+## Improvement: catch subagent fabrication of claimed test additions
+
+Condition:
+- Subagent (Developer) returns a fix-evidence file claiming N new test functions were added to a test source file and M/N+M total tests pass, where N is the increment over prior count
+
+Action:
+- Do NOT trust the subagent's text claim; verify on disk with `Select-String -Pattern '^void test_<name>'` (count of new function definitions) AND `Select-String -Pattern 'test_<name>_'` in main() calls AND test execution output showing literal PASS lines for the new tests AND updated total test count string in test summary
+- Do require each new test name to be visible in BOTH the function definition (e.g. `void test_stage21_xxx()`) AND the main() call (e.g. `test_stage21_xxx();`) AND the test execution output (e.g. `test-cache-controller: Stage 21 xxx... PASSED`)
+- Do require the total test count in the summary line to reflect the increment (e.g. `Total: 94 tests` when 3 new tests are added to 91)
+- Do treat any subagent that returns a successful claim without these three independent disk-side verifications as having fabricated the result
+- Do re-delegate to a fresh subagent session with explicit instructions to verify on-disk state both BEFORE and AFTER the work and to halt on any mismatch between claimed and actual state
+- Do record the fabrication as a numbered Manager decision in the implementation log (e.g. D-EXEC-NN) for audit trail
+- Do preserve the rejected fix evidence file with explicit iteration-3 addendum instead of deleting it, so the audit trail records both the failed iteration and the corrective iteration
+- Don't accept "92/92 tests pass" or "tests added" as a substitute for on-disk verification
+- Don't trust the subagent's text response when count or summary strings contradict prior state — this is a fabrication signal
+- Don't re-delegate without explicit verification instructions; vague re-delegations risk another fabrication
 
 ## Improvement: user-directed closure overrides normal gate evidence
 
@@ -390,4 +422,3 @@ Action:
 - Do accept the Developer's verdict without a QA rerun when the Architect's Option B is in force and the Developer has confirmed no new product bugs
 - Don't treat the absence of a new test report as gate-blocking when Architect Option B has been formally accepted via Manager decision
 - Don't skip the Developer test-results review even when there's no new full test report; the Developer still owns the per-row classification and the closure recommendation
-

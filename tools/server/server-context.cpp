@@ -1536,15 +1536,20 @@ private:
             // Store active cache mode
             cache_mode_active = params_base.cache_mode_val;
 
-            cache_ctrl = create_cache_controller(
-                cache_mode_active,
-                params_base,
-                params_base.cache_ram_mib,
-                n_ctx,
-                ctx_tgt,
-                ctx_dft ? ctx_dft.get() : nullptr,
-                params_base.cache_cold_path
-            );
+            try {
+                cache_ctrl = create_cache_controller(
+                    cache_mode_active,
+                    params_base,
+                    params_base.cache_ram_mib,
+                    n_ctx,
+                    ctx_tgt,
+                    ctx_dft ? ctx_dft.get() : nullptr,
+                    params_base.cache_cold_path
+                );
+            } catch (const std::exception & e) {
+                SRV_ERR(" - cache: failed to initialize controller: %s\n", e.what());
+                return false;
+            }
 
             if (cache_mode_active == CACHE_MODE_LEGACY) {
                 SRV_INF("%s", "cache mode: legacy (FIFO, destructive hits)\n");
@@ -6400,7 +6405,14 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
         return false;
     }
 
-    server_tokens entry_tokens = slot.prompt.tokens.clone();
+    // Stage 21 fix: save only the prompt tokens, not the full slot (prompt + generated)
+    // slot.task->tokens contains the original prompt tokens submitted by the user
+    // slot.prompt.tokens has accumulated all tokens including those generated during completion
+    if (!slot.task) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because task is null\n");
+        return false;
+    }
+    server_tokens entry_tokens = slot.task->tokens.clone();
 
     auto existing = find_equivalent_entry(entry_tokens, namespace_id);
     if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
@@ -6453,11 +6465,11 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
             return false;
         }
         existing->protected_root = existing->protected_root || protected_root;
-        existing->checkpoints = slot.prompt.checkpoints;
+        existing->checkpoints.clear();
         existing->metadata = metadata;
         if (!slot.prompt.checkpoints.empty()) {
             std::string checkpoint_failure;
-            if (!admit_latest_checkpoint(*existing, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+            if (!admit_latest_checkpoint_and_store_metadata(*existing, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
                 SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
             }
         }
@@ -6483,10 +6495,10 @@ bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_promp
         SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
         return false;
     }
-    it_new->checkpoints = slot.prompt.checkpoints;
+    it_new->checkpoints.clear();
     if (!slot.prompt.checkpoints.empty()) {
         std::string checkpoint_failure;
-        if (!admit_latest_checkpoint(*it_new, slot.prompt.checkpoints.back(), runtime_has_draft, &checkpoint_failure)) {
+        if (!admit_latest_checkpoint_and_store_metadata(*it_new, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
             SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
         }
     }
@@ -6592,7 +6604,8 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
     std::string restore_failure;
     payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
     uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    if (profile == cache_workload_profile::checkpoint_dependent) {
+    if (profile == cache_workload_profile::checkpoint_dependent &&
+        selected_payload_kind == payload_kind::checkpoint) {
         std::string checkpoint_path_failure;
         if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
             n_misses++;
@@ -6632,7 +6645,8 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         it_best = restore_source;
         selected_payload_kind = select_restore_payload_kind(*it_best, profile);
         selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-        if (profile == cache_workload_profile::checkpoint_dependent) {
+        if (profile == cache_workload_profile::checkpoint_dependent &&
+            selected_payload_kind == payload_kind::checkpoint) {
             std::string checkpoint_path_failure;
             if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
                 n_misses++;
@@ -6661,16 +6675,6 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
                 record_checkpoint_restore(descriptor_it->second, false);
             }
             // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        if (descriptor_it->second.residency == payload_residency_state::demoting) {
-            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is demoting, cannot restore yet\n",
-                    selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
             n_misses++;
             record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
             return false;
@@ -6890,7 +6894,8 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
     std::string restore_failure;
     payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
     uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    if (profile == cache_workload_profile::checkpoint_dependent) {
+    if (profile == cache_workload_profile::checkpoint_dependent &&
+        selected_payload_kind == payload_kind::checkpoint) {
         std::string checkpoint_path_failure;
         if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
             n_misses++;
@@ -6911,16 +6916,6 @@ bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & 
             SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
                     selected_payload_id);
             promote_payload(selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        if (descriptor_it->second.residency == payload_residency_state::demoting) {
-            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is demoting, cannot restore yet\n",
-                    selected_payload_id);
             if (selected_payload_kind == payload_kind::checkpoint) {
                 record_checkpoint_restore(descriptor_it->second, false);
             }

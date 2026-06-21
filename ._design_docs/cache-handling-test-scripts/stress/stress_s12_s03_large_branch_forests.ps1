@@ -17,6 +17,7 @@ param(
     [int]    $DistinctPrefixes = 64,
     [int]    $MtpVariant     = 0,
     [ValidateSet('original','marked')] [string] $JinjaVariant = 'original',
+    [string] $Stage17ServerArgsBase64 = '',
     [switch] $DryRun
 )
 
@@ -28,6 +29,7 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 
 . (Join-Path $libDir 'Write-StressEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
+. (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
 # MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
 $jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
@@ -56,6 +58,15 @@ $serverFlags = @('--cache-mode','hybrid','--cache-ram',"$HotBudgetMiB",
                  '--parallel',"$ParallelSlots",'--metrics','--ctx-size','512',
                  '--temp','0','--seed',"$Seed")
 $serverFlags = Merge-MtpJinjaFlag -Flags $serverFlags -JinjaPath $jinjaPath
+$serverFlags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
+
+function Get-FlagValue {
+    param([string[]] $Flags, [string] $Name)
+    for ($i = 0; $i -lt ($Flags.Count - 1); $i++) {
+        if ($Flags[$i] -eq $Name) { return $Flags[$i + 1] }
+    }
+    return ''
+}
 
 if ($DryRun) {
     Write-Host "DRY-RUN: would generate $DistinctPrefixes prefixes with seed $Seed and run $DurationMin min"
@@ -92,7 +103,7 @@ $proc = Start-Process -FilePath $serverExe `
     -NoNewWindow -PassThru
 
 $ready = $false
-$deadline = (Get-Date).AddSeconds(180)
+$deadline = (Get-Date).AddSeconds(300)
 while ((Get-Date) -lt $deadline) {
     try {
         $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 4
@@ -100,7 +111,7 @@ while ((Get-Date) -lt $deadline) {
     } catch {}
     Start-Sleep -Seconds 2
 }
-if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Write-Error "Server did not start" }
+if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; [Console]::Error.WriteLine("Server did not start"); exit 1 }
 
 (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -UseBasicParsing -TimeoutSec 10).Content |
     Out-File -FilePath (Join-Path $OutDir 'metrics-before.txt') -Encoding utf8
@@ -118,6 +129,10 @@ $csvPath  = Join-Path $OutDir 'resource-samples.csv'
 "elapsed_s,workingset_bytes,handle_count" | Out-File -FilePath $csvPath -Encoding utf8
 
 while ((Get-Date) -lt $end) {
+    if ($proc.HasExited) {
+        [Console]::Error.WriteLine("Server exited early with code $($proc.ExitCode)")
+        exit 1
+    }
     foreach ($p in $prompts) {
         $body = (@{ prompt = $p; n_predict = 4; temperature = 0; seed = $Seed; cache_prompt = $true } |
             ConvertTo-Json -Compress)
@@ -137,6 +152,19 @@ while ((Get-Date) -lt $end) {
 
 (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -UseBasicParsing -TimeoutSec 10).Content |
     Out-File -FilePath (Join-Path $OutDir 'metrics-after.txt') -Encoding utf8
+
+$coldPath = Get-FlagValue -Flags $serverFlags -Name '--cache-cold-path'
+if ($coldPath -and (Test-Path $coldPath)) {
+    $drainDeadline = (Get-Date).AddSeconds(120)
+    while ((Get-Date) -lt $drainDeadline) {
+        $tmpFiles = Get-ChildItem -Path $coldPath -Filter '*.cold.tmp' -File -ErrorAction SilentlyContinue
+        if (-not $tmpFiles) { break }
+        try {
+            Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -UseBasicParsing -TimeoutSec 10 | Out-Null
+        } catch {}
+        Start-Sleep -Seconds 2
+    }
+}
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
 Write-StressEvidence -OutDir $OutDir -ScenarioId 'S12-S03' -Variant 'forest-50MiB' `

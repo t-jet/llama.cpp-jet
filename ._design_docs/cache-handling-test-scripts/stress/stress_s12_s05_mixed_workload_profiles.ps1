@@ -3,7 +3,7 @@
 # Stage 12 stress: S12-S05 mixed workload profiles.
 # Plain-transformer Qwen3-0.6B (default); target-plus-draft Qwen3-8B
 # plus Qwen3-0.6B if both fixtures load; checkpoint-dependent BLOCKED
-# without fixture. 30 minute run per profile. Stub data otherwise.
+# without fixture. DurationMin is the whole row cap, split across profiles.
 # Evidence dir: ._design_docs/.test_reports/stress-s12-s05-<timestamp>/
 
 param(
@@ -11,10 +11,12 @@ param(
     [string] $ModelPath      = '',
     [string] $DraftModelPath = '',
     [string] $OutDir         = '',
+    [int]    $Port           = 8230,
     [int]    $DurationMin    = 30,
     [int]    $Seed           = 42,
     [int]    $MtpVariant     = 0,
     [ValidateSet('original','marked')] [string] $JinjaVariant = 'original',
+    [string] $Stage17ServerArgsBase64 = '',
     [switch] $DryRun
 )
 
@@ -26,6 +28,7 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 
 . (Join-Path $libDir 'Write-StressEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
+. (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
 # MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
 $jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
@@ -57,9 +60,21 @@ $profiles = @(
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
+$rowDurationSeconds = [Math]::Max(1, $DurationMin * 60)
+$baseProfileSeconds = [Math]::Max(1, [int][Math]::Floor($rowDurationSeconds / $profiles.Count))
+$profileDurations = @{}
+for ($idx = 0; $idx -lt $profiles.Count; $idx++) {
+    $profileSeconds = $baseProfileSeconds
+    if ($idx -eq ($profiles.Count - 1)) {
+        $profileSeconds = [Math]::Max(1, $rowDurationSeconds - ($baseProfileSeconds * ($profiles.Count - 1)))
+    }
+    $profileDurations[$profiles[$idx].name] = $profileSeconds
+}
+
 if ($DryRun) {
+    Write-Host "DRY-RUN: S12-S05 row cap $DurationMin min ($rowDurationSeconds sec); profiles=$($profiles.Count)"
     foreach ($p in $profiles) {
-        Write-Host "DRY-RUN: would run profile $($p.name) for $DurationMin min"
+        Write-Host "DRY-RUN: would run profile $($p.name) for $($profileDurations[$p.name]) sec"
     }
     exit 0
 }
@@ -67,11 +82,14 @@ if ($DryRun) {
 foreach ($p in $profiles) {
     $subDir = Join-Path $OutDir $p.name
     if (-not (Test-Path $subDir)) { New-Item -ItemType Directory -Force -Path $subDir | Out-Null }
+    $profileDurationSeconds = $profileDurations[$p.name]
+    Write-Host "S12-S05 profile $($p.name): row cap $DurationMin min, profile allocation $profileDurationSeconds sec"
 
     $stub = -not (Test-Path $p.model)
     if ($p.draft) { $stub = $stub -or (-not (Test-Path $p.draft)) }
     $serverFlags = $p.args
     $serverFlags = Merge-MtpJinjaFlag -Flags $serverFlags -JinjaPath $jinjaPath
+    $serverFlags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
 
     if ($stub) {
         "# STUB: profile $($p.name) fixture missing" |
@@ -89,7 +107,7 @@ foreach ($p in $profiles) {
         }
         Write-StressEvidence -OutDir $subDir -ScenarioId 'S12-S05' -Variant $p.name `
             -ModelFixture (Split-Path $p.model -Leaf) -BuildType 'Release' `
-            -ServerFlags $serverFlags -Seed $Seed -DurationSeconds ($DurationMin * 60) `
+            -ServerFlags $serverFlags -Seed $Seed -DurationSeconds $profileDurationSeconds `
             -MetricsBeforePath (Join-Path $subDir 'metrics-before.txt') `
             -MetricsDuringPath (Join-Path $subDir 'metrics-during.txt') `
             -MetricsAfterPath  (Join-Path $subDir 'metrics-after.txt') `
@@ -102,7 +120,7 @@ foreach ($p in $profiles) {
         Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 
-    $port = 8230 + ([int]([System.Text.Encoding]::UTF8.GetBytes($p.name)[0]))
+    $port = $Port + [array]::IndexOf($profiles, $p)
     $modelArg = @('--model',$p.model)
     $startArgs = $serverFlags + $modelArg + @('--host','127.0.0.1',"--port","$port",
                         '--temp','0','--seed',"$Seed",'--ctx-size','512')
@@ -125,7 +143,7 @@ foreach ($p in $profiles) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
         Write-StressEvidence -OutDir $subDir -ScenarioId 'S12-S05' -Variant $p.name `
             -ModelFixture (Split-Path $p.model -Leaf) -BuildType 'Release' `
-            -ServerFlags $serverFlags -Seed $Seed -DurationSeconds ($DurationMin * 60) `
+            -ServerFlags $serverFlags -Seed $Seed -DurationSeconds $profileDurationSeconds `
             -MetricsBeforePath (Join-Path $subDir 'metrics-before.txt') `
             -MetricsDuringPath (Join-Path $subDir 'metrics-during.txt') `
             -MetricsAfterPath  (Join-Path $subDir 'metrics-after.txt') `
@@ -138,7 +156,7 @@ foreach ($p in $profiles) {
         Out-File -FilePath (Join-Path $subDir 'metrics-before.txt') -Encoding utf8
 
     $start = Get-Date
-    $end   = $start.AddMinutes($DurationMin)
+    $end   = $start.AddSeconds($profileDurationSeconds)
     $rowCount = 0
     $csvPath  = Join-Path $subDir 'resource-samples.csv'
     "elapsed_s,workingset_bytes,handle_count" | Out-File -FilePath $csvPath -Encoding utf8
@@ -165,7 +183,7 @@ foreach ($p in $profiles) {
     Write-StressEvidence -OutDir $subDir -ScenarioId 'S12-S05' -Variant $p.name `
         -ModelFixture (Split-Path $p.model -Leaf) -BuildType 'Release' `
         -ServerFlags $serverFlags -RequestCount $rowCount -Seed $Seed `
-        -DurationSeconds ($DurationMin * 60) `
+        -DurationSeconds $profileDurationSeconds `
         -MetricsBeforePath (Join-Path $subDir 'metrics-before.txt') `
         -MetricsDuringPath (Join-Path $subDir 'metrics-during.txt') `
         -MetricsAfterPath  (Join-Path $subDir 'metrics-after.txt') `

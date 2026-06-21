@@ -78,7 +78,7 @@ Condition:
 
 Action:
 
-- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
+- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. For new untracked durable docs, run a separate whitespace check such as `git diff --check --no-index` against an empty temp file and interpret no output as clean even though no-index exits 1 for content differences. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
 
 ## Improvement: CRLF and trailing whitespace on Windows tool-inserted content
 
@@ -811,7 +811,34 @@ Condition:
 
 Action:
 
-- Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them. Don't accept dry-run flag checks as proof that live verdict logic enforces bounded miss, redaction, metric, or artifact requirements.
+- Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do require presence/minimum counts for every design-required workload class before PASS/PASS-candidate, then require the class-specific evidence for those rows. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them, or when it validates only rows that happen to exist while missing required classes can pass. Don't accept dry-run flag checks as proof that live verdict logic enforces bounded miss, redaction, metric, artifact, or workload-class requirements.
+
+## Post-task review 2026-06-18 (Stage 21 implementation re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed F-21-IR-01 after commit 65d678d71, produced part-06 with REWORK verdict, and updated only the Stage 21 implementation entry gate status. The review caught that corrected live logic blocks missing evidence for existing near/new rows but can still pass when those required classes are absent.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a staged workload runner verdict gate after a correction claims required evidence is enforced
+- Action:
+  - Do test missing-class paths as well as missing-evidence paths; PASS must require required class presence and class-specific evidence.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Runner verdict must enforce design PASS criteria
+- Decision: Strengthen existing improvement.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When reviewing a runner script or harness that produces PASS, FAIL, BLOCKED, or PASS-candidate verdicts for a staged workload gate
+  - Action:
+    - Do require presence/minimum counts for design-required workload classes before PASS/PASS-candidate, then require the class-specific evidence for those rows.
 
 ### Post-Task Review - 2026-06-18 (Stage 20 design authoring)
 
@@ -962,3 +989,745 @@ Similar memory check:
 
 Memory update:
 - Added `Runner verdict must enforce design PASS criteria`.
+
+## Post-task review 2026-06-18 (Stage 22 design authoring)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Authored Stage 22 design and reconciled index/tracker without production edits. Verified new doc line count, LF/no-BOM/no-trailing-whitespace, and tracked-doc `git diff --check`. Normal `git diff --check` skipped the untracked new design doc, so a no-index check against an empty temp file was needed.
+
+Improvement outcome candidate:
+- Condition:
+  - When authoring a new durable doc that is still untracked
+- Action:
+  - Do run a separate whitespace check for the new file because normal `git diff --check` skips untracked paths.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement: Untracked or partly-tracked review doc paths
+- Decision: Strengthen existing improvement.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When adding or updating review/design docs that are untracked or partly tracked by git
+  - Action:
+    - Do verify untracked content directly and run `git diff --check --no-index` against an empty temp file for new durable docs when normal diff cannot include them.
+
+## Improvement: State-machine validation-order contradictions
+
+Condition:
+- When reviewing a design for a state-machine refactor where one requirement says to preserve current validation order and another requires special handling for a state already rejected by that order
+
+Action:
+- Do compare the proposed order against current code line-by-line and flag the contradiction as blocking unless the design states the exact reordered branch or diagnostic outcome. Do require a focused unit assertion for the special state.
+
+## Improvement: Race-fix plans need deterministic duplicate/stale assertions
+
+Condition:
+- When reviewing an implementation plan for an async race, stale callback, duplicate callback, or idempotent completion fix
+
+Action:
+- Do require focused deterministic unit assertions for the stale/duplicate state transitions and counter stability. Don't accept heavy rerun evidence or timing-dependent async behavior as the only proof path.
+
+## Post-task review 2026-06-18 (Stage 22 design review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 22 design against architecture, requirements, Stage 21 evidence, and current demotion code. Produced an in-place review section under the 300-line cap with REWORK verdict, 2 blocking findings, and 1 non-blocking stale-history note. Verified the updated untracked design doc with byte-level LF/ASCII checks, normal `git diff --check`, and no-index whitespace check.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a design for a state-machine refactor where preserved validation order conflicts with required special handling for a state already rejected by that order
+- Action:
+  - Do compare proposed order against current code and block until the design names the exact reordered branch or diagnostic outcome, with a unit assertion.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Cross-part protocol consistency in multi-part design
+- Decision: Add new improvement because this task found a single-function validation-order contradiction, not a cross-part protocol conflict.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When reviewing a design for a state-machine refactor where one requirement says to preserve current validation order and another requires special handling for a state already rejected by that order
+  - Action:
+    - Do compare the proposed order against current code line-by-line and flag the contradiction as blocking unless the design states the exact reordered branch or diagnostic outcome. Do require a focused unit assertion for the special state.
+
+## Post-task review 2026-06-18 (Stage 22 design correction)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Corrected the Stage 22 design in place after review gate 01 without code/test edits. Closed F-22-DR-01 by making the already-demoting validation branch precede generic non-hot rejection, and closed F-22-DR-02 by adding explicit target/draft demotion completion coverage. Kept the design under 300 lines and verified LF/no-BOM/ASCII/trailing whitespace plus `git diff --check`.
+
+Improvement outcome candidate:
+- Condition:
+  - When correcting a design review finding in an untracked stage doc that already has an in-place review section
+- Action:
+  - Do keep the review finding historical, add a separate correction record after it, and update current status/handoff lines to corrected pending re-review.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement: Gate wording with open findings
+- Decision: No update; existing rule already covers stale handoff/status cleanup after gate state changes.
+
+Memory update:
+- No new improvement; existing gate wording rule was applied.
+
+## Post-task review 2026-06-18 (Stage 22 design re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed correction record 01, checked current demotion code and existing test hooks narrowly, and recorded PASS in the Stage 22 design without production/test edits. Kept the untracked design doc under the 300-line cap and updated current status/handoff plus index state.
+
+Improvement outcome candidate:
+- Condition:
+  - When appending a re-review section to a design doc close to the 300-line cap
+- Action:
+  - Do count lines before patching, keep the section compact, and update stale current status/handoff lines in place rather than adding extra prose.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement: Gate wording with open findings
+- Decision: No update; existing gate wording and line-cap rules already cover this pattern.
+
+Memory update:
+- No new improvement; existing rules were applied.
+
+## Improvement: Placeholder tests are not acceptance evidence
+
+Condition:
+- When reviewing implementation evidence that maps a required test ID to a registered test function
+
+Action:
+- Do inspect the test body, not only its name and registration. If the function only prints, `assert(true)`, or otherwise cannot fail when the required behavior regresses, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
+
+## Improvement: User hints are hypotheses, not requirements
+
+Condition:
+- When a bug-fix review mentions a user-provided thinking hint such as async timing, race behavior, or suspected root cause
+
+Action:
+- Do decide independently from code, evidence, and approved docs whether that hint is required for the fix. Don't treat the hint as a new design requirement unless Manager or the accepted design records it.
+
+## Post-task review 2026-06-19 (Stage 22 D22-EXEC-01 bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed bug-fix report, Stage 22 docs, QA/developer reports, and code/test diffs without editing production code or tests. Appended PASS review under the report line cap and verified untracked doc hygiene with byte-level checks plus no-index whitespace check.
+
+Improvement outcome candidate:
+- Condition:
+  - When a bug-fix review includes a user-provided async or timing hint
+- Action:
+  - Do decide independently whether the hint is required, based on code, evidence, and accepted docs.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement: Race-fix plans need deterministic duplicate/stale assertions
+- Decision: Add new improvement because this review covered user-hint classification, not test evidence sufficiency.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When a bug-fix review mentions a user-provided thinking hint such as async timing, race behavior, or suspected root cause
+  - Action:
+    - Do decide independently from code, evidence, and approved docs whether that hint is required for the fix. Don't treat the hint as a new design requirement unless Manager or the accepted design records it.
+
+## Post-task review 2026-06-19 (Stage 22 implementation review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed Stage 22 code, tests, accepted design, implementation plan, Stage 21 context, build output, test output, and diff checks. Recorded a REWORK verdict in a split implementation review part because the entry doc was already 288 lines. Found one blocking test/evidence issue: TP-22-UT6 wrapper is a placeholder even though TP-21 invariant tests are real and separately registered. Verified own docs as LF-only, no BOM, ASCII, no trailing whitespace, and under 300 lines.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing implementation evidence that maps a required test ID to a registered test function
+- Action:
+  - Do inspect the test body and reject placeholder functions as meaningful coverage; require truthful evidence mapping if underlying tests satisfy the row separately.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Race-fix plans need deterministic duplicate/stale assertions
+- Decision: Add new improvement because this task exposed a test-body/evidence-mapping gap, not only a deterministic assertion gap.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When reviewing implementation evidence that maps a required test ID to a registered test function
+  - Action:
+    - Do inspect the test body, not only its name and registration. If the function only prints, `assert(true)`, or otherwise cannot fail when the required behavior regresses, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
+
+## Post-task review 2026-06-19 (Stage 22 implementation re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed the narrow F-22-IR-01 correction without editing production code or tests. Verified the placeholder wrapper was removed from source, active evidence now records 104 total tests with 7 focused Stage 22 tests plus direct TP-21 invariant PASS lines, and stale gate wording was updated in the implementation entry, split re-review part, document index, and tracker. Ran focused binary output check plus tracked and no-index whitespace checks for touched docs.
+
+Improvement outcome candidate:
+- Condition:
+  - When a re-review correction changes both gate result and evidence counts in an untracked stage implementation doc
+- Action:
+  - Do update the split review part, entry status/Contents, document index, and tracker row together; verify untracked docs with no-index whitespace checks and tracked docs with normal `git diff --check`.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Gate wording with open findings; Untracked or partly-tracked review doc paths
+- Decision: No update; existing rules already cover gate-state sweep and no-index checks for untracked durable docs.
+
+Memory update:
+- No new improvement; existing gate wording and untracked-doc verification rules were applied.
+
+## Post-task review 2026-06-19 (Stage 22 D22-RERUN-01 bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the D22-RERUN-01 fix report, QA rerun 02, Developer review, Stage 22 docs, and current code/test diffs without editing production code or tests. Appended a PASS review under the report line cap. Verified the ignored fixes report directly because normal `git diff` could not see it; byte checks and no-index whitespace check were clean.
+
+Improvement outcome candidate:
+- Condition:
+  - When appending review text to an ignored `.test_reports` file
+- Action:
+  - Do verify path status, byte hygiene, and no-index whitespace checks instead of relying on normal `git diff`.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths
+- Decision: No update; existing rule already requires direct verification and no-index whitespace checks for untracked or partly tracked durable docs.
+
+Memory update:
+- No new improvement; existing untracked-doc verification rule was reinforced.
+
+## Improvement: Fallback predicates must match accepted scope
+
+Condition:
+- When reviewing a bug fix that claims fallback is limited to restore-visible or resident state, but code gates fallback through a broader descriptor-exists predicate
+
+Action:
+- Do compare the exact predicate used for candidate visibility with the accepted fix wording and focused regression setup. Don't accept a descriptor-only predicate when the gate requires resident bytes or hot-record visibility; require code narrowing or a documented Manager-approved behavior expansion.
+
+## Post-task review 2026-06-19 (Stage 22 D22-RERUN-03-F1 correction re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed the narrow D22-RERUN-03-F1 correction, verified the fallback
+  predicate now uses restore-visible resident exact state, verified the
+  metadata-only source checkpoint precheck is guarded by selected payload kind,
+  and confirmed 109/109 focused test evidence locally. Appended the PASS review
+  to the ignored fixes report and updated stale gate wording in the Stage 22
+  implementation entry, tracker, and index. Verified ignored and untracked docs
+  with byte checks and no-index whitespace checks.
+
+Improvement outcome candidate:
+- Condition:
+  - When re-reviewing a correction to a fallback predicate after a prior
+    Architect blocker
+- Action:
+  - Do compare the fixed predicate against the exact accepted scope and require
+    the regression to assert both the allowed and rejected boundary.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Fallback predicates must match accepted scope.
+- Decision: No update; the existing improvement already covered this behavior.
+
+Memory update:
+- No new improvement; existing fallback-predicate and ignored-doc verification
+  rules were applied.
+
+## Post-task review 2026-06-19 (Stage 22 D22-RERUN-04-F1 bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the D22-RERUN-04-F1 fix without editing production code or tests.
+  Appended a PASS review to the ignored fixes report, checked prefix/LRU/delete
+  invariants, verified the focused A/B/C regression is registered, and used
+  byte-level plus no-index whitespace checks because normal git diff does not
+  show ignored `.test_reports` files.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a fix that keeps an entry in a discovery index after
+    eviction or demotion
+- Action:
+  - Do distinguish discovery visibility from restore visibility by tracing the
+    later descriptor, owner, residency, and hot-record predicates before
+    deciding whether the index retention is safe.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Fallback predicates must match accepted scope; Untracked or partly-tracked
+    review doc paths.
+- Decision: No update. Existing predicate-scope and ignored-doc verification
+  rules covered the task; the discovery-index distinction was applied but does
+  not need a separate memory entry.
+
+Memory update:
+- No new improvement; existing predicate and ignored-doc rules were reinforced.
+
+## Post-task review 2026-06-19 (Stage 22 D22-RERUN-05-F1 bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow D22-RERUN-05-F1 fix without editing product code or
+  tests. Appended a PASS review to the ignored fixes report, verified the
+  branch-forest eviction candidate filter against LRU membership, checked the
+  strengthened A/B/C regression body, and confirmed scoped diff hygiene plus
+  ignored-report byte/no-index checks.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a fix that intentionally keeps entries visible for lookup
+    while removing them from eviction planning
+- Action:
+  - Do trace both indexes independently: the lookup index must still find the
+    entry, while the policy candidate builder must reject entries absent from
+    the LRU or ownership index.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Fallback predicates must match accepted scope; D22-RERUN-04 post-task note
+    on distinguishing discovery visibility from restore visibility; Untracked
+    or partly-tracked review doc paths.
+- Decision: No update. Existing predicate-scope and ignored-doc rules covered
+  the task, and the prior discovery-visibility note already captured the
+  needed review pattern.
+
+Memory update:
+- No new improvement; existing predicate/index-scope and ignored-doc rules were
+  reinforced.
+
+## Post-task review 2026-06-20 (Stage 22 D22-RERUN-06-F1/F2/F3 bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow D22-RERUN-06 promotion lifetime fix without editing
+  product code or tests. Appended a PASS review to the ignored fixes report,
+  verified `remove_payload` preserves promoting descriptors, checked bounded
+  promotion completion handling, ran focused test binary evidence locally, and
+  confirmed ignored-report byte hygiene plus no-index whitespace check.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a fix for queued async completion lifetime
+- Action:
+  - Do trace the owner descriptor from enqueue through cleanup/removal and
+    completion, then require a regression that forces cleanup while completion
+    is still queued.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Debug-hook evidence is not production integration; Race-fix plans need
+    deterministic duplicate/stale assertions; Untracked or partly-tracked
+    review doc paths.
+- Decision: No update. Existing async evidence and ignored-doc verification
+  rules covered the task.
+
+Memory update:
+- No new improvement; existing async-completion and ignored-doc rules were
+  reinforced.
+
+## Improvement: Fragility review blocker threshold
+
+Condition:
+- When Manager requires a fragility or design review after a multi-iteration
+  bug-fix cascade before QA rerun authorization
+
+Action:
+- Do separate current-fix correctness from broader design fragility. Block QA
+  only when the active fix violates approved architecture, leaves durable
+  behavior undocumented, lacks a focused regression for the newly accepted
+  contract, or needs a Manager-approved contract change. Record simpler
+  ownership or retry-contract cleanup as advisory when the active contract is
+  implemented, documented in persistent stage docs, and still gated by the
+  heavy rerun.
+
+## Post-task review 2026-06-20 (Stage 22 D22-RERUN-07-F1/F2/F3/F4 bug-fix and fragility review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the D22-RERUN-07 cold checkpoint promotion fix and the full Stage 22
+  fix cascade without editing product code or tests. Appended a PASS Architect
+  review to the ignored fixes report, ran both focused builds, ran
+  `test-cache-controller.exe` locally with 112/112 PASS, verified scoped diff
+  hygiene, and recorded that the Stage 22 fragility review does not block QA.
+
+Improvement outcome candidate:
+- Condition:
+  - When Manager requires a fragility or design review after a multi-iteration
+    bug-fix cascade before QA rerun authorization
+- Action:
+  - Do separate current-fix correctness from broader design fragility; block QA
+    only for active contract, documentation, regression, or architecture
+    violations, and record post-QA simplification as advisory when the heavy
+    rerun remains the process-level proof.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Debug-hook evidence is not production integration; Gate wording with open
+    findings; Atomic-operation design reviews.
+- Decision: Add new improvement because this task required a distinct
+  blocker-threshold decision for a required fragility review, not only evidence
+  sufficiency or stale gate wording.
+
+Memory update:
+- Added `Fragility review blocker threshold`.
+
+## Post-task review 2026-06-20 (Stage 23 design authoring)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Authored a new Stage 23 design for the deferred full S/L matrix, updated the
+  index and tracker, avoided product/test/runner edits, and verified line caps,
+  LF-only bytes, ASCII, trailing whitespace, normal diff check, and no-index
+  whitespace check for the untracked design file.
+
+Improvement outcome candidate:
+- Condition:
+  - When authoring a new stage design that depends on prior deferred execution
+    scope and closed follow-up stages
+- Action:
+  - Do keep the new design scoped to the deferred activity, cite the closed
+    stages as prerequisites, and avoid reopening their gates unless a current
+    blocker exists.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Gate wording with open findings; Scoped traceability for deferred
+    requirements; Untracked or partly-tracked review doc paths.
+- Decision: No update. Existing rules already covered scoped deferred design,
+  stale gate wording, and untracked-doc verification.
+
+Memory update:
+- No new improvement; existing scoped-traceability and gate-wording rules were
+  reinforced.
+
+## Post-task review 2026-06-20 (Stage 23 design review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the Stage 23 full S/L matrix execution design against Stage 20
+  deferred scope, Stage 17 TP-17-ST1..ST3, Stage 21/22 closure context,
+  requirements, architecture, index, tracker, and wrapper shape. Recorded a
+  PASS review in a new Stage 23 design part without editing the design,
+  tracker, index, scripts, or product code. Verified line caps and doc hygiene
+  for the new untracked report.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a design where the user forbids editing the reviewed design
+    but still asks to create a separate review-history part
+- Action:
+  - Do keep the verdict and handoff in the review part only, and record any
+    post-gate tracker or index state change as Manager-owned unless the user
+    explicitly authorizes durable status edits.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Gate wording with open findings; Untracked or partly-tracked review doc
+    paths.
+- Decision: No update. Existing gate-wording and untracked-doc verification
+  rules already covered the behavior.
+
+Memory update:
+- No new improvement; existing gate-wording and untracked-doc rules were
+  reinforced.
+
+## Improvement: Raw payload retention success paths
+
+Condition:
+- When reviewing a memory-pressure fix that drops, trims, or gates raw payload
+  data only on a failure, skip, or rejection path
+
+Action:
+- Do inspect the corresponding success/admission path for retained raw vectors
+  or copied payload lists. Do require a regression that proves the success path
+  is bounded, not only that the skip path drops data.
+
+## Post-task review 2026-06-21 (Stage 23 S03 product fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the S03 product fix without editing product code. Returned REWORK
+  because checkpoint-list copying was fixed only for skipped checkpoint
+  admission, while successful admission still retained full raw checkpoint
+  vectors outside resident-payload eviction pressure. Verified the new review
+  part and updated docs for line cap, LF-only bytes, ASCII, no BOM, no trailing
+  whitespace, and scoped diff checks.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a memory-pressure fix that drops raw payload data on only
+    one branch
+- Action:
+  - Do inspect both skip/failure and success/admission paths, and require
+    success-path boundedness evidence.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Fallback predicates must match accepted scope; Debug-hook evidence is not
+    production integration.
+- Decision: Add new improvement because this task exposed raw payload retention
+  on a success path, not only predicate scope or test hook sufficiency.
+
+Memory update:
+- Added `Raw payload retention success paths`.
+
+## Post-task review 2026-06-21 (Stage 23 S03 correction re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed the narrow F-23-S03-AR-01/F-23-S03-AR-02 corrections, verified
+  success-path checkpoint metadata storage and target+draft demotion pressure,
+  recorded PASS in a new Stage 23 implementation part, and swept current gate
+  wording across the parent, index, correction part, and ignored fix report.
+
+Improvement outcome candidate:
+- Condition:
+  - When re-reviewing a correction for a prior raw-payload retention finding
+- Action:
+  - Do verify the previously failing success path, confirm the new regression
+    would fail under the old behavior, and update all current handoff locations
+    from re-review-ready to the new gate state.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Raw payload retention success paths; Gate wording with open findings;
+    Untracked or partly-tracked review doc paths.
+- Decision: No update. Existing rules already covered success-path review,
+  stale handoff cleanup, and direct verification for untracked/ignored docs.
+
+Memory update:
+- No new improvement; existing raw-payload and gate-wording rules were
+  reinforced.
+
+## Improvement: Entry docs near line cap
+
+Condition:
+- When updating an entry/navigation document that is already close to the
+  300-line cap
+
+Action:
+- Do run a line count after adding links or gate wording, then trim duplicate
+  status text into the existing top-level status/gate line before finishing.
+  Don't leave a parent entry over cap because the new detailed part is under
+  cap.
+
+## Post-task review 2026-06-21 (Stage 23 S03 startup-crash fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the focused startup-crash fix without editing product code or tests,
+  verified missing-cold-path and existing-cold-path evidence on disk, corrected
+  stale durable test-count text, wrote a PASS review artifact, and updated the
+  parent/index gate. The parent entry initially crossed the 300-line cap after
+  link and gate wording were added; a follow-up trim brought it back to exactly
+  300 lines.
+
+Improvement outcome candidate:
+- Condition:
+  - When updating an entry/navigation document that is already close to the
+    300-line cap
+- Action:
+  - Do run a line count after adding links or gate wording, then trim duplicate
+    status text into the existing top-level status/gate line before finishing.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - CRLF and trailing whitespace on Windows tool-inserted content; Gate wording
+    with open findings.
+- Decision: Add new improvement because existing rules cover hygiene and gate
+  consistency, but not the pattern where parent link updates push an entry over
+  the split-rule cap.
+
+Memory update:
+- Added `Entry docs near line cap`.
+
+## Post-task review 2026-06-21 (Stage 23 S03 rerun09 bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow F-23-S03-RERUN09-01 metadata lifetime fix, verified the
+  symbolized attach-checkpoint boundary read, confirmed the new stale-completion
+  regression, ran focused build/test/diff hygiene, wrote a PASS report in the
+  ignored `.test_reports` tree, and updated the Stage 23 implementation/index
+  gate without touching product or test code.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a narrow crash fix in an ignored report directory with a
+    near-cap implementation entry
+- Action:
+  - Do combine direct ignored-file byte checks, scoped diff hygiene, and entry
+    line-count checks before returning the handoff.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Self-claim format
+    verification in review subjects; Entry docs near line cap; Gate wording
+    with open findings.
+- Decision: No update. Existing rules already covered ignored report
+  verification, byte hygiene, line cap checks, and gate wording.
+
+Memory update:
+- No new improvement; existing ignored-doc, byte-hygiene, line-cap, and
+  gate-wording rules were reinforced.
+
+## Post-task review 2026-06-22 (Stage 23 S06 pressure-workload bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the S06 pressure-workload fixture substitution without running the
+  full live row or editing product code. Confirmed the Qwen3.5 payload was
+  rejected before hot admission under the 16 MiB hot budget, verified the S06
+  pressure fixture path and Stage 23 flags, checked smoke evidence for real
+  demotion and cold eviction pressure, wrote a PASS report in the ignored
+  `.test_reports` tree, and updated Stage 23 gate docs. Direct byte checks,
+  no-index whitespace checks, parser checks, and line counts covered the new
+  ignored report and near-cap implementation entry.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner workload fixture substitution for a pressure row
+- Action:
+  - Do verify both the old fixture rejection boundary and the substitute
+    fixture admission/pressure evidence before accepting the substitution.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Entry docs near line cap;
+    Gate wording with open findings; Raw payload retention success paths.
+- Decision: No update. Existing rules already covered direct ignored-report
+  verification, line-cap hygiene, gate updates, and success-path pressure
+  evidence checks.
+
+Memory update:
+- No new improvement; existing ignored-doc, line-cap, gate-wording, and
+  success-path verification rules were reinforced.
+
+## Post-task review 2026-06-21 (Stage 23 S06 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow S06 runner-contract fix without running the live row or
+  editing product code. Confirmed the duplicate `--cache-ram` root cause,
+  verified S06 omits wrapper cache RAM while preserving required Stage 23 flags,
+  verified S04 still receives wrapper `--cache-ram 512`, wrote a PASS review in
+  the ignored `.test_reports` tree, and updated the Stage 23 implementation and
+  index gate. Direct byte checks and no-index whitespace checks covered the new
+  ignored report, and line counts kept the near-cap implementation entry under
+  300 lines.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner-contract fix whose fix report changed-files list
+    omits an actual changed runner script
+- Action:
+  - Do inspect git status and diffs directly, include the omitted file in the
+    review artifact, and treat the omission as a risk note rather than a blocker
+    when the verified contract and durable gate docs are correct.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Entry docs near line cap;
+    Gate wording with open findings.
+- Decision: No update. Existing rules already required direct status/diff
+  verification, ignored-report checks, and gate-doc consistency. The omission
+  was handled in the review artifact without needing a new memory entry.
+
+Memory update:
+- No new improvement; existing direct-verification, ignored-doc, line-cap, and
+  gate-wording rules were reinforced.
+
+## Post-task review 2026-06-21 (Stage 23 S05 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow S05 runner-contract fix without editing product code or
+  tests. Confirmed the per-profile duration root cause, verified 600/600/600
+  allocation in direct and wrapper dry-runs, wrote a PASS report in the ignored
+  `.test_reports` tree, updated the Stage 23 implementation/index gate, and
+  trimmed the near-cap implementation entry back under 300 lines.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner-contract fix in an ignored report directory with a
+    near-cap implementation entry
+- Action:
+  - Do combine direct ignored-file byte checks, scoped parser/dry-run evidence,
+    and entry line-count checks before returning the handoff.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; CRLF and trailing whitespace
+    on Windows tool-inserted content; Entry docs near line cap; Gate wording
+    with open findings.
+- Decision: No update. Existing rules already covered ignored report
+  verification, byte hygiene, parser/dry-run evidence, line-cap trimming, and
+  gate wording.
+
+Memory update:
+- No new improvement; existing ignored-doc, byte-hygiene, line-cap, and
+  gate-wording rules were reinforced.

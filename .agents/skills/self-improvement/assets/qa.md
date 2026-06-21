@@ -30,23 +30,31 @@ Condition:
 - Reviewing QA plan that claims scripted coverage for named test IDs, broad scenario ranges, or negative-test ranges
 
 Action:
-- Search runner scripts and focused test sources for those exact IDs or required behaviors. Compare implemented assertions with plan. Split public-harness coverage from acceptance rows needing focused, draft-fixture, stats-capable, or fault-injection evidence. Map every PASS claim to specific test names or source lines. Update runner PASS/BLOCKED logic only when current task requires automation changes.
+- Search runner scripts and focused test sources for those exact IDs or required behaviors. Compare implemented assertions with plan. When a plan relies on wrapper dry-run or readiness output, compare the dry-run-validated flags and fixture paths with the actual live child-process argument list and row-script parameters; do not accept synthetic dry-run logging as proof of live execution behavior. Also compare required evidence filenames from the plan and wrapper row gates against what each row script can actually write, especially before/after metrics files. Split public-harness coverage from acceptance rows needing focused, draft-fixture, stats-capable, or fault-injection evidence. Map every PASS claim to specific test names or source lines. Update runner PASS/BLOCKED logic only when current task requires automation changes.
 
 ## Improvement: reconcile runner summaries with evidence
 
 Condition:
-- Test runner emits conflicting console output, exit codes, generated reports, skip/fail summaries, blank/UNKNOWN rows, or inflated totals
+- Test runner emits conflicting console output, exit codes, generated reports, skip/fail summaries, blank/UNKNOWN rows, inflated totals, or candidate PASS logic that is weaker than the current Manager/user acceptance gate
 
 Action:
-- Inspect generated report and raw logs. Rerun narrow direct checks for disputed cases or truncated startup logs when possible. Count only real test rows. Base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence rather than runner exit code or summary alone.
+- Inspect generated report, raw logs, prompt-evidence JSONL, metrics, and the active gate wording. Rerun narrow direct checks for disputed cases or truncated startup logs when possible. Count only real test rows. Base final PASS/FAIL/SKIP/BLOCKED counts on verified evidence and the active gate, not on runner exit code or summary alone. If a runner PASS-candidate only proves a weaker rule, record that mismatch in the durable report and classify by the stricter gate, including named per-request requirements such as every exact repeat needing `cache_n > 0`. When the gate names forbidden warning or miss families, count them separately in server logs and JSONL; do not treat a clean runner summary as overriding non-zero forbidden-family evidence. For llama.cpp logs, count exact warning families or severity patterns, because many warnings use a single `W` field rather than the words `WARN` or `warning`.
+
+## Improvement: do not rerun failed QA without new handoff
+
+Condition:
+- User asks to continue or manage the stage after QA already produced a fresh FAIL report and no new Developer fix, Manager exception, or changed test scope is present
+
+Action:
+- Do verify the latest report and relevant dirty paths, then keep the stage at bug handoff. If acting as Manager, update the implementation gate log, stage tracker, document index, and active fixes report so they point to the failed rerun and next Developer owner. Do not spend another model-backed run on the same binary and same acceptance gate unless a new handoff changes the expected evidence.
 
 ## Improvement: suppress PowerShell helper output
 
 Condition:
-- Adding or editing PowerShell QA harness functions that build result arrays or markdown reports
+- Adding or editing PowerShell QA harness functions or one-off wrappers that build result arrays, JSON summaries, or markdown reports
 
 Action:
-- Suppress non-result command output from cleanup helpers and HTTP request helpers with assignment, filtering, or `[void]`; otherwise stray return values can become blank or malformed report rows.
+- Suppress non-result command output from cleanup helpers, HTTP request helpers, and command-log helpers with assignment, filtering, redirect-to-file, or `[void]`. Do not let `Tee-Object` pipeline output flow into a function or wrapper return value that is also being appended to a result array; otherwise build logs or native stderr records can pollute JSON summaries, blank report rows, or malformed markdown evidence even when the underlying command exit code is correct.
 
 ## Improvement: validate generated markdown reports
 
@@ -78,7 +86,7 @@ Condition:
 - QA execution session will create ad hoc artifact directories and may also run scripts that generate their own reports
 
 Action:
-- Decide final session report suffix before collecting ad hoc artifacts. Store artifacts under path named for that final report so evidence links do not point at different report number.
+- Decide final session report suffix before collecting ad hoc artifacts. Check the durable report path, the matching non-durable output root, and any matching cold root before writing the first artifact. If any matching root already exists, treat that suffix as used and advance to the next chronological suffix. Store artifacts under the final suffix so evidence links do not point at a different report number.
 
 ## Improvement: separate plan updates from product handoffs
 
@@ -126,7 +134,7 @@ Condition:
 - Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
 
 Action:
-- Check initial line counts before editing near-limit QA docs. Keep additions within remaining line budget. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
+- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
 
 ## Improvement: separate own QA edits from dirty sources
 
@@ -242,6 +250,14 @@ Condition:
 Action:
 - Put verbatim long commands in fenced code block under `### Long-form commands` subsection. Keep only short summaries in table cells; markdown table parsers count unescaped `|` as column separators and emit MD056/MD060 lint errors, while MD012 catches resulting blank-line clutter.
 - Check generated report with `get_errors` for touched markdown files before handoff. Fix MD024 duplicate headings by making heading text unique per section.
+
+## Improvement: verify runner script parameters before launch
+
+Condition:
+- Launching PowerShell QA runner or test harness script with command-line parameters, especially when script behavior or available parameters are not yet verified in current session
+
+Action:
+- Read the script's param block (first ~50-100 lines containing `[CmdletBinding()]` and `param()` declarations) before constructing launch command. Verify parameter names, mandatory flags, defaults, and validation attributes match the intended launch arguments. Do not infer parameter names solely from design docs or implementation logs; scripts may hardcode flags internally or use different parameter names than the conceptual design describes.
 
 ## Improvement: use absolute paths for PowerShell log output when Push-Location changes CWD
 
@@ -541,13 +557,13 @@ Condition:
 Action:
 - Don't trust that the /completion response has a 	imings.total_ms field. The current llama.cpp server exposes only prompt_ms and predicted_ms in the timings struct, and 	otal_ms is absent (or zero if deserialized as a default). Compute 	otal_ms = prompt_ms + predicted_ms in the harness or recompute step, and label the per-request column explicitly as "total_ms (prompt+predicted)" so the next session does not chase a phantom missing field. Cite the prior smoke-test summary (where total_ms was 0 across all rows) as evidence of the missing field, not as a product bug.
 
-## Improvement: git diff --check skips untracked new files; use --no-index
+## Improvement: git diff --check skips untracked markdown; use --no-index
 
 Condition:
-- Task brief requires running git diff --check <new-untracked-md-path> and reporting the exit code, and the file was just created with create_file
+- Validating markdown QA artifacts or durable docs that are untracked, newly created, ignored, or otherwise absent from the tracked git diff
 
 Action:
-- Don't trust exit 0 from git diff --check <untracked-path> as proof the file is whitespace-clean. Untracked files are not inspected by plain git diff --check, so even a CRLF-only new file returns exit 0. After the file is LF-only, run git diff --check --no-index /dev/null <path> to inspect the actual content; zero lines of warning output and exit 1 (differ) is the clean state. Combine with byte-level CR count check via [System.IO.File]::ReadAllBytes to be certain.
+- Don't trust exit 0 from plain git diff --check as proof an untracked or ignored markdown file is whitespace-clean. Plain git diff --check does not inspect those paths, so a CRLF-only untracked file can still return exit 0. Run git diff --check --no-index /dev/null <path> for each untracked/ignored markdown artifact or durable doc; zero warning output with exit 1 (files differ) is the clean state. Combine this with byte-level CR and non-ASCII checks via [System.IO.File]::ReadAllBytes, and run normal git diff --check for tracked touched files.
 
 
 ## Improvement: PowerShell automatic variables block PID/args/Host reassignment
@@ -565,6 +581,14 @@ Condition:
 
 Action:
 - Do not trust `Test-Path` alone for dot-prefixed paths on Windows + PowerShell. PowerShell path resolver may normalize the leading dot and resolve to a sibling `_test_output` (no dot) which is a different physical directory. Use `Get-ChildItem -LiteralPath "D:\path\._test_output" -Force | Where-Object { $_.Name -eq "foo" }` for canonical existence check. If a new file is needed, write it with `Out-File -FilePath $absolutePath` (where `$absolutePath` is built with `Join-Path` from `Get-Location`) and verify with `Get-ChildItem -LiteralPath $absolutePath` immediately after. Per existing memory item `verify create_file path against near-duplicate dir names`, the same applies: after `create_file` or `Out-File` to a dot-prefixed path, verify with `Get-ChildItem -LiteralPath` using the full absolute path, not `Test-Path`.
+
+## Improvement: classify near-ready heavy startup timeouts as harness setup first
+
+Condition:
+- A model-backed heavy QA runner fails `/health` before any requests, but `server.err.log` shows the server is still progressing through model load or slot initialization near the runner readiness timeout
+
+Action:
+- Do not classify the run as cache product evidence. Preserve the failed runner attempt as setup evidence, then rerun the same fixture, flags, workload, and request schema with a longer readiness wait without editing the reusable runner. Base PASS/FAIL only on the request-phase run. If the longer-wait run still never reaches health or exits, report BLOCKED/FAIL-health with startup logs and do not infer cache behavior.
 
 ## Improvement: Manager decision D-NN-M reclassification may not need invocation when fix actually succeeds
 
@@ -586,6 +610,47 @@ Action:
 - When the second exec reuses the first exec's folder (because the build was not re-cleaned), record this explicitly in the second report's evidence column with a note like "shared with first exec"
 - Don't reference old -rerun folder names in test-report evidence columns; update them when the convention is applied
 
+## Improvement: avoid nested PowerShell backtick continuations in shell_command
+
+Condition:
+- Running a PowerShell script through `functions.shell_command` with an inner `powershell -Command "& script ..."` invocation that passes many parameters, especially array parameters such as `-RowsToRun @('S01',...)`
+
+Action:
+- Don't use multiline backtick continuations inside the nested `-Command` string. The outer shell or JSON escaping can drop the continuation and run the script without the intended parameters, then treat later parameter lines as separate commands. Use one single-line `-Command` with an explicit array literal, or write a short outer PowerShell block that invokes the script directly with native argument binding. If using `-File`, verify array parameters bind as separate elements rather than one CSV string.
+
+## Improvement: check server implementation DLL mtime on Windows launcher builds
+
+Condition:
+- QA execution requires fresh `llama-server.exe` build evidence on Windows, and the CMake/MSBuild target emits a small launcher executable plus `llama-server-impl.dll`
+
+Action:
+- Do record mtimes for both `build-cov/bin/Release/llama-server.exe` and `build-cov/bin/Release/llama-server-impl.dll`. Treat the target build log plus current implementation DLL mtime as the freshness evidence when the launcher executable is up to date and does not relink. Do not reject an otherwise clean build solely because the launcher exe mtime did not change.
+
+## Improvement: separate wrapper preflight timestamp from runner timestamp
+
+Condition:
+- A QA execution wrapper creates preflight artifacts under one timestamped directory and then calls a reusable runner that creates its own timestamped evidence directory under the same run root
+
+Action:
+- Do identify the runner's reported `evidence_path` and use that as the final request/metrics/log evidence path. Record the wrapper preflight directory separately for build and controller-test evidence. Do not scan server logs or metrics from the wrapper directory unless the runner actually wrote them there.
+
+## Improvement: do not use LASTEXITCODE for PowerShell script return-object runners
+
+Condition:
+- A QA wrapper invokes a PowerShell runner that returns an object instead of calling an external executable, and the wrapper needs to decide whether the run command failed
+
+Action:
+- Don't classify the runner command from `$LASTEXITCODE`; it may retain a stale value or be empty because PowerShell script success does not set it. Use try/catch for invocation errors, then classify the run from the generated `summary.json`, request rows, logs, and gate evidence.
+
+## Improvement: reject row_gate success when final row evidence is missing
+
+Condition:
+- A stress or longrun wrapper row emits `row_gate ... exitCode=0`, but the row server stopped during the request phase or before final scrape, and required files such as `metrics-after.txt`, `evidence-summary.md`, or `cap-exit.json` are missing
+
+Action:
+- Don't accept the row from wrapper exit code or row_gate alone. Wait until the row cap or wrapper completion if the child script swallows request errors, then classify from required-file presence, launch stderr, server liveness, and server log tail. If final `/metrics` fails with connection refused after request traffic, mark the row as FAIL/BLOCKED per the stricter acceptance gate and stop the matrix when the plan requires bug handoff.
+- Do check the row script's actual evidence contract before treating a missing optional cap artifact as row failure. Some S/L row scripts complete a fixed-duration loop, scrape `metrics-after.txt`, write `evidence-summary.md`, and stop the server without producing `cap-exit.json`; in that shape, classify from the completed duration, wrapper exit, row gate, after metrics, logs, and prompt/cold evidence rather than failing solely on absent `cap-exit.json`.
+
 
 
 ## Improvement: cache validation position matters for bounded-error exit
@@ -598,3 +663,27 @@ Action:
 - Verify the validation block runs BEFORE the warmup step in the source. If it does not, record the structural finding (validation is positioned wrong) and route to Developer for a position fix.
 - The design's "F-XX-IMPL-02" closure citing "this check at line N" must be verified empirically; the check at the cited line may not fire for the actual sub-case the row exercises (e.g. when a sibling check with stricter condition is the one that would fire, but a different invalid configuration hits the warmup path first).
 - When a single test plan row produces a STATUS_STACK_BUFFER_OVERRUN and a sibling row with a different invalid config produces the same crash, both rows likely share a single root cause: a buffer overrun in the warmup path that fires before any validation block. Document the shared root cause once and link the second row as a sibling of the first.
+
+## Improvement: verify CUDA before multi-hour GPU-expected rows
+
+Condition:
+- A model-backed QA execution session is expected to use NVIDIA/CUDA, especially long stress, longrun, heavy, or benchmark rows where CPU-only execution would waste the run window
+
+Action:
+- Do verify CUDA before live rows by checking `CMakeCache.txt` for `GGML_CUDA:BOOL=ON`, recording startup logs that show a CUDA/GPU backend, and capturing `nvidia-smi` with the `llama-server.exe` process using GPU memory. If any check shows CPU-only execution (`GGML_CUDA:BOOL=OFF`, CPU-only startup logs, or 0 MiB/no compute process in `nvidia-smi`), stop immediately, preserve evidence, and classify the run as `BLOCKED-invalid-CPU-only` rather than continuing the matrix.
+
+## Improvement: enforce row cap over internal profile loops
+
+Condition:
+- A stress or longrun row script runs multiple internal profiles or subcases, and the active test plan defines a cap for the row rather than for each internal profile
+
+Action:
+- Do inspect the row script before or during execution to confirm whether `DurationMin` applies once per row or once per internal profile. If the script applies the duration to each profile and the total row runtime exceeds the plan cap, classify the session as `BLOCKED-runner-contract` even when each profile writes `metrics-after.txt` and `evidence-summary.md`. Preserve completed profile evidence, stop row-owned processes after capture, and hand off to Manager for cap interpretation or runner fix before opening the next row.
+
+## Improvement: verify pressure rows actually create pressure
+
+Condition:
+- A stress or longrun row is named or specified as a pressure row, budget row, eviction row, queue row, demotion row, or cold-store row, especially when wrapper flags or row-local flags control the effective hot or cold budget
+
+Action:
+- Do inspect the live `evidence-summary.md`, server startup/state logs, resource samples, and after metrics to confirm both the effective budget and an observed pressure path. If duplicate flags leave the live server using a larger budget than the row's pressure setup (for example local `--cache-ram 16` followed by wrapper `--cache-ram 512`), classify as `BLOCKED-runner-contract`. If the effective pressure budget is correct but metrics and artifacts still show 0 demotions, 0 skips, 0 evictions, 0 cold files, 0 resident entries, or otherwise no required pressure signal, also classify as `BLOCKED-runner-contract` rather than PASS even when wrapper exit, row_gate, evidence files, redacted evidence, and error scans are clean. Route to Manager for scope/runner disposition before the next row opens.

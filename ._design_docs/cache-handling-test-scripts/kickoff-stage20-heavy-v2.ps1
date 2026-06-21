@@ -299,6 +299,20 @@ function Get-HV1Verdict {
         }
     }
 
+    $originals = @($Requests | Where-Object { $_.request_class -eq 'exact-original' })
+    if ($originals.Count -lt 3) {
+        $blockedContractReasons += "required-class-exact-original-missing-expected-3-actual-$($originals.Count)"
+    }
+    if ($exactRepeats.Count -lt 3) {
+        $blockedContractReasons += "required-class-exact-repeat-missing-expected-3-actual-$($exactRepeats.Count)"
+    }
+    if ($near.Count -lt 2) {
+        $blockedContractReasons += "required-class-near-prefix-missing-expected-2-actual-$($near.Count)"
+    }
+    if ($newPrompts.Count -lt 2) {
+        $blockedContractReasons += "required-class-new-prompt-missing-expected-2-actual-$($newPrompts.Count)"
+    }
+
     $coldEviction = 'not-observed'
     if ($MetricsAfter.status -eq 'OK' -and (Test-Path $MetricsAfter.path)) {
         $evictionLine = Select-String -Path $MetricsAfter.path -Pattern 'cache_cold_evictions_total' | Select-Object -First 1

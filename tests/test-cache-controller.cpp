@@ -66,7 +66,7 @@ void test_cache_mode_enum() {
 // Test 2: Factory creates correct controller type
 void test_factory_creation() {
     printf("test-cache-controller: factory creation...\n");
-    
+
     // Test legacy controller creation
     common_params params = create_test_params();
     auto legacy_ctrl = create_cache_controller(
@@ -78,7 +78,7 @@ void test_factory_creation() {
         nullptr
     );
     assert(legacy_ctrl != nullptr);
-    
+
     // Test hybrid controller creation
     auto hybrid_ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -89,14 +89,14 @@ void test_factory_creation() {
         nullptr
     );
     assert(hybrid_ctrl != nullptr);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 3: Legacy controller basic interface
 void test_legacy_controller_interface() {
     printf("test-cache-controller: legacy controller interface...\n");
-    
+
     common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_LEGACY,
@@ -106,25 +106,25 @@ void test_legacy_controller_interface() {
         nullptr,
         nullptr
     );
-    
+
     // Test size() returns 0 initially
     assert(ctrl->size() == 0);
-    
+
     // Test n_tokens() returns 0 initially
     assert(ctrl->n_tokens() == 0);
-    
+
     // Test get_stats() returns JSON
     json stats = ctrl->get_stats();
     assert(stats.contains("type"));
     assert(stats["type"] == "legacy");
-    
+
     printf("  PASSED\n");
 }
 
 // Test 4: Hybrid controller basic interface
 void test_hybrid_controller_interface() {
     printf("test-cache-controller: hybrid controller interface...\n");
-    
+
     common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -134,13 +134,13 @@ void test_hybrid_controller_interface() {
         nullptr,
         nullptr
     );
-    
+
     // Test size() returns 0 initially
     assert(ctrl->size() == 0);
-    
+
     // Test n_tokens() returns 0 initially
     assert(ctrl->n_tokens() == 0);
-    
+
     // Test get_stats() returns JSON with hybrid fields
     json stats = ctrl->get_stats();
     assert(stats.contains("type"));
@@ -162,7 +162,7 @@ void test_hybrid_controller_interface() {
     assert(stats.contains("n_target_only_payload_descriptors"));
     assert(stats.contains("n_target_and_draft_payload_descriptors"));
     assert(stats.contains("namespaces"));
-    
+
     printf("  PASSED\n");
 }
 
@@ -264,7 +264,7 @@ void test_branch_checksum_lookup_selects_restore_candidate() {
 // Test 5: Boundary metadata structures
 void test_boundary_metadata() {
     printf("test-cache-controller: boundary metadata structures...\n");
-    
+
     // Test prompt_boundary creation
     prompt_boundary boundary(
         prompt_boundary::SYSTEM_START,
@@ -274,29 +274,29 @@ void test_boundary_metadata() {
     assert(boundary.type == prompt_boundary::SYSTEM_START);
     assert(boundary.token_index == 0);
     assert(boundary.metadata == "system");
-    
+
     // Test prepared_prompt_metadata
     prepared_prompt_metadata metadata;
     assert(!metadata.has_boundaries());
-    
+
     metadata.add_boundary(prompt_boundary::MESSAGE_START, 10, "user");
     assert(metadata.has_boundaries());
     assert(metadata.boundaries.size() == 1);
-    
+
     auto msg_starts = metadata.get_boundaries(prompt_boundary::MESSAGE_START);
     assert(msg_starts.size() == 1);
     assert(msg_starts[0].token_index == 10);
-    
+
     metadata.clear();
     assert(!metadata.has_boundaries());
-    
+
     printf("  PASSED\n");
 }
 
 // Test 6: Boundary types enum
 void test_boundary_types() {
     printf("test-cache-controller: boundary types enum...\n");
-    
+
     // Ensure all boundary types are defined
     prompt_boundary b1(prompt_boundary::SYSTEM_START, 0);
     prompt_boundary b2(prompt_boundary::SYSTEM_END, 1);
@@ -304,22 +304,22 @@ void test_boundary_types() {
     prompt_boundary b4(prompt_boundary::MESSAGE_END, 3);
     prompt_boundary b5(prompt_boundary::TOOL_CALL_START, 4);
     prompt_boundary b6(prompt_boundary::TOOL_CALL_END, 5);
-    
+
     // All types should be distinct
     assert(b1.type != b2.type);
     assert(b3.type != b4.type);
     assert(b5.type != b6.type);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 7: Server task has prompt_metadata field
 void test_task_metadata_field() {
     printf("test-cache-controller: server_task metadata field...\n");
-    
+
     server_task task;
     task.type = SERVER_TASK_TYPE_COMPLETION;
-    
+
     // Test that prompt_metadata field exists and can be accessed
     task.prompt_metadata.add_boundary(prompt_boundary::SYSTEM_START, 0, "test");
     assert(task.prompt_metadata.has_boundaries());
@@ -328,21 +328,21 @@ void test_task_metadata_field() {
     assert(task.child_tasks.size() == 1);
     assert(task.child_tasks[0].prompt_metadata.has_boundaries());
     assert(task.child_tasks[0].prompt_metadata.boundaries[0].metadata == "test");
-    
+
     printf("  PASSED\n");
 }
 
 // Test 8: Hybrid cache entry structure
 void test_hybrid_cache_entry() {
     printf("test-cache-controller: hybrid cache entry structure...\n");
-    
+
     hybrid_cache_entry entry;
-    
+
     // Test initial state
     assert(entry.use_count == 0);
     assert(entry.protected_root == false);
     assert(entry.namespace_id.empty());
-    
+
     // Test mark_used
     entry.mark_used(1);
     assert(entry.use_count == 1);
@@ -354,39 +354,39 @@ void test_hybrid_cache_entry() {
 
     entry.metadata.add_boundary(prompt_boundary::MESSAGE_START, 0, "user");
     assert(entry.metadata.has_boundaries());
-    
+
     // Test size calculation (should not crash)
     size_t sz = entry.size();
     assert(sz >= 0);
-    
+
     // Test n_tokens
     assert(entry.n_tokens() == 0);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 9: Common params has cache_mode_val field
 void test_common_params_field() {
     printf("test-cache-controller: common_params cache_mode_val field...\n");
-    
+
     common_params params;
-    
+
     // Default should be LEGACY
     assert(params.cache_mode_val == CACHE_MODE_LEGACY);
-    
+
     // Can be set to HYBRID
     params.cache_mode_val = CACHE_MODE_HYBRID;
     assert(params.cache_mode_val == CACHE_MODE_HYBRID);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 10: Update method doesn't crash
 void test_update_method() {
     printf("test-cache-controller: update method...\n");
-    
+
     common_params params = create_test_params();
-    
+
     // Legacy controller
     auto legacy_ctrl = create_cache_controller(
         CACHE_MODE_LEGACY,
@@ -397,7 +397,7 @@ void test_update_method() {
         nullptr
     );
     legacy_ctrl->update(); // Should not crash
-    
+
     // Hybrid controller
     auto hybrid_ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -408,14 +408,14 @@ void test_update_method() {
         nullptr
     );
     hybrid_ctrl->update(); // Should not crash
-    
+
     printf("  PASSED\n");
 }
 
 // Test 11: Hybrid controller statistics tracking
 void test_hybrid_statistics() {
     printf("test-cache-controller: hybrid statistics tracking...\n");
-    
+
     common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -425,23 +425,23 @@ void test_hybrid_statistics() {
         nullptr,
         nullptr
     );
-    
+
     json stats = ctrl->get_stats();
-    
+
     // Check initial statistics
     assert(stats["n_hits"] == 0);
     assert(stats["n_misses"] == 0);
     assert(stats["n_evictions"] == 0);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 12: Namespace ID computation (basic)
 void test_namespace_computation() {
     printf("test-cache-controller: namespace computation...\n");
-    
+
     common_params params = create_test_params();
-    
+
     // Create two hybrid controllers with same params
     auto ctrl1 = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -451,7 +451,7 @@ void test_namespace_computation() {
         nullptr,
         nullptr
     );
-    
+
     auto ctrl2 = create_cache_controller(
         CACHE_MODE_HYBRID,
         params,
@@ -460,30 +460,30 @@ void test_namespace_computation() {
         nullptr,
         nullptr
     );
-    
+
     // Both should work without crashing
     json stats1 = ctrl1->get_stats();
     json stats2 = ctrl2->get_stats();
-    
+
     assert(stats1.contains("namespaces"));
     assert(stats2.contains("namespaces"));
-    
+
     printf("  PASSED\n");
 }
 
 // Test 13: Protected root flag
 void test_protected_root() {
     printf("test-cache-controller: protected root flag...\n");
-    
+
     hybrid_cache_entry entry;
-    
+
     // Default is not protected
     assert(entry.protected_root == false);
-    
+
     // Can be set to protected
     entry.protected_root = true;
     assert(entry.protected_root == true);
-    
+
     printf("  PASSED\n");
 }
 
@@ -504,26 +504,26 @@ void test_lru_sequence() {
 // Test 15: Metadata field queries
 void test_metadata_queries() {
     printf("test-cache-controller: metadata field queries...\n");
-    
+
     prepared_prompt_metadata meta;
-    
+
     // Add multiple boundaries of different types
     meta.add_boundary(prompt_boundary::SYSTEM_START, 0, "sys1");
     meta.add_boundary(prompt_boundary::MESSAGE_START, 10, "msg1");
     meta.add_boundary(prompt_boundary::MESSAGE_END, 20, "msg1");
     meta.add_boundary(prompt_boundary::MESSAGE_START, 21, "msg2");
-    
+
     // Query specific type
     auto sys_bounds = meta.get_boundaries(prompt_boundary::SYSTEM_START);
     assert(sys_bounds.size() == 1);
     assert(sys_bounds[0].token_index == 0);
-    
+
     auto msg_starts = meta.get_boundaries(prompt_boundary::MESSAGE_START);
     assert(msg_starts.size() == 2);
-    
+
     auto msg_ends = meta.get_boundaries(prompt_boundary::MESSAGE_END);
     assert(msg_ends.size() == 1);
-    
+
     printf("  PASSED\n");
 }
 
@@ -1296,9 +1296,9 @@ void test_task_result_and_prompt_helpers() {
 // Test 25: Namespace isolation - comprehensive key structure
 void test_namespace_isolation_comprehensive_key() {
     printf("test-cache-controller: namespace isolation - comprehensive key structure...\n");
-    
+
     common_params params = create_test_params();
-    
+
     // Create hybrid controllers to test namespace isolation
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -1308,35 +1308,35 @@ void test_namespace_isolation_comprehensive_key() {
         nullptr,  // no target context (basic test)
         nullptr   // no draft context
     );
-    
+
     auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
-    
+
     // Add entries with the same tokens but mark them with different namespaces
     // (simulating different model configurations)
     prepared_prompt_metadata meta1;
     meta1.compatibility_key = "model-A";  // Different model
-    
+
     prepared_prompt_metadata meta2;
     meta2.compatibility_key = "model-B";  // Different model
-    
+
     hybrid->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta1);
     hybrid->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4}), meta2);
-    
+
     // Both entries should exist (different namespaces)
     assert(hybrid->debug_entry_count_for_tests() == 2);
-    
+
     json stats = ctrl->get_stats();
     assert(stats["n_entries"] == 2);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 26: Namespace isolation - draft model presence
 void test_namespace_isolation_draft_model() {
     printf("test-cache-controller: namespace isolation - draft model...\n");
-    
+
     common_params params = create_test_params();
-    
+
     // Test that entries with and without draft models get different namespaces
     auto ctrl_no_draft = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -1346,7 +1346,7 @@ void test_namespace_isolation_draft_model() {
         nullptr,
         nullptr  // No draft
     );
-    
+
     auto ctrl_with_draft = create_cache_controller(
         CACHE_MODE_HYBRID,
         params,
@@ -1355,17 +1355,17 @@ void test_namespace_isolation_draft_model() {
         nullptr,
         nullptr  // In real scenario would be draft context
     );
-    
+
     // Verify both controllers work
     assert(ctrl_no_draft != nullptr);
     assert(ctrl_with_draft != nullptr);
-    
+
     json stats_no_draft = ctrl_no_draft->get_stats();
     json stats_with_draft = ctrl_with_draft->get_stats();
-    
+
     assert(stats_no_draft.contains("type"));
     assert(stats_with_draft.contains("type"));
-    
+
     printf("  PASSED\n");
 }
 
@@ -1428,7 +1428,7 @@ void test_namespace_isolation_draft_context_modes() {
 // Test 27: Namespace isolation - metadata compatibility key
 void test_namespace_isolation_metadata_compat_key() {
     printf("test-cache-controller: namespace isolation - metadata compatibility key...\n");
-    
+
     common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -1438,34 +1438,34 @@ void test_namespace_isolation_metadata_compat_key() {
         nullptr,
         nullptr
     );
-    
+
     auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
-    
+
     // Same tokens, different compatibility keys
     prepared_prompt_metadata meta1;
     meta1.compatibility_key = "config-alpha";
-    
+
     prepared_prompt_metadata meta2;
     meta2.compatibility_key = "config-beta";  // Different config
-    
+
     prepared_prompt_metadata meta3;
     meta3.compatibility_key = "config-alpha";  // Same as meta1
-    
+
     hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta1);
     hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta2);
     hybrid->debug_add_entry_for_tests(create_tokens({10, 20, 30}), meta3);
-    
+
     // Three entries: two with config-alpha (different token sequences tracked separately)
     // and one with config-beta
     assert(hybrid->debug_entry_count_for_tests() == 3);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 28: Namespace isolation - template variation
 void test_namespace_isolation_template() {
     printf("test-cache-controller: namespace isolation - template...\n");
-    
+
     common_params params = create_test_params();
     auto ctrl = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -1475,31 +1475,31 @@ void test_namespace_isolation_template() {
         nullptr,
         nullptr
     );
-    
+
     auto * hybrid = static_cast<hybrid_cache_controller*>(ctrl.get());
-    
+
     // Same tokens, different templates (via preparation_id)
     prepared_prompt_metadata meta1;
     meta1.preparation_id = "template-chatml";
-    
+
     prepared_prompt_metadata meta2;
     meta2.preparation_id = "template-llama3";  // Different template
-    
+
     hybrid->debug_add_entry_for_tests(create_tokens({100, 200}), meta1);
     hybrid->debug_add_entry_for_tests(create_tokens({100, 200}), meta2);
-    
+
     // Both entries should exist (different templates)
     assert(hybrid->debug_entry_count_for_tests() == 2);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 29: Namespace isolation - comprehensive validation
 void test_namespace_isolation_validation() {
     printf("test-cache-controller: namespace isolation - comprehensive validation...\n");
-    
+
     common_params params = create_test_params();
-    
+
     // Test that validate_hybrid_cache_safety works
     auto ctrl_no_draft = create_cache_controller(
         CACHE_MODE_HYBRID,
@@ -1509,129 +1509,129 @@ void test_namespace_isolation_validation() {
         nullptr,
         nullptr
     );
-    
+
     auto * hybrid_no_draft = static_cast<hybrid_cache_controller*>(ctrl_no_draft.get());
-    
+
     // Without draft model, should be safe (returns true, no warnings in non-verbose mode)
     bool is_safe = hybrid_no_draft->validate_hybrid_cache_safety(false);
     assert(is_safe == true);  // Safe for single-model scenario
-    
+
     printf("  PASSED\n");
 }
 
 // Test 30: Namespace isolation - model path variation (Part 14)
 void test_namespace_isolation_model_path() {
     printf("test-cache-controller: namespace isolation - model path...\n");
-    
+
     common_params params1 = create_test_params("model_A.gguf");
     common_params params2 = create_test_params("model_B.gguf");
-    
+
     hybrid_cache_controller ctrl1(params1, 100, 1000, nullptr, nullptr);
     hybrid_cache_controller ctrl2(params2, 100, 1000, nullptr, nullptr);
-    
+
     auto key1 = ctrl1.debug_get_compatibility_key_for_tests();
     auto key2 = ctrl2.debug_get_compatibility_key_for_tests();
-    
+
     // Different model paths should produce different namespaces
     assert(key1.compute() != key2.compute());
     assert(key1.model_path_hash != key2.model_path_hash);
-    
+
     printf("  PASSED\n");
 }
 
 // Test 31: Namespace isolation - LoRA adapters (Part 14)
 void test_namespace_isolation_lora_adapters() {
     printf("test-cache-controller: namespace isolation - lora adapters...\n");
-    
+
     common_params params_no_lora = create_test_params();
     common_params params_with_lora = create_test_params();
-    
+
     // Add LoRA adapter to second params
     common_adapter_lora_info lora;
     lora.path = "adapter.gguf";
     lora.scale = 1.0f;
     params_with_lora.lora_adapters.push_back(lora);
-    
+
     hybrid_cache_controller ctrl_no_lora(params_no_lora, 100, 1000, nullptr, nullptr);
     hybrid_cache_controller ctrl_with_lora(params_with_lora, 100, 1000, nullptr, nullptr);
-    
+
     auto key1 = ctrl_no_lora.debug_get_compatibility_key_for_tests();
     auto key2 = ctrl_with_lora.debug_get_compatibility_key_for_tests();
-    
+
     // LoRA presence should produce different namespaces
     assert(key1.compute() != key2.compute());
     assert(key1.lora_adapters.empty());
     assert(!key2.lora_adapters.empty());
-    
+
     printf("  PASSED\n");
 }
 
 // Test 32: Namespace isolation - control vectors (Part 14)
 void test_namespace_isolation_control_vectors() {
     printf("test-cache-controller: namespace isolation - control vectors...\n");
-    
+
     common_params params_no_cvec = create_test_params();
     common_params params_with_cvec = create_test_params();
-    
+
     // Add control vector to second params
     common_control_vector_load_info cvec;
     cvec.fname = "vector.gguf";
     cvec.strength = 1.0f;
     params_with_cvec.control_vectors.push_back(cvec);
-    
+
     hybrid_cache_controller ctrl_no_cvec(params_no_cvec, 100, 1000, nullptr, nullptr);
     hybrid_cache_controller ctrl_with_cvec(params_with_cvec, 100, 1000, nullptr, nullptr);
-    
+
     auto key1 = ctrl_no_cvec.debug_get_compatibility_key_for_tests();
     auto key2 = ctrl_with_cvec.debug_get_compatibility_key_for_tests();
-    
+
     // Control vector presence should produce different namespaces
     assert(key1.compute() != key2.compute());
     assert(key1.control_vectors.empty());
     assert(!key2.control_vectors.empty());
-    
+
     printf("  PASSED\n");
 }
 
 // Test 33: Namespace isolation - multimodal configuration (Part 14)
 void test_namespace_isolation_multimodal() {
     printf("test-cache-controller: namespace isolation - multimodal...\n");
-    
+
     common_params params_text_only = create_test_params();
     common_params params_multimodal = create_test_params("model.gguf", "", "projector.gguf");
-    
+
     hybrid_cache_controller ctrl_text(params_text_only, 100, 1000, nullptr, nullptr);
     hybrid_cache_controller ctrl_mm(params_multimodal, 100, 1000, nullptr, nullptr);
-    
+
     auto key1 = ctrl_text.debug_get_compatibility_key_for_tests();
     auto key2 = ctrl_mm.debug_get_compatibility_key_for_tests();
-    
+
     // Multimodal configuration should produce different namespaces
     assert(key1.compute() != key2.compute());
     assert(key1.mm_projector_id == "none");
     assert(key2.mm_projector_id != "none");
-    
+
     printf("  PASSED\n");
 }
 
 // Test 34: Namespace isolation - kv_unified flag (Part 14)
 void test_namespace_isolation_kv_unified() {
     printf("test-cache-controller: namespace isolation - kv_unified...\n");
-    
+
     common_params params_separate = create_test_params("model.gguf", "", "", false);
     common_params params_unified = create_test_params("model.gguf", "", "", true);
-    
+
     hybrid_cache_controller ctrl_sep(params_separate, 100, 1000, nullptr, nullptr);
     hybrid_cache_controller ctrl_uni(params_unified, 100, 1000, nullptr, nullptr);
-    
+
     auto key1 = ctrl_sep.debug_get_compatibility_key_for_tests();
     auto key2 = ctrl_uni.debug_get_compatibility_key_for_tests();
-    
+
     // kv_unified flag should produce different namespaces
     assert(key1.compute() != key2.compute());
     assert(key1.kv_unified == false);
     assert(key2.kv_unified == true);
-    
+
     printf("  PASSED\n");
 }
 
@@ -2920,6 +2920,27 @@ void test_stage17_arg_parser_rejects_below_minus_one() {
     printf("  PASSED\n");
 }
 
+void test_stage23_missing_cold_path_fails_bounded_controller_init() {
+    printf("test-cache-controller: Stage 23 missing cold path fails bounded controller init...\n");
+    common_params params = create_test_params();
+    params.cache_mode_val = CACHE_MODE_HYBRID;
+    params.cache_cold_max_mib = 512;
+
+    const auto missing_dir = std::filesystem::temp_directory_path() /
+        "llama-stage23-missing-cold-path-regression";
+    std::error_code ec;
+    std::filesystem::remove_all(missing_dir, ec);
+
+    bool caught = false;
+    try {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, missing_dir.string());
+    } catch (const std::runtime_error & e) {
+        caught = std::string(e.what()).find("cold store configuration failed") != std::string::npos;
+    }
+    assert(caught);
+    printf("  PASSED\n");
+}
+
 // TP-17-UT7: prompt evidence modes off, redacted, raw all valid (Stage 17 unit 2026-06-17).
 void test_stage17_prompt_evidence_modes_accepted() {
     printf("test-cache-controller: Stage 17 prompt evidence modes accepted...\n");
@@ -3008,6 +3029,995 @@ void test_stage18_f18exec02_raw_legacy_rejected() {
         }
     }
     assert(rejected);
+    printf("  PASSED\n");
+}
+
+// TP-21-UT1: verify exact-repeat lookup finds saved entry as exact hit, not prefix candidate (Stage 21 bug-fix 2026-06-18).
+void test_stage21_exact_repeat_restore_with_prompt_only_save() {
+    printf("test-cache-controller: Stage 21 exact repeat restore with prompt-only save...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata meta;
+    meta.preparation_id = "prep-stage21-ut1";
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 30, token_checksum({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}), false, "user");
+
+    std::vector<int> token_ids;
+    for (int i = 1; i <= 30; ++i) {
+        token_ids.push_back(i);
+    }
+
+    ctrl.debug_add_entry_for_tests(create_tokens(token_ids), meta);
+    int match_idx = ctrl.debug_find_match_tokens_for_tests(create_tokens(token_ids), meta);
+    assert(match_idx >= 0);
+
+    json stats = ctrl.get_stats();
+    assert(stats.contains("cache_prefix_candidates_total"));
+    assert(stats["cache_prefix_candidates_total"] == 0);
+
+    printf("  PASSED\n");
+}
+
+// TP-21-UT2: verify entry with multiple boundaries can be looked up with same prompt and boundaries (Stage 21 bug-fix 2026-06-18).
+void test_stage21_exact_repeat_prefix_boundary() {
+    printf("test-cache-controller: Stage 21 exact repeat prefix boundary...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata meta;
+    meta.preparation_id = "prep-stage21-ut2";
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, 15, token_checksum({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}), false, "user");
+    meta.add_span(prompt_boundary::MESSAGE_END, 15, 30, token_checksum({16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}), false, "user");
+
+    std::vector<int> token_ids;
+    for (int i = 1; i <= 30; ++i) {
+        token_ids.push_back(i);
+    }
+
+    ctrl.debug_add_entry_for_tests(create_tokens(token_ids), meta);
+    int match_idx = ctrl.debug_find_match_tokens_for_tests(create_tokens(token_ids), meta);
+    assert(match_idx >= 0);
+
+    printf("  PASSED\n");
+}
+
+// TP-21-UT3: verify near-prefix variant still returns bounded miss, not unsafe_prefix_rejected (Stage 21 bug-fix 2026-06-18).
+void test_stage21_near_prefix_still_rejected() {
+    printf("test-cache-controller: Stage 21 near prefix still rejected...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    prepared_prompt_metadata meta_entry;
+    meta_entry.preparation_id = "prep-stage21-ut3-entry";
+    meta_entry.add_span(prompt_boundary::MESSAGE_END, 0, 30, token_checksum({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}), false, "user");
+
+    std::vector<int> entry_ids;
+    for (int i = 1; i <= 30; ++i) {
+        entry_ids.push_back(i);
+    }
+    ctrl.debug_add_entry_for_tests(create_tokens(entry_ids), meta_entry);
+
+    prepared_prompt_metadata meta_query;
+    meta_query.preparation_id = "prep-stage21-ut3-query";
+    meta_query.add_span(prompt_boundary::MESSAGE_END, 0, 34, token_checksum({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 99, 99, 99, 99}), false, "user");
+
+    std::vector<int> query_ids;
+    for (int i = 1; i <= 30; ++i) {
+        query_ids.push_back(i);
+    }
+    query_ids.push_back(99);
+    query_ids.push_back(99);
+    query_ids.push_back(99);
+    query_ids.push_back(99);
+
+    int match_idx = ctrl.debug_find_match_tokens_for_tests(create_tokens(query_ids), meta_query);
+    assert(match_idx < 0);
+
+    auto reason = ctrl.debug_classify_stage17_miss_for_tests(create_tokens(query_ids), meta_query);
+    assert(reason == cache_restore_miss_reason::token_count_mismatch ||
+           reason == cache_restore_miss_reason::checksum_mismatch ||
+           reason == cache_restore_miss_reason::namespace_mismatch);
+    assert(reason != cache_restore_miss_reason::unsafe_prefix_rejected);
+
+    printf("  PASSED\n");
+}
+
+// TP-21-UT4: verify demoting payload is still counted in budget (Stage 21 F-21-RERUN-01 fix 2026-06-18).
+void test_stage21_demoting_payload_counted_in_budget() {
+    printf("test-cache-controller: Stage 21 demoting payload counted in budget...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({1, 2}), false, "stage21-ut4", 600, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(600, 0, int64_t(600), true));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage21_ut4_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+
+    json stats_before = ctrl.get_stats();
+    size_t resident_before = stats_before["resident_payload_bytes"];
+    assert(resident_before >= 600);
+
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    assert(residency == payload_residency_state::demoting);
+
+    json stats_demoting = ctrl.get_stats();
+    size_t resident_demoting = stats_demoting["resident_payload_bytes"];
+    assert(resident_demoting >= 600);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    printf("  PASSED\n");
+}
+
+// TP-21-UT5: verify descriptor resident_payload_bytes preserved during demotion (Stage 21 F-21-RERUN-01 fix 2026-06-18).
+void test_stage21_descriptor_resident_bytes_preserved_during_demotion() {
+    printf("test-cache-controller: Stage 21 descriptor resident_bytes preserved during demotion...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({3, 4}), false, "stage21-ut5", 800, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(800, 0, int64_t(800), true));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage21_ut5_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+
+    json stats_before = ctrl.get_stats();
+    size_t resident_before = stats_before["resident_payload_bytes"];
+    assert(resident_before >= 800);
+
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    assert(residency == payload_residency_state::demoting);
+
+    json stats_demoting = ctrl.get_stats();
+    size_t resident_demoting = stats_demoting["resident_payload_bytes"];
+    assert(resident_demoting >= 800);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    printf("  PASSED\n");
+}
+
+// TP-21-UT6: verify entry eviction during demotion does not crash (Stage 21 F-21-RERUN-01 fix 2026-06-18).
+void test_stage21_entry_eviction_during_demotion_does_not_crash() {
+    printf("test-cache-controller: Stage 21 entry eviction during demotion does not crash...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 800, nullptr, nullptr);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({5, 6}), false, "stage21-ut6-1", 300, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(300, 0, int64_t(300), true));
+    ctrl.debug_add_entry_for_tests(create_tokens({7, 8}), false, "stage21-ut6-2", 300, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(300, 0, int64_t(300), true));
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage21_ut6_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+
+    ctrl.debug_add_entry_for_tests(create_tokens({9, 10}), false, "stage21-ut6-3", 300, 0);
+    assert(ctrl.debug_admit_checkpoint_for_tests(300, 0, int64_t(300), true));
+
+    ctrl.debug_stop_io_worker_for_tests();
+    printf("  PASSED\n");
+}
+
+void test_stage23_demotion_queue_budget_pressure_falls_back_to_eviction() {
+    printf("test-cache-controller: Stage 23 demotion queue pressure falls back to eviction...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(200);
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage23_demote_pressure_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+    ctrl.debug_io_worker_for_tests().debug_set_completion_delay_for_tests(1000);
+
+    for (int i = 0; i < 8; ++i) {
+        ctrl.debug_add_entry_for_tests(create_tokens({100 + i, 200 + i}), false, "stage23-demote-pressure", 100, 0);
+    }
+
+    json stats = ctrl.get_stats();
+    size_t resident = stats["resident_payload_bytes"];
+    assert(resident <= 200);
+    assert(stats["n_payload_evictions"] > 0);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    printf("  PASSED\n");
+}
+
+void test_stage23_target_draft_demotion_pressure_counts_both_payloads() {
+    printf("test-cache-controller: Stage 23 target+draft demotion pressure counts both payloads...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(300);
+
+    const std::string cold_dir =
+        (std::filesystem::temp_directory_path() / "stage23_demote_pair_pressure_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_start_io_worker_for_tests();
+    ctrl.debug_io_worker_for_tests().debug_set_completion_delay_for_tests(1000);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({301, 302}), false, "stage23-demote-pair-pressure", 200, 80);
+    ctrl.debug_add_entry_for_tests(create_tokens({303, 304}), false, "stage23-demote-pair-pressure", 10, 20);
+
+    json stats = ctrl.get_stats();
+    assert(stats["resident_payload_bytes"].get<size_t>() <= 300);
+    assert(stats["n_payload_evictions"].get<size_t>() > 0);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    printf("  PASSED\n");
+}
+
+static bool stage22_metric_has_reason(const json & rows, const std::string & reason) {
+    for (const auto & row : rows) {
+        if (row.value("reason", std::string()) == reason) {
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename Tag, typename Tag::type Member>
+struct stage22_private_access {
+    friend typename Tag::type stage22_get_private(Tag) {
+        return Member;
+    }
+};
+
+struct stage22_entries_tag {
+    using type = std::list<hybrid_cache_entry> hybrid_cache_controller::*;
+    friend type stage22_get_private(stage22_entries_tag);
+};
+
+struct stage22_descriptors_tag {
+    using type = std::unordered_map<uint64_t, payload_descriptor> hybrid_cache_controller::*;
+    friend type stage22_get_private(stage22_descriptors_tag);
+};
+
+struct stage22_hot_payloads_tag {
+    using type = std::unordered_map<uint64_t, hot_payload_record> hybrid_cache_controller::*;
+    friend type stage22_get_private(stage22_hot_payloads_tag);
+};
+
+struct stage22_handle_demotion_tag {
+    using type = void (hybrid_cache_controller::*)(io_completion_result &);
+    friend type stage22_get_private(stage22_handle_demotion_tag);
+};
+
+struct stage22_remove_payload_tag {
+    using type = void (hybrid_cache_controller::*)(uint64_t);
+    friend type stage22_get_private(stage22_remove_payload_tag);
+};
+
+struct stage23_admit_checkpoint_store_tag {
+    using type = bool (hybrid_cache_controller::*)(
+        hybrid_cache_entry &,
+        const std::list<common_prompt_checkpoint> &,
+        bool,
+        std::string *,
+        bool);
+    friend type stage22_get_private(stage23_admit_checkpoint_store_tag);
+};
+
+template struct stage22_private_access<stage22_entries_tag, &hybrid_cache_controller::entries>;
+template struct stage22_private_access<stage22_descriptors_tag, &hybrid_cache_controller::payload_descriptors>;
+template struct stage22_private_access<stage22_hot_payloads_tag, &hybrid_cache_controller::hot_payloads>;
+template struct stage22_private_access<stage22_handle_demotion_tag, &hybrid_cache_controller::handle_demotion_completion>;
+template struct stage22_private_access<stage22_remove_payload_tag, &hybrid_cache_controller::remove_payload>;
+template struct stage22_private_access<
+    stage23_admit_checkpoint_store_tag,
+    &hybrid_cache_controller::admit_latest_checkpoint_and_store_metadata>;
+
+static std::list<hybrid_cache_entry> & stage22_entries(hybrid_cache_controller & ctrl) {
+    return ctrl.*stage22_get_private(stage22_entries_tag{});
+}
+
+static std::unordered_map<uint64_t, payload_descriptor> & stage22_descriptors(hybrid_cache_controller & ctrl) {
+    return ctrl.*stage22_get_private(stage22_descriptors_tag{});
+}
+
+static std::unordered_map<uint64_t, hot_payload_record> & stage22_hot_payloads(hybrid_cache_controller & ctrl) {
+    return ctrl.*stage22_get_private(stage22_hot_payloads_tag{});
+}
+
+static void stage22_handle_demotion_completion(hybrid_cache_controller & ctrl, io_completion_result & result) {
+    (ctrl.*stage22_get_private(stage22_handle_demotion_tag{}))(result);
+}
+
+static void stage22_remove_payload(hybrid_cache_controller & ctrl, uint64_t payload_id) {
+    (ctrl.*stage22_get_private(stage22_remove_payload_tag{}))(payload_id);
+}
+
+static bool stage23_admit_checkpoint_store(
+        hybrid_cache_controller & ctrl,
+        hybrid_cache_entry & entry,
+        const std::list<common_prompt_checkpoint> & checkpoints,
+        bool runtime_has_draft,
+        std::string * failure_reason,
+        bool bypass_workload_profile = false) {
+    return (ctrl.*stage22_get_private(stage23_admit_checkpoint_store_tag{}))(
+        entry, checkpoints, runtime_has_draft, failure_reason, bypass_workload_profile);
+}
+
+static void stage22_add_exact_payload(hybrid_cache_controller & ctrl, size_t target_bytes, size_t draft_bytes = 0) {
+    ctrl.debug_add_entry_for_tests(create_tokens({41, 42, 43}), false, "stage22", target_bytes, draft_bytes);
+}
+
+static server_tokens stage22_token_range(int first, int count) {
+    std::vector<int> ids;
+    ids.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        ids.push_back(first + i);
+    }
+    return create_tokens(ids);
+}
+
+static uint64_t stage22_checksum_range(int first, int count) {
+    std::vector<int> ids;
+    ids.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        ids.push_back(first + i);
+    }
+    return token_checksum(ids);
+}
+
+static prepared_prompt_metadata stage22_metadata_for_range(int first, int count, const std::string & label) {
+    prepared_prompt_metadata meta;
+    meta.add_span(prompt_boundary::MESSAGE_END, 0, count, stage22_checksum_range(first, count), false, label);
+    return meta;
+}
+
+static bool stage22_attach_exact_payload(
+        hybrid_cache_controller & ctrl,
+        server_tokens tokens,
+        const prepared_prompt_metadata & meta,
+        const std::string & namespace_id,
+        size_t target_bytes) {
+    debug_attach_options opts;
+    opts.target_bytes = target_bytes;
+    opts.runtime_has_draft = false;
+    opts.namespace_override = namespace_id;
+    return ctrl.debug_attach_payload_for_tests(std::move(tokens), meta, opts);
+}
+
+static io_completion_result stage22_success_result(uint64_t payload_id) {
+    io_completion_result result{};
+    result.payload_id = payload_id;
+    result.is_demotion = true;
+    result.success = true;
+    result.ref = payload_id;
+    return result;
+}
+
+static io_completion_result stage22_failure_result(uint64_t payload_id) {
+    io_completion_result result{};
+    result.payload_id = payload_id;
+    result.is_demotion = true;
+    result.success = false;
+    result.failure_reason = io_failure_reason::write_error;
+    return result;
+}
+
+void test_stage23_skipped_checkpoint_admission_does_not_store_checkpoint_list() {
+    printf("test-cache-controller: Stage 23 skipped checkpoint admission drops checkpoint list...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({31, 32}), false, "stage23-checkpoint-skip", 128, 0);
+
+    common_prompt_checkpoint cp{};
+    cp.n_tokens = 2;
+    cp.pos_min = 0;
+    cp.pos_max = 1;
+    cp.data_tgt.resize(64, 0x33);
+    std::list<common_prompt_checkpoint> checkpoints;
+    checkpoints.push_back(cp);
+
+    std::string failure;
+    hybrid_cache_entry & entry = stage22_entries(ctrl).front();
+    assert(!stage23_admit_checkpoint_store(ctrl, entry, checkpoints, false, &failure));
+    assert(entry.checkpoints.empty());
+    assert(entry.checkpoint_payload_id == 0);
+    assert(failure == "missing checkpoint boundary metadata");
+
+    printf("  PASSED\n");
+}
+
+void test_stage23_successful_checkpoint_admission_keeps_metadata_only_list() {
+    printf("test-cache-controller: Stage 23 successful checkpoint admission keeps metadata-only list...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({41, 42, 43, 44}), false, "stage23-checkpoint-success", 128, 0);
+
+    common_prompt_checkpoint first{};
+    first.update_pos(2, 0, 2);
+    first.data_tgt.resize(64, 0x33);
+    first.data_dft.resize(32, 0x44);
+
+    common_prompt_checkpoint latest{};
+    latest.update_pos(4, 0, 4);
+    latest.data_tgt.resize(96, 0x55);
+    latest.data_dft.resize(48, 0x66);
+
+    std::list<common_prompt_checkpoint> checkpoints;
+    checkpoints.push_back(first);
+    checkpoints.push_back(latest);
+
+    std::string failure;
+    hybrid_cache_entry & entry = stage22_entries(ctrl).front();
+    assert(stage23_admit_checkpoint_store(ctrl, entry, checkpoints, true, &failure, true));
+    assert(entry.checkpoints.size() == 2);
+    for (const auto & checkpoint : entry.checkpoints) {
+        assert(checkpoint.data_tgt.empty());
+        assert(checkpoint.data_dft.empty());
+    }
+
+    const uint64_t checkpoint_id = entry.checkpoint_payload_id;
+    assert(checkpoint_id != 0);
+    assert(stage22_hot_payloads(ctrl).at(checkpoint_id).target.size() == 96);
+    assert(stage22_hot_payloads(ctrl).at(checkpoint_id).draft.size() == 48);
+    assert(entry.size() == entry.tokens.size() * sizeof(llama_token) +
+        entry.resident_payload_bytes_cached + entry.namespace_id.size());
+
+    printf("  PASSED\n");
+}
+
+// TP-22-UT1: demotion success transitions once and syncs owner views.
+void test_stage22_demotion_success_transitions_once() {
+    printf("test-cache-controller: Stage 22 demotion success transitions once...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 256);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    io_completion_result result = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::cold);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) == stage22_hot_payloads(ctrl).end());
+    assert(stage22_entries(ctrl).front().resident_payload_bytes_cached == 0);
+    assert(ctrl.debug_first_entry_metadata_only_for_tests());
+    json stats = ctrl.get_stats();
+    assert(stats["n_demotion_successes"].get<size_t>() == 1);
+    assert(stats["n_cold_payload_count"].get<size_t>() == 1);
+    assert(stats["n_cold_payload_bytes"].get<size_t>() == 256);
+    printf("  PASSED\n");
+}
+
+// TP-22-UT2: duplicate success completion is idempotent.
+void test_stage22_duplicate_success_idempotent() {
+    printf("test-cache-controller: Stage 22 duplicate success idempotent...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 192);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    io_completion_result result = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+    json first = ctrl.get_stats();
+    stage22_handle_demotion_completion(ctrl, result);
+    json second = ctrl.get_stats();
+
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::cold);
+    assert(second["n_demotion_successes"].get<size_t>() == first["n_demotion_successes"].get<size_t>());
+    assert(second["n_cold_payload_count"].get<size_t>() == first["n_cold_payload_count"].get<size_t>());
+    assert(second["n_cold_payload_bytes"].get<size_t>() == first["n_cold_payload_bytes"].get<size_t>());
+    assert(stage22_metric_has_reason(second["cache_structured_diagnostics_by_shape"], "duplicate_success"));
+    assert(!stage22_metric_has_reason(second["cache_structured_diagnostics_by_shape"], "residency"));
+    printf("  PASSED\n");
+}
+
+// TP-22-UT3: stale success after immediate eviction does not recreate ownership.
+void test_stage22_stale_success_after_evicted() {
+    printf("test-cache-controller: Stage 22 stale success after evicted...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 128);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    ctrl.debug_evict_first_payload_for_tests();
+
+    io_completion_result result = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::evicted);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) == stage22_hot_payloads(ctrl).end());
+    assert(stage22_entries(ctrl).front().payload_id == 0);
+    json stats = ctrl.get_stats();
+    assert(stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "stale_success_evicted"));
+    printf("  PASSED\n");
+}
+
+// TP-23-UT6: stale demotion success removes its cold file.
+void test_stage23_stale_success_removes_cold_file() {
+    printf("test-cache-controller: Stage 23 stale success removes cold file...\n");
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage23_stale_success_cleanup_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_cold_store_for_tests(cold_dir.string());
+    stage22_add_exact_payload(ctrl, 128);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    ctrl.debug_evict_first_payload_for_tests();
+
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = payload_id;
+    snapshot.pair_state = 0;
+    snapshot.format_version = COLD_STORE_FORMAT_VERSION_1;
+    snapshot.target_size_bytes = 128;
+    snapshot.target_checksum = 0;
+    std::vector<uint8_t> target(128, 0x42);
+    const cold_ref ref = ctrl.debug_cold_store_for_tests().write(payload_id, target, {}, snapshot);
+    assert(ref != 0);
+    std::stringstream name;
+    name << std::hex << payload_id << ".cold";
+    const std::filesystem::path cold_file = cold_dir / name.str();
+    assert(std::filesystem::exists(cold_file));
+
+    io_completion_result result = stage22_success_result(payload_id);
+    result.ref = ref;
+    stage22_handle_demotion_completion(ctrl, result);
+
+    assert(!std::filesystem::exists(cold_file));
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::evicted);
+    json stats = ctrl.get_stats();
+    assert(stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "stale_success_evicted"));
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-23-UT7: cold budget accounts queued demotions before writes complete.
+void test_stage23_cold_budget_counts_pending_demotions() {
+    printf("test-cache-controller: Stage 23 cold budget counts pending demotions...\n");
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage23_pending_cold_budget_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_io_worker_for_tests().debug_set_completion_delay_for_tests(1000);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({501, 502}), false, "stage23-pending-cold", 700 * 1024, 0);
+    ctrl.debug_add_entry_for_tests(create_tokens({503, 504}), false, "stage23-pending-cold", 700 * 1024, 0);
+
+    assert(ctrl.debug_evict_first_payload_for_tests());
+    assert(ctrl.debug_get_residency_state_for_tests(1) == payload_residency_state::demoting);
+    const size_t skipped_before = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    assert(ctrl.debug_evict_last_payload_for_tests());
+    const size_t skipped_after = ctrl.get_stats()["cache_cold_demotions_skipped_total"].get<size_t>();
+    assert(skipped_after == skipped_before + 1);
+
+    ctrl.debug_stop_io_worker_for_tests();
+    ctrl.process_completions();
+    json stats = ctrl.get_stats();
+    assert(stats["cache_cold_bytes"].get<size_t>() <= 1024 * 1024);
+
+    size_t disk_bytes = 0;
+    for (const auto & file : std::filesystem::directory_iterator(cold_dir)) {
+        if (file.is_regular_file()) {
+            disk_bytes += static_cast<size_t>(file.file_size());
+        }
+    }
+    assert(disk_bytes <= 1024 * 1024 + sizeof(cold_store_header));
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-23-UT8: demotion-budget fallback plus stale completion keeps checkpoint attach safe.
+void test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach() {
+    printf("test-cache-controller: Stage 23 demotion budget fallback stale completion checkpoint attach...\n");
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage23_fallback_stale_checkpoint_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 1024 * 1024, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_io_worker_for_tests().debug_set_completion_delay_for_tests(1000);
+
+    const auto tokens_a = stage22_token_range(700, 3);
+    const auto tokens_b = stage22_token_range(800, 3);
+    const auto meta_a = stage22_metadata_for_range(700, 3, "prompt");
+    const auto meta_b = stage22_metadata_for_range(800, 3, "prompt");
+    assert(stage22_attach_exact_payload(ctrl, tokens_a.clone(), meta_a, "stage23-fallback-stale", 700 * 1024));
+    assert(stage22_attach_exact_payload(ctrl, tokens_b.clone(), meta_b, "stage23-fallback-stale", 700 * 1024));
+
+    auto second = std::next(stage22_entries(ctrl).begin());
+    const uint64_t first_payload_id = stage22_entries(ctrl).front().payload_id;
+    const uint64_t second_payload_id = second->payload_id;
+    assert(first_payload_id != 0);
+    assert(second_payload_id != 0);
+
+    assert(ctrl.debug_evict_first_payload_for_tests());
+    assert(stage22_descriptors(ctrl)[first_payload_id].residency == payload_residency_state::demoting);
+    assert(ctrl.debug_evict_last_payload_for_tests());
+    assert(stage22_descriptors(ctrl)[second_payload_id].residency == payload_residency_state::evicted);
+    assert(stage22_hot_payloads(ctrl).find(second_payload_id) == stage22_hot_payloads(ctrl).end());
+    json pressure_stats = ctrl.get_stats();
+    assert(stage22_metric_has_reason(pressure_stats["cache_payload_transitions_by_shape"], "demotion_budget_pressure"));
+
+    ctrl.debug_stop_io_worker_for_tests();
+    ctrl.process_completions();
+    assert(stage22_descriptors(ctrl)[first_payload_id].residency == payload_residency_state::cold);
+    assert(stage22_descriptors(ctrl)[second_payload_id].residency == payload_residency_state::evicted);
+
+    common_prompt_checkpoint checkpoint;
+    checkpoint.update_pos(3, 0, 3);
+    checkpoint.data_tgt.resize(96, 0x55);
+    std::list<common_prompt_checkpoint> checkpoints;
+    checkpoints.push_back(checkpoint);
+    std::string failure;
+    assert(stage23_admit_checkpoint_store(ctrl, *second, checkpoints, false, &failure, true));
+    assert(second->checkpoint_payload_id != 0);
+    assert(stage22_descriptors(ctrl)[second->checkpoint_payload_id].residency == payload_residency_state::hot);
+    assert(stage22_descriptors(ctrl)[second_payload_id].residency == payload_residency_state::evicted);
+    assert(second->payload_id == 0);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-22-UT4: demotion failure with hot bytes reverts to hot.
+void test_stage22_demotion_failure_with_hot_bytes_reverts() {
+    printf("test-cache-controller: Stage 22 demotion failure with hot bytes reverts...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 320);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    io_completion_result result = stage22_failure_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::hot);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) != stage22_hot_payloads(ctrl).end());
+    assert(stage22_entries(ctrl).front().resident_payload_bytes_cached == 320);
+    json stats = ctrl.get_stats();
+    assert(stats["n_demotion_failures"].get<size_t>() == 1);
+    printf("  PASSED\n");
+}
+
+// TP-22-UT5: demotion failure without hot bytes evicts and syncs views.
+void test_stage22_demotion_failure_without_hot_bytes_evicts() {
+    printf("test-cache-controller: Stage 22 demotion failure without hot bytes evicts...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 384);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    stage22_hot_payloads(ctrl).erase(payload_id);
+
+    io_completion_result result = stage22_failure_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::evicted);
+    assert(stage22_descriptors(ctrl)[payload_id].resident_payload_bytes == 0);
+    assert(stage22_entries(ctrl).front().resident_payload_bytes_cached == 0);
+    assert(ctrl.debug_first_entry_metadata_only_for_tests());
+    printf("  PASSED\n");
+}
+
+// TP-22-UT7: target/draft completion and duplicate success stay paired.
+void test_stage22_target_draft_completion_idempotent() {
+    printf("test-cache-controller: Stage 22 target/draft completion idempotent...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 512, 256);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    auto & descriptor = stage22_descriptors(ctrl)[payload_id];
+    descriptor.residency = payload_residency_state::demoting;
+
+    io_completion_result result = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+    json first = ctrl.get_stats();
+    stage22_handle_demotion_completion(ctrl, result);
+    json second = ctrl.get_stats();
+
+    assert(descriptor.residency == payload_residency_state::cold);
+    assert(descriptor.pair_state == payload_pair_state::target_and_draft);
+    assert(descriptor.target_size_bytes == 512);
+    assert(descriptor.draft_size_bytes == 256);
+    assert(second["n_cold_payload_bytes"].get<size_t>() == first["n_cold_payload_bytes"].get<size_t>());
+    assert(second["n_cold_payload_count"].get<size_t>() == first["n_cold_payload_count"].get<size_t>());
+    assert(stage22_entries(ctrl).front().resident_payload_bytes_cached == 0);
+    assert(stage22_metric_has_reason(second["cache_structured_diagnostics_by_shape"], "duplicate_success"));
+    printf("  PASSED\n");
+}
+
+// TP-22-UT8: already-demoting rejection takes in-flight path before generic non-hot.
+void test_stage22_demote_already_demoting_in_progress() {
+    printf("test-cache-controller: Stage 22 demote already demoting in progress...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 160);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    assert(!ctrl.demote_payload(payload_id));
+    json stats = ctrl.get_stats();
+    assert(stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "in_progress"));
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "residency"));
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::demoting);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) != stage22_hot_payloads(ctrl).end());
+    printf("  PASSED\n");
+}
+
+// D22-EXEC-01: demoting exact payloads are restorable while hot bytes remain.
+void test_stage22_demoting_exact_payload_validates_with_hot_bytes() {
+    printf("test-cache-controller: Stage 22 demoting exact payload validates with hot bytes...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 224);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    assert(stage22_hot_payloads(ctrl).find(payload_id) != stage22_hot_payloads(ctrl).end());
+    assert(ctrl.debug_validate_first_payload_for_tests(false));
+    json stats = ctrl.get_stats();
+    assert(stats["n_restore_failures"].get<size_t>() == 0);
+    assert(stats["n_fallback_restores"].get<size_t>() == 0);
+    printf("  PASSED\n");
+}
+
+// D22-EXEC-01: demoting restore still fails when hot bytes are gone.
+void test_stage22_demoting_exact_payload_without_hot_bytes_unavailable() {
+    printf("test-cache-controller: Stage 22 demoting exact payload without hot bytes unavailable...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 224);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    stage22_hot_payloads(ctrl).erase(payload_id);
+
+    assert(!ctrl.debug_validate_first_payload_for_tests(false));
+    json stats = ctrl.get_stats();
+    assert(stats["n_restore_failures"].get<size_t>() == 1);
+    assert(stats["n_fallback_restores"].get<size_t>() == 1);
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-01: demoting exact entries remain eligible for exact lookup while hot bytes remain.
+void test_stage22_demoting_exact_entry_remains_lookup_visible() {
+    printf("test-cache-controller: Stage 22 demoting exact entry remains lookup visible...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const server_tokens tokens = create_tokens({41, 42, 43});
+    stage22_add_exact_payload(ctrl, 224);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    assert(ctrl.debug_find_match_tokens_for_tests(tokens, "stage22") == 3);
+    assert(ctrl.debug_validate_first_payload_for_tests(false));
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-01: removing a demoting payload leaves a tombstone for completion.
+void test_stage22_demoting_remove_payload_completion_has_descriptor() {
+    printf("test-cache-controller: Stage 22 demoting remove payload completion has descriptor...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 224);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+
+    stage22_remove_payload(ctrl, payload_id);
+    assert(stage22_descriptors(ctrl).find(payload_id) != stage22_descriptors(ctrl).end());
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::evicted);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) == stage22_hot_payloads(ctrl).end());
+
+    io_completion_result result = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, result);
+    json stats = ctrl.get_stats();
+    assert(stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "stale_success_evicted"));
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "descriptor_not_found"));
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-03-F1: checkpoint-dependent lookup can fall back to an exact blob
+// only when a prior checkpoint payload was evicted and the exact payload is resident.
+void test_stage22_checkpoint_dependent_exact_fallback_after_checkpoint_eviction() {
+    printf("test-cache-controller: Stage 22 checkpoint-dependent exact fallback after checkpoint eviction...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const server_tokens tokens = create_tokens({51, 52, 53});
+    ctrl.debug_add_entry_for_tests(tokens.clone(), false, "stage22-fallback", 224, 0);
+    const uint64_t exact_id = stage22_entries(ctrl).front().payload_id;
+    assert(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(3), true));
+
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+    stage22_hot_payloads(ctrl).erase(checkpoint_id);
+    auto & checkpoint_descriptor = stage22_descriptors(ctrl)[checkpoint_id];
+    checkpoint_descriptor.residency = payload_residency_state::evicted;
+    checkpoint_descriptor.resident_payload_bytes = 0;
+
+    assert(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+        tokens, "stage22-fallback", cache_workload_profile::checkpoint_dependent) == 3);
+    assert(ctrl.debug_validate_first_payload_for_tests(false));
+    assert(ctrl.get_stats()["cache_checkpoint_hits_total"].get<size_t>() == 0);
+
+    stage22_hot_payloads(ctrl).erase(exact_id);
+    auto & exact_descriptor = stage22_descriptors(ctrl)[exact_id];
+    exact_descriptor.residency = payload_residency_state::cold;
+    exact_descriptor.resident_payload_bytes = 0;
+    assert(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+        tokens, "stage22-fallback", cache_workload_profile::checkpoint_dependent) == -1);
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-06: a cold checkpoint descriptor survives while promotion is queued.
+void test_stage22_cold_checkpoint_promotion_completion_keeps_descriptor() {
+    printf("test-cache-controller: Stage 22 cold checkpoint promotion completion keeps descriptor...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage22_rerun06_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+
+    const server_tokens tokens = stage22_token_range(6101, 30);
+    const prepared_prompt_metadata meta = stage22_metadata_for_range(6101, 30, "B");
+    assert(stage22_attach_exact_payload(ctrl, tokens.clone(), meta, "stage22-rerun06", 224));
+    assert(ctrl.debug_admit_checkpoint_for_tests(96, 0, int64_t(30), true));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+
+    ctrl.debug_start_io_worker_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    ctrl.debug_stop_io_worker_for_tests();
+    auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    for (int i = 0; residency == payload_residency_state::demoting && i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    }
+    assert(residency == payload_residency_state::cold);
+
+    assert(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+        tokens, "stage22-rerun06", cache_workload_profile::checkpoint_dependent) == 30);
+    assert(ctrl.promote_payload(checkpoint_id));
+    assert(stage22_descriptors(ctrl)[checkpoint_id].residency == payload_residency_state::promoting);
+
+    stage22_remove_payload(ctrl, checkpoint_id);
+    assert(stage22_descriptors(ctrl).find(checkpoint_id) != stage22_descriptors(ctrl).end());
+    assert(stage22_descriptors(ctrl)[checkpoint_id].residency == payload_residency_state::promoting);
+
+    ctrl.debug_start_io_worker_for_tests();
+    residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    for (int i = 0; residency == payload_residency_state::promoting && i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    }
+    ctrl.debug_stop_io_worker_for_tests();
+    json stats = ctrl.get_stats();
+
+    assert(stage22_descriptors(ctrl)[checkpoint_id].residency == payload_residency_state::hot);
+    assert(stage22_hot_payloads(ctrl).find(checkpoint_id) != stage22_hot_payloads(ctrl).end());
+    assert(ctrl.debug_validate_first_checkpoint_for_tests());
+    assert(stats["n_promotion_successes"].get<size_t>() == 1);
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "descriptor_not_found"));
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "residency"));
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-07: cold checkpoint restore completes promotion before the miss path.
+void test_stage22_cold_checkpoint_exact_restore_promotes_in_request() {
+    printf("test-cache-controller: Stage 22 cold checkpoint exact restore promotes in request...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage22_rerun07_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+
+    const server_tokens tokens = stage22_token_range(7101, 30);
+    const prepared_prompt_metadata meta = stage22_metadata_for_range(7101, 30, "C");
+    assert(stage22_attach_exact_payload(ctrl, tokens.clone(), meta, "stage22-rerun07", 224));
+    assert(ctrl.debug_admit_checkpoint_for_tests(96, 0, int64_t(30), true));
+    const uint64_t checkpoint_id = ctrl.debug_first_checkpoint_payload_id_for_tests();
+    assert(checkpoint_id != 0);
+
+    ctrl.debug_start_io_worker_for_tests();
+    assert(ctrl.debug_demote_first_checkpoint_for_tests());
+    auto residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    for (int i = 0; residency == payload_residency_state::demoting && i < 40; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        ctrl.process_completions();
+        residency = ctrl.debug_get_residency_state_for_tests(checkpoint_id);
+    }
+    assert(residency == payload_residency_state::cold);
+
+    assert(ctrl.debug_request_stage9_checkpoint_promotion_for_tests(tokens, "stage22-rerun07"));
+    ctrl.debug_stop_io_worker_for_tests();
+    json stats = ctrl.get_stats();
+
+    assert(stage22_descriptors(ctrl)[checkpoint_id].residency == payload_residency_state::hot);
+    assert(stage22_hot_payloads(ctrl).find(checkpoint_id) != stage22_hot_payloads(ctrl).end());
+    assert(ctrl.debug_validate_first_checkpoint_for_tests());
+    assert(stats["n_promotion_successes"].get<size_t>() == 1);
+    assert(stats["n_promotion_failures"].get<size_t>() == 0);
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "descriptor_not_found"));
+    assert(!stage22_metric_has_reason(stats["cache_structured_diagnostics_by_shape"], "residency"));
+    printf("  PASSED\n");
+}
+
+// D22-RERUN-04-F1: demotion pressure from A must not hide B from exact lookup.
+void test_stage22_multi_entry_demotion_keeps_next_exact_visible() {
+    printf("test-cache-controller: Stage 22 multi-entry demotion keeps next exact visible...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2000, 1000, nullptr, nullptr);
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage22_rerun05_test").string();
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+
+    const std::string ns = "stage22-rerun05";
+    const server_tokens tokens_a = stage22_token_range(1001, 30);
+    const server_tokens tokens_b = stage22_token_range(2001, 30);
+    const server_tokens tokens_c = stage22_token_range(3001, 30);
+    const server_tokens tokens_a_near = stage22_token_range(1001, 34);
+    const server_tokens tokens_b_near = stage22_token_range(2001, 34);
+    const server_tokens tokens_d = stage22_token_range(4001, 30);
+    const server_tokens tokens_e = stage22_token_range(5001, 30);
+    const prepared_prompt_metadata meta_a = stage22_metadata_for_range(1001, 30, "A");
+    const prepared_prompt_metadata meta_b = stage22_metadata_for_range(2001, 30, "B");
+    const prepared_prompt_metadata meta_c = stage22_metadata_for_range(3001, 30, "C");
+    const prepared_prompt_metadata meta_a_near = stage22_metadata_for_range(1001, 34, "A-near");
+    const prepared_prompt_metadata meta_b_near = stage22_metadata_for_range(2001, 34, "B-near");
+    const prepared_prompt_metadata meta_d = stage22_metadata_for_range(4001, 30, "D");
+    const prepared_prompt_metadata meta_e = stage22_metadata_for_range(5001, 30, "E");
+
+    assert(stage22_attach_exact_payload(ctrl, tokens_a.clone(), meta_a, ns, 300));
+    assert(stage22_attach_exact_payload(ctrl, tokens_b.clone(), meta_b, ns, 300));
+    assert(stage22_attach_exact_payload(ctrl, tokens_c.clone(), meta_c, ns, 300));
+
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(650);
+    assert(stage22_attach_exact_payload(ctrl, tokens_a_near.clone(), meta_a_near, ns, 200));
+    assert(stage22_attach_exact_payload(ctrl, tokens_b_near.clone(), meta_b_near, ns, 200));
+    assert(stage22_attach_exact_payload(ctrl, tokens_d.clone(), meta_d, ns, 200));
+    assert(stage22_attach_exact_payload(ctrl, tokens_e.clone(), meta_e, ns, 200));
+    assert(ctrl.debug_refresh_entry_for_tests(tokens_a, false, ns));
+
+    assert(ctrl.debug_find_match_tokens_for_tests(tokens_b, ns) == 30);
+    assert(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+        tokens_b, ns, cache_workload_profile::plain_transformer) == 30);
+    auto & entries = stage22_entries(ctrl);
+    auto entry_b = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+        return entry.namespace_id == ns &&
+            entry.tokens.get_common_prefix(tokens_b) == tokens_b.size() &&
+            entry.n_tokens() == static_cast<int>(tokens_b.size());
+    });
+    assert(entry_b != entries.end());
+    assert(entry_b->payload_id != 0);
+    assert(entry_b->metadata.boundaries.size() == 1);
+    assert(entry_b->metadata.boundaries[0].token_start == 0);
+    assert(entry_b->metadata.boundaries[0].token_end == 30);
+    assert(entry_b->metadata.boundaries[0].checksum == stage22_checksum_range(2001, 30));
+    assert(stage22_descriptors(ctrl)[entry_b->payload_id].residency == payload_residency_state::demoting);
+    assert(stage22_descriptors(ctrl)[entry_b->payload_id].resident_payload_bytes == 300);
+    assert(stage22_hot_payloads(ctrl).find(entry_b->payload_id) != stage22_hot_payloads(ctrl).end());
+    assert(entry_b->resident_payload_bytes_cached == 300);
     printf("  PASSED\n");
 }
 
@@ -3238,7 +4248,7 @@ int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
     printf("==================================================\n\n");
-    
+
     // Run all tests
     test_cache_mode_enum();
     test_factory_creation();
@@ -3276,7 +4286,7 @@ int main() {
     test_hybrid_compatibility_key_miss();
     test_server_task_inline_helpers();
     test_task_result_and_prompt_helpers();
-    
+
     // Phase 3: Gap 2.2 namespace isolation tests
     test_namespace_isolation_comprehensive_key();
     test_namespace_isolation_draft_model();
@@ -3284,14 +4294,14 @@ int main() {
     test_namespace_isolation_metadata_compat_key();
     test_namespace_isolation_template();
     test_namespace_isolation_validation();
-    
+
     // Phase 3: Part 14 comprehensive field tests
     test_namespace_isolation_model_path();
     test_namespace_isolation_lora_adapters();
     test_namespace_isolation_control_vectors();
     test_namespace_isolation_multimodal();
     test_namespace_isolation_kv_unified();
-    
+
     // Stage 6 Step 1: Residency state machine tests
     test_residency_state_transitions();
     test_residency_state_enum_values();
@@ -3341,10 +4351,42 @@ int main() {
     // Stage 18 bug-fix loop 2026-06-18: F-18-DR-01 + F-18-EXEC-02 regression
     test_stage18_f18dr01_corner_case_rejected();
     test_stage18_f18exec02_raw_legacy_rejected();
+    // Stage 21 bug-fix loop 2026-06-18: prompt-only save fix
+    test_stage21_exact_repeat_restore_with_prompt_only_save();
+    test_stage21_exact_repeat_prefix_boundary();
+    test_stage21_near_prefix_still_rejected();
+    // Stage 21 bug-fix loop 2026-06-18: F-21-RERUN-01 demotion budget fix
+    test_stage21_demoting_payload_counted_in_budget();
+    test_stage21_descriptor_resident_bytes_preserved_during_demotion();
+    test_stage21_entry_eviction_during_demotion_does_not_crash();
+    test_stage23_demotion_queue_budget_pressure_falls_back_to_eviction();
+    test_stage23_target_draft_demotion_pressure_counts_both_payloads();
+    test_stage23_stale_success_removes_cold_file();
+    test_stage23_cold_budget_counts_pending_demotions();
+    test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach();
+    test_stage23_skipped_checkpoint_admission_does_not_store_checkpoint_list();
+    test_stage23_successful_checkpoint_admission_keeps_metadata_only_list();
+    test_stage23_missing_cold_path_fails_bounded_controller_init();
+    // Stage 22 demotion coordination refactor
+    test_stage22_demotion_success_transitions_once();
+    test_stage22_duplicate_success_idempotent();
+    test_stage22_stale_success_after_evicted();
+    test_stage22_demotion_failure_with_hot_bytes_reverts();
+    test_stage22_demotion_failure_without_hot_bytes_evicts();
+    test_stage22_target_draft_completion_idempotent();
+    test_stage22_demote_already_demoting_in_progress();
+    test_stage22_demoting_exact_payload_validates_with_hot_bytes();
+    test_stage22_demoting_exact_payload_without_hot_bytes_unavailable();
+    test_stage22_demoting_exact_entry_remains_lookup_visible();
+    test_stage22_demoting_remove_payload_completion_has_descriptor();
+    test_stage22_checkpoint_dependent_exact_fallback_after_checkpoint_eviction();
+    test_stage22_cold_checkpoint_promotion_completion_keeps_descriptor();
+    test_stage22_cold_checkpoint_exact_restore_promotes_in_request();
+    test_stage22_multi_entry_demotion_keeps_next_exact_visible();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 89 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18)\n");
+    printf("Total: 120 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 8 Stage 23 focused + 15 Stage 22 focused)\n");
     printf("==================================================\n");
 
     return 0;

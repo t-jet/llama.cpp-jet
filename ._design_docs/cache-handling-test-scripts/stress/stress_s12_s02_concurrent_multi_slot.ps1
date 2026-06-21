@@ -15,6 +15,7 @@ param(
     [int]    $Seed           = 42,
     [int]    $MtpVariant     = 0,
     [ValidateSet('original','marked')] [string] $JinjaVariant = 'original',
+    [string] $Stage17ServerArgsBase64 = '',
     [switch] $DryRun
 )
 
@@ -26,6 +27,7 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 
 . (Join-Path $libDir 'Write-StressEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
+. (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
 # MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
 $jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
@@ -66,6 +68,7 @@ foreach ($n in $SlotCounts) {
                      '--ctx-size','512','--temp','0','--seed',"$Seed",
                      '--cache-ram','100')
     $serverFlags = Merge-MtpJinjaFlag -Flags $serverFlags -JinjaPath $jinjaPath
+$serverFlags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
 
     if ($stubData) {
         "# STUB: model not found at $ModelPath" |
@@ -99,7 +102,7 @@ foreach ($n in $SlotCounts) {
         -NoNewWindow -PassThru
 
     $ready = $false
-    $deadline = (Get-Date).AddSeconds(180)
+    $deadline = (Get-Date).AddSeconds(300)
     while ((Get-Date) -lt $deadline) {
         try {
             $h = Invoke-WebRequest -Uri "http://127.0.0.1:$portUse/health" -UseBasicParsing -TimeoutSec 4

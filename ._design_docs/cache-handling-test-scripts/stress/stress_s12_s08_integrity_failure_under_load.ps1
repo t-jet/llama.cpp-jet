@@ -18,6 +18,7 @@ param(
     [int]    $Seed           = 42,
     [int]    $MtpVariant     = 0,
     [ValidateSet('original','marked')] [string] $JinjaVariant = 'original',
+    [string] $Stage17ServerArgsBase64 = '',
     [switch] $DryRun
 )
 
@@ -29,6 +30,7 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 
 . (Join-Path $libDir 'Write-StressEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
+. (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
 # MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
 $jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
@@ -56,6 +58,7 @@ $serverFlags = @('--cache-mode','hybrid','--cache-ram',"$HotBudgetMiB",
                  '--parallel',"$ParallelSlots",'--metrics','--ctx-size','512',
                  '--temp','0','--seed',"$Seed")
 $serverFlags = Merge-MtpJinjaFlag -Flags $serverFlags -JinjaPath $jinjaPath
+$serverFlags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
 
 Write-Host "S12-S08 integrity failure under load; stub=$stubData faultStub=$faultStub"
 
@@ -95,7 +98,7 @@ $proc = Start-Process -FilePath $serverExe `
     -NoNewWindow -PassThru
 
 $ready = $false
-$deadline = (Get-Date).AddSeconds(180)
+$deadline = (Get-Date).AddSeconds(300)
 while ((Get-Date) -lt $deadline) {
     try {
         $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 4
@@ -103,7 +106,7 @@ while ((Get-Date) -lt $deadline) {
     } catch {}
     Start-Sleep -Seconds 2
 }
-if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Write-Error "Server did not start" }
+if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; [Console]::Error.WriteLine("Server did not start"); exit 1 }
 
 $precondPath = Join-Path $OutDir 'precondition.log'
 "Focus binary: $faultBin`r`nStub: $faultStub`r`n" | Out-File -FilePath $precondPath -Encoding utf8

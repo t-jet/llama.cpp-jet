@@ -767,7 +767,14 @@ private:
         hybrid_cache_entry & entry,
         const common_prompt_checkpoint & checkpoint,
         bool runtime_has_draft,
-        std::string * failure_reason = nullptr);
+        std::string * failure_reason = nullptr,
+        bool bypass_workload_profile = false);
+    bool admit_latest_checkpoint_and_store_metadata(
+        hybrid_cache_entry & entry,
+        const std::list<common_prompt_checkpoint> & checkpoints,
+        bool runtime_has_draft,
+        std::string * failure_reason = nullptr,
+        bool bypass_workload_profile = false);
     const hot_payload_record * resolve_hot_payload(const hybrid_cache_entry & entry, std::string * failure_reason) const;
     const hot_payload_record * resolve_hot_payload(uint64_t payload_id, std::string * failure_reason) const;
     bool validate_payload_for_restore(
@@ -827,6 +834,7 @@ private:
     void record_prefix_candidate(const char * result, const char * reason);
     bool cold_budget_allows_write(size_t bytes) const;
     bool cold_budget_make_room(size_t bytes, const payload_descriptor & descriptor);
+    size_t calculate_demoting_payload_bytes() const;
     void record_cold_demotion_skipped(const payload_descriptor & descriptor, const char * reason);
     payload_kind select_restore_payload_kind(const hybrid_cache_entry & entry, cache_workload_profile profile) const;
     llama_state_seq_flags restore_state_flags_for_payload(payload_kind kind) const;

@@ -28,7 +28,7 @@ Condition:
 
 Action:
 
-- Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed.
+- Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. If the hygiene note itself is edited after measurement, rerun the line-count and whitespace checks and record the final values, not the earlier draft values.
 - Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
 - Verified 2026-06-18 (Stage 19 implementation plan): `create_file` produced an LF-with-CRLF file on Windows (CRLF=298, LF=298, no BOM) and the durable-doc convention requires LF-only; the existing "Preserve local line endings in patch edits" improvement gives the fix recipe (replace CRLF with LF, save with `UTF8Encoding($false)` to skip BOM), but a separate byte-level check is needed to detect the issue on newly created untracked files because the lint pass and `Get-Content | Measure-Object -Line` both report a normal line count.
 
@@ -160,7 +160,7 @@ Condition:
 
 Action:
 
-- Do trace the full handoff from checkpoint export flags and descriptor span metadata through controller restore, slot launch, and prompt processing; check request `cache_prompt`, explicit `id_slot` routing, restored token count, and checkpoint/SWA replay guards before treating the mismatch as response serialization or test-shaping only.
+- Do trace the full handoff from checkpoint export flags and descriptor span metadata through candidate selection, controller restore, slot launch, and prompt processing; check request `cache_prompt`, explicit `id_slot` routing, restored token count, and checkpoint/SWA replay guards before treating the mismatch as response serialization or test-shaping only. If an exact match reports `payload_unavailable`, inspect both early residency gates in the restore path and later descriptor validation, because a transient state may be rejected twice even while valid hot bytes remain. If a rerun changes from `payload_unavailable` to `exact_entry_absent`, inspect lookup predicates such as `entry_has_payload_kind_for_restore`, restore-candidate rank/filter logic, selected-payload fallback rules, and descriptor lifetime cleanup such as `remove_payload`; a validation fix is incomplete if candidate selection still hides the descriptor, a stricter precheck blocks the later fallback path, or queued completion can arrive after descriptor erase. If a later rerun keeps the same row, same miss reason, and same hit pattern after a focused fix, and metrics show the fixed fallback path was not exercised, classify the prior root cause as incomplete rather than a distinct new root cause unless new evidence proves divergence. Verified 2026-06-19 (Stage 22 D22-EXEC-01/D22-EXEC-04 bug fix): `try_restore_from_cache` rejected demoting descriptors before validation, and `validate_descriptor_against_record(..., require_hot=true)` also rejected demoting; allowing demoting only when the hot payload record still exists made focused tests pass without forcing an async design. Verified again 2026-06-19 (Stage 22 D22-RERUN-01): exact lookup still required `hot`, and `remove_payload` erased demoting descriptors before completion; fixing those earlier/lifetime gates removed the focused `exact_entry_absent` and `descriptor_not_found` regressions in unit coverage. Verified again 2026-06-19 (Stage 22 D22-RERUN-03-F1): checkpoint-dependent selection filtered out a prior-checkpoint entry after checkpoint eviction even though exact fallback was still resident, and the checkpoint-only precheck would have blocked the fallback; aligning candidate selection and precheck gating with `select_restore_payload_kind` fixed focused coverage. Verified again 2026-06-19 (Stage 22 rerun 04 test-results review): req-009 still had `exact_entry_absent`, req-008/010 still hit, forbidden warnings stayed zero, and `cache_exact_blob_restores_total` stayed zero after D22-RERUN-03-F1; the review correctly classified the D22-RERUN-03-F1 cause as incomplete. Verified again 2026-06-19 (Stage 22 rerun 05 test-results review): after the D22-RERUN-04-F1 prefix-index retention fix, req-009 still had `exact_entry_absent`, req-008/010 still hit, forbidden warnings stayed zero, and `cache_exact_blob_restores_total` still stayed zero; the review correctly classified D22-RERUN-04-F1 as incomplete rather than a new root cause, and narrowed retest to the A/B/C heavy sequence prefix-index plus branch lookup visibility after hot-budget pressure.
 
 ## Improvement: Split near-limit planning docs early
 
@@ -170,7 +170,8 @@ Condition:
 
 Action:
 
-- Do split the entry into a short TOC/status file and part files before drafting the full content; don't leave an over-limit draft in the worktree while reviewing. After any trim or consolidation, run `Measure-Object -Line` immediately to confirm the line count actually dropped, because paragraph consolidation can grow line count rather than reduce it.
+- Do split the entry into a short TOC/status file and part files before drafting the full content; don't leave an over-limit draft in the worktree while reviewing. When appending evidence to an unsplit near-cap file, aim for at least a 5-10 line buffer below the cap instead of landing exactly on 300, because later wording fixes can push it over. After any trim or consolidation, run `Measure-Object -Line` immediately to confirm the line count actually dropped, because paragraph consolidation can grow line count rather than reduce it.
+- When reporting final line counts for the 300-line cap, use `(Get-Content -LiteralPath $path).Count` or a byte-level LF count so blank lines are included; `Measure-Object -Line` can undercount blank lines and produce a misleading lower number.
 
 ## Improvement: Cache metric defaults across modes
 
@@ -191,6 +192,16 @@ Condition:
 Action:
 
 - Do inspect the resulting diff and newline counts for unnecessary line-ending churn; if a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff. On Windows, `replace_string_in_file` can save the whole file as CRLF even when HEAD is LF, and `[System.IO.File]::WriteAllText` with `UTF8` adds a UTF-8 BOM by default; use `New-Object System.Text.UTF8Encoding($false)` and strip the BOM with `if ($content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }` before saving, then convert CRLF to LF with `-replace "\`r\`n", "\`n"` so the worktree matches HEAD's blob format; verify with `git diff --check` and a `git diff -w --stat` showing only the intended insertions.
+
+## Improvement: CRLF script diffs need byte-level whitespace verification
+
+Condition:
+
+- When a touched PowerShell or script file intentionally remains CRLF in the worktree and scoped `git diff --check` reports trailing whitespace only on added lines that end with CRLF
+
+Action:
+
+- Do verify the diff stat shows only intended content insertions, run `Select-String -Pattern '[ \t]+$'` for real trailing spaces or tabs, and record byte-level CR/LF counts proving the file stayed consistently CRLF. Don't normalize the whole script to LF just to satisfy `git diff --check` when that would create line-ending churn against the local file style.
 
 ## Improvement: Update indexes before mutable keys
 
@@ -926,3 +937,305 @@ Condition:
 
 Action:
 - Do encode each required PASS predicate as an explicit gate before the PASS branch, with separate `FAIL-*`, `BLOCKED-metric-unavailable`, and `BLOCKED-runner-contract` reason arrays. After patching, read the changed function or diff before validation to catch stale variables and old reason handling that parser checks may not flag.
+
+## Improvement: PowerShell foreach output before piping
+
+Condition:
+- When writing a PowerShell one-liner that emits objects from a `foreach` block, script block, or inline loop and then pipes the produced objects to formatting or filtering
+
+Action:
+- Do assign the loop or script-block output to a variable first, then pipe the variable. This avoids parser errors from placing `|` immediately after a closing brace in dense one-liners used for hygiene checks. Apply this even to quick hygiene commands; repeated parser failures waste review time.
+
+## Improvement: Cold-path startup crashes need setup split
+
+Condition:
+- When a Windows llama-server startup crash happens with `--cache-cold-path` and the process exits before `/health`, especially with `0xc0000409` or no fatal tail after model load
+
+Action:
+- Do run two minimized CUDA launches before deeper cache triage: one with the same cold path missing, and one after explicitly creating the cold path and evidence directory. Classify missing-directory failures as a harness setup bug plus any unbounded product error handling; don't continue root-cause work as CUDA, model, or cache-pressure failure until the existing-directory launch is tested.
+
+## Improvement: Write exact build evidence after commands finish
+
+Condition:
+- When updating a durable fix report with exact build evidence such as binary mtimes, test counts, or command exits
+
+Action:
+- Do run the build/test commands first, collect filesystem mtimes and exit codes, then write the evidence section. Don't write placeholder mtimes or counts before the command finishes, because a later correction pass can leave stale evidence in an otherwise valid report.
+
+## Improvement: Manager gate outranks runner PASS-candidate in test-results reviews
+
+Condition:
+- When reviewing a QA rerun where the runner summary reports `PASS-candidate`, `OK`, or another aggregate non-fail label, but a Manager gate or accepted stage contract lists stricter acceptance checks for the same rows
+
+Action:
+- Do classify the row against the Manager gate first and treat the runner label as evidence only. If the runner accepted a partial hit count or partial evidence, state that split explicitly in the developer review, assign product or harness ownership from the stricter gate, and do not let the aggregate runner label downgrade a gate FAIL to PASS or BLOCKED.
+
+## Improvement: Focused test counts must match binary output
+
+Condition:
+- When adding, removing, replacing, or de-duplicating focused test functions or registrations
+
+Action:
+- Do update the registered test calls, any hard-coded binary summary count, and any durable report test-count wording in the same edit; run the binary and verify the printed total plus the new/removed PASS lines before documenting evidence. If removing a placeholder wrapper, remove it from the focused count instead of keeping a no-op and state which direct PASS lines satisfy the inherited invariant. Verified 2026-06-21 (Stage 23 S03 correction): adding two Stage 23 focused tests required changing the summary from 114 / 2 Stage 23 to 116 / 4 Stage 23 before recording correction evidence.
+
+## Improvement: Manager-only exceptions stay blockers without recorded decisions
+
+Condition:
+- When a QA report failure could fit a named exception path, but the design or Manager gate says the exception is valid only after an explicit Manager decision
+
+Action:
+- Do classify the current gate result as FAIL/product bug or blocked handoff until the Manager decision exists in a durable doc. Cite the exact design or Manager acceptance line that requires the exception, and do not recommend accepting the run as an exception candidate based only on plausible timing or bounded diagnostics.
+
+## Internal Post-Task Record (2026-06-19, Stage 22 heavy QA developer review)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Review report was created without production/test edits. Evidence was cross-checked against runner summary, prompt evidence, server log, metrics, design, and implementation gate. The key decision was strict: exact repeats with `payload_unavailable` remain a product bug because Manager has not recorded the bounded cold-promotion latency exception required by the Stage 22 gate.
+
+Improvement outcome candidate:
+- Condition:
+  - When a QA report failure could fit a named exception path, but the design or Manager gate says the exception is valid only after an explicit Manager decision
+- Action:
+  - Do keep the gate as FAIL/product bug or blocked handoff until that Manager decision exists in durable docs; do not treat bounded diagnostics or plausible timing as enough for acceptance.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Test-results review gate classification.
+- Decision:
+  - Add new. The existing entry requires classifying failures, but does not cover Manager-only exception gates.
+
+Memory update:
+- Final improvement outcome stored above.
+
+## Internal Post-Task Record (2026-06-19, Stage 22 D22-RERUN-05-F1 fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Product fix, strengthened regression, builds, test run, diff check, fix report, and implementation log update completed. One tool-use gap occurred: running `test-cache-controller` and `llama-server` builds in parallel caused MSBuild to compile the same `server-cache-hybrid.obj` path concurrently and one target failed with a permission error. Serial rerun passed.
+
+Improvement outcome candidate:
+- Condition:
+  - When building multiple CMake/MSBuild targets that share generated objects or project dependencies in the same build tree
+- Action:
+  - Do run those builds serially, or build the broader target after the narrower target completes. Don't launch shared-target MSBuild invocations in parallel tool calls, because they can collide on the same `.obj` or generated export files and produce a false build failure.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Serial MSBuild for shared CMake targets
+
+Condition:
+- When building multiple CMake/MSBuild targets that share generated objects, project dependencies, or output files in the same build tree
+
+Action:
+- Do run those builds serially, or build the broader target after the narrower target completes. Don't launch shared-target MSBuild invocations in parallel tool calls, because they can collide on the same `.obj`, `.lib`, `.exp`, or generated output and create a false permission-denied build failure.
+
+## Improvement: Async completion tests must drain queued work
+
+Condition:
+- When testing an asynchronous demotion or promotion completion path and manually invoking a private completion handler or synthetic completion result
+
+Action:
+- Do either avoid enqueueing the worker item, or process/drain the real queued worker item before the test ends. Prefer a real worker-backed completion when the test is meant to prove queued ownership or lifetime behavior. Don't manually complete a synthetic result after enqueueing the same operation and leave the queued work item behind, because a later worker start/stop or destructor path can emit unrelated stale-completion diagnostics and make the regression evidence noisy.
+
+## Improvement: Wrapper dry-run must expose nested row-cap allocation
+
+Condition:
+- When a parent runner passes one row cap to a child script that internally subdivides the row into profiles, phases, or sub-runs
+
+Action:
+- Do make both the child dry-run output and the parent wrapper side log show the total row cap and each internal allocation before any live run. Don't rely on parent flag validation alone, because it can pass while the child multiplies the cap internally and violates the stage runner contract.
+
+## Internal Post-Task Record (2026-06-21, Stage 23 S05 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix stayed in runner/script and docs scope. The S05 child now treats `DurationMin` as the whole row cap and splits it across the three profiles, while wrapper dry-run/live side logs expose the same allocation. Lightweight evidence used direct child dry-run, wrapper dry-run with side-log allocation, parser checks, and doc hygiene. No full S05 live row, product code, public metrics, public flags, tests, fixtures, commits, or pushes were used.
+
+Improvement outcome candidate:
+- Condition:
+  - When a parent runner passes one row cap to a child script that internally subdivides the row into profiles, phases, or sub-runs
+- Action:
+  - Do make both child dry-run output and parent wrapper side log show total row cap and each internal allocation before live run; don't rely on parent flag validation alone.
+
+Similar memory check:
+- Similar improvement found: Partial. Existing dry-run sentinel and runner PASS gate entries cover evidence clarity and verdict gates, but not nested duration allocation.
+- Decision: Add new.
+
+Memory update:
+- Final improvement outcome stored under "Improvement: Wrapper dry-run must expose nested row-cap allocation".
+
+## Improvement: Windows access violations need symbolized offset triage
+
+Condition:
+- When a Windows model-backed server row loses `llama-server.exe` with no fatal tail in `server.err.log`, and Windows Application Error reports `0xc0000005` with a fault offset in `llama-server-impl.dll`
+
+Action:
+- Do read `Get-WinEvent` Application records and map `image base + fault offset` with local `llvm-symbolizer.exe --obj=build-cov\bin\Release\llama-server-impl.dll <address>` before stopping at the last cache warning. If a focused fix removes the visible pressure symptom but the same AV offset remains, treat the first fix as incomplete and continue root-cause analysis from the symbolized frame; don't classify the remaining crash as a separate environment issue without symbol evidence.
+
+## Improvement: Carry forward explicit next-review scope from Manager gates
+
+Condition:
+- When a Manager gate assigns the current review a normal classification task and also requires the next Architect, QA, or Manager review to include a special scope item such as a fix-history fragility review
+
+Action:
+- Do record that special scope in both the root-cause direction and handoff sections, name the Manager decision ID, and make it part of the retest or review authorization path. Don't leave it only in the inputs-reviewed or gate-basis section, because the next owner may otherwise miss the extra review obligation while following the product-bug handoff.
+
+## Improvement: Owned-scope restore fixes can use precondition hooks
+
+Condition:
+- When a product bug is in a restore or request path but the direct function body is outside the owned write scope
+
+Action:
+- Do inspect the direct function to find owned helpers called before the failing branch, then patch the narrow owned helper if it can satisfy the same contract without public-surface changes. Document the indirect fix point and add a focused regression that proves the helper changes the end-to-end state the direct function consumes. Don't edit out-of-scope files just because the failing log line is printed there.
+
+## Internal Post-Task Record (2026-06-20, Stage 22 QA rerun 08 developer review)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Review report was created without product, test, runner, fixture, CMake, schema, metric-name, index, tracker, or implementation-log edits. The PASS gate was classified against Manager decisions D22-RERUN-40 and D22-RERUN-41, and the non-gating negative cache-byte metric was kept visible as a separate product observability follow-up.
+
+Improvement outcome candidate:
+- Condition:
+  - When a QA report passes the active gate but includes a non-gating metric anomaly with an impossible value
+- Action:
+  - Do classify the anomaly explicitly as a blocker, follow-up, or non-issue; if it is outside the active acceptance contract but still invalid product telemetry, record it as a separate follow-up with focused metric retest scope and keep the gate verdict tied to the Manager acceptance criteria.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Test-results review gate classification.
+- Decision:
+  - Add new. The existing entry covers non-pass rows and misleading runner output, but does not cover impossible metric values inside an otherwise passing gate.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Non-gating metric anomalies need explicit follow-up classification
+
+Condition:
+- When a QA report passes the active gate but includes a non-gating metric anomaly with an impossible or invalid value
+
+Action:
+- Do classify the anomaly explicitly as a gate blocker, separate follow-up, or non-issue. If Manager marked it non-gating but the value is still invalid product telemetry, keep the gate verdict tied to the accepted criteria and record a separate follow-up with focused metric-accounting retest scope.
+
+## Improvement: Pass server-flag arrays to child PowerShell rows with encoded args
+
+Condition:
+- When a PowerShell wrapper must pass a dynamic list of server flags through `Start-Process` into child `.ps1` row scripts, especially flags beginning with `--` or arrays supplied through `powershell -File`
+
+Action:
+- Do encode the server-flag array as JSON and Base64, pass it as one scalar parameter, decode it inside the child script, and validate both wrapper dry-run and child dry-run. Don't pass raw `string[]` values or documented `@('S01','S02')` syntax through an outer `powershell -File` command and assume the child receives the same array, because the command boundary can flatten row arrays or reinterpret `--flag` tokens as script parameters.
+
+## Improvement: Check doc cap immediately after pointer edits
+
+Condition:
+- When adding a short gate pointer, status line, or cross-reference to an existing durable design or implementation document near the 300-line cap
+
+Action:
+- Do check the line count immediately after the edit and bring the file back under 300 lines by tight reflow or required splitting before other hygiene checks. Don't assume a small pointer edit is exempt from the document size rule; parent stage logs can already be close enough that one or two lines violate the cap.
+
+## Internal Post-Task Record (2026-06-20, Stage 21 resume review using Stage 22 rerun 08)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Review-only scope was maintained. The new Stage 21 report mapped the Stage 22 rerun 08 evidence to TP-21-HV1/HV2, kept the negative cache-byte gauge visible as a non-gating product observability follow-up, and did not edit product code, tests, runner, fixture, public surfaces, tracker, index, or implementation logs.
+
+Improvement outcome candidate:
+- Condition:
+  - When a resumed stage uses a later stage's QA rerun as candidate evidence and includes a non-gating metric anomaly
+- Action:
+  - Do tie the verdict to the Manager resume criteria, map the later evidence to the resumed stage's acceptance rows, and keep invalid-but-out-of-scope telemetry as a separate follow-up with focused retest scope.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Non-gating metric anomalies need explicit follow-up classification.
+- Decision:
+  - No update. The existing improvement already covers the actionable behavior used here.
+
+Memory update:
+- Final improvement outcome stored:
+  - No new or strengthened entry.
+
+## Internal Post-Task Record (2026-06-21, Stage 23 S06 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix stayed in wrapper and documentation scope. S06 now keeps its cold-pressure hot cache budget by removing duplicate wrapper `--cache-ram 512` from the encoded Stage 17 flag list for S06 only, while required Stage 23 flags still pass through. Dry-run and focused side-log assertions prove S06 has effective 16 MiB and S04 still keeps wrapper 512 MiB. No product code, public flags, metrics, tests, fixtures, commits, pushes, or full live S06 rerun were used.
+
+Improvement outcome candidate:
+- Condition:
+  - When a child runner intentionally sets a row-specific server flag and the parent wrapper also passes the same flag through encoded or appended server args
+- Action:
+  - Do remove or reorder the parent duplicate for that row, pass the child override explicitly, and add dry-run side-log assertions for both the row-specific final value and a neighboring row that still uses the parent default.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Pass server-flag arrays to child PowerShell rows with encoded args.
+- Decision:
+  - Add new. The existing rule covers transport safety for encoded arrays; this task exposed duplicate-flag precedence at the server CLI layer.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Row-specific server flags need final-value assertions
+
+Condition:
+- When a child runner intentionally sets a row-specific server flag and the parent wrapper also passes the same flag through encoded, appended, or shared server args
+
+Action:
+- Do remove or reorder the parent duplicate for that row, pass the child override explicitly when possible, and add dry-run side-log assertions for both the row-specific final value and a neighboring row that still uses the parent default. Do not rely on "flag present" checks when duplicate CLI flags use last-value-wins behavior.
+
+## Improvement: Pressure workloads need admit-size proof
+
+Condition:
+- When fixing a cache pressure runner where the goal is demotion, cold eviction, queue pressure, or skip evidence under a small byte budget
+
+Action:
+- Do first prove a single payload can be admitted under that budget by checking live save size or a short smoke. If the minimum payload is larger than the budget, changing prompt count or identity cannot create demotion pressure; adjust the fixture or workload shape so payloads fit, then run a short smoke long enough to cross the next pressure boundary before documenting the fix.
+
+## Internal Post-Task Record (2026-06-21, Stage 23 S03 product-crash fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix loop used Application Error evidence and symbolized `llama-server-impl.dll` with image base plus fault offset before patching. The root cause moved from a broad demotion-pressure guess to the exact checkpoint metadata boundary read in `attach_checkpoint_payload`. The code fix stayed narrow, the regression covered demotion-budget rejection plus immediate eviction plus older demotion completion before checkpoint attach, and evidence was collected before writing the fix report.
+
+Improvement outcome candidate:
+- Condition:
+  - When a Windows access violation report includes only a fault offset and the first hypothesis points to nearby logs rather than a symbolized frame
+- Action:
+  - Do map image base plus fault offset to a source line before patching and let that frame override log-adjacent hypotheses.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Windows access violations need symbolized offset triage.
+- Decision:
+  - No update. Existing rule already requires Application Error lookup and image-base plus offset symbolization before stopping at the last cache warning.
+
+Memory update:
+- Final improvement outcome stored:
+  - No new or strengthened entry.

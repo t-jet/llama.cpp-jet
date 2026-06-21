@@ -19,6 +19,7 @@ param(
     [int]    $LatencyDriftThresholdPct = 20,
     [int]    $MtpVariant     = 0,
     [ValidateSet('original','marked')] [string] $JinjaVariant = 'original',
+    [string] $Stage17ServerArgsBase64 = '',
     [switch] $DryRun
 )
 
@@ -30,6 +31,7 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 
 . (Join-Path $libDir 'Write-LongrunEvidence.ps1')
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
+. (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
 # MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
 $jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
@@ -54,6 +56,7 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDi
 $flags = @('--cache-mode','hybrid','--parallel','1','--cache-ram','100',
            '--metrics','--ctx-size','512','--temp','0','--seed',"$Seed")
 $flags = Merge-MtpJinjaFlag -Flags $flags -JinjaPath $jinjaPath
+$flags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
 
 Write-Host "S12-L02 30m reproducibility; stub=$stubData"
 
@@ -94,7 +97,7 @@ $proc = Start-Process -FilePath $serverExe `
     -NoNewWindow -PassThru
 
 $ready = $false
-$deadline = (Get-Date).AddSeconds(180)
+$deadline = (Get-Date).AddSeconds(300)
 while ((Get-Date) -lt $deadline) {
     try {
         $h = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 4
@@ -102,7 +105,10 @@ while ((Get-Date) -lt $deadline) {
     } catch {}
     Start-Sleep -Seconds 2
 }
-if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Write-Error "Server did not start" }
+if (-not $ready) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; [Console]::Error.WriteLine("Server did not start"); exit 1 }
+
+(Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -UseBasicParsing -TimeoutSec 10).Content |
+    Out-File -FilePath (Join-Path $OutDir 'metrics-before.txt') -Encoding utf8
 
 $csvPath = Join-Path $OutDir 'resource-samples.csv'
 "elapsed_s,workingset_bytes,handle_count,server_live" | Out-File -FilePath $csvPath -Encoding utf8
