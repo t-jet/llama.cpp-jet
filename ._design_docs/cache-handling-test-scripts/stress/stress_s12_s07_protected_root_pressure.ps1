@@ -8,6 +8,7 @@
 param(
     [string] $BuildDir       = '',
     [string] $ModelPath      = '',
+    [string] $PressureModelPath = '',
     [string] $OutDir         = '',
     [int]    $Port           = 8207,
     [int]    $DurationMin    = 30,
@@ -30,16 +31,21 @@ $libDir     = Join-Path $sourceRoot '._design_docs\cache-handling-test-scripts\l
 . (Join-Path $libDir 'Read-GgufChatTemplate.ps1')
 . (Join-Path $libDir 'Get-Stage17ServerArgs.ps1')
 
-# MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
-$jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $ModelPath -SourceRoot $sourceRoot
-if ($MtpVariant -gt 0 -and $MtpVariant -ne 2 -and $jinjaPath -and -not (Test-Path $jinjaPath)) {
-    Write-Host "BLOCKED: jinja file missing at $jinjaPath (MtpVariant=$MtpVariant JinjaVariant=$JinjaVariant)"
-}
-
 if (-not $BuildDir)  { $BuildDir  = Join-Path $sourceRoot 'build' }
 if (-not $ModelPath) {
     $ModelPath = if ($env:LLAMA_CACHE_TEST_MODEL) { $env:LLAMA_CACHE_TEST_MODEL }
                  else { Join-Path $sourceRoot '._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf' }
+}
+if (-not $PressureModelPath) {
+    $PressureModelPath = Join-Path $sourceRoot '._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf'
+}
+$pressureModelAvailable = $PressureModelPath -and (Test-Path $PressureModelPath)
+$serverModelPath = if ($pressureModelAvailable) { $PressureModelPath } else { $ModelPath }
+
+# MTP + jinja variant params (post-closure follow-up, part-19 sec 7.1).
+$jinjaPath = Resolve-MtpJinjaPath -MtpVariant $MtpVariant -JinjaVariant $JinjaVariant -ModelPath $serverModelPath -SourceRoot $sourceRoot
+if ($MtpVariant -gt 0 -and $MtpVariant -ne 2 -and $jinjaPath -and -not (Test-Path $jinjaPath)) {
+    Write-Host "BLOCKED: jinja file missing at $jinjaPath (MtpVariant=$MtpVariant JinjaVariant=$JinjaVariant)"
 }
 if (-not $OutDir) {
     $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -47,7 +53,7 @@ if (-not $OutDir) {
 }
 $serverExe = Join-Path $BuildDir 'bin\Release\llama-server.exe'
 
-$stubData = -not (Test-Path $ModelPath)
+$stubData = -not (Test-Path $serverModelPath)
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
 $serverFlags = @('--cache-mode','hybrid','--cache-ram',"$HotBudgetMiB",
@@ -56,10 +62,10 @@ $serverFlags = @('--cache-mode','hybrid','--cache-ram',"$HotBudgetMiB",
 $serverFlags = Merge-MtpJinjaFlag -Flags $serverFlags -JinjaPath $jinjaPath
 $serverFlags += Get-Stage17ServerArgsFromBase64 -Encoded $Stage17ServerArgsBase64
 
-Write-Host "S12-S07 protected-root pressure; stub=$stubData"
+Write-Host "S12-S07 protected-root pressure; model=$serverModelPath; pressure-model=$pressureModelAvailable; unique-nonprotected-prompts=true; stub=$stubData"
 
 if ($DryRun) {
-    Write-Host "DRY-RUN: would emit protected roots and run for $DurationMin min"
+    Write-Host "DRY-RUN: would emit protected roots and run for $DurationMin min; hot-budget=$HotBudgetMiB MiB; pressure-model=$serverModelPath; unique-nonprotected-prompts=true"
     exit 0
 }
 
@@ -72,13 +78,13 @@ if ($stubData) {
     "elapsed_s,workingset_bytes,handle_count`r`n" |
         Out-File -FilePath (Join-Path $OutDir 'resource-samples.csv') -Encoding utf8
     Write-StressEvidence -OutDir $OutDir -ScenarioId 'S12-S07' -Variant 'protected-8MiB' `
-        -ModelFixture (Split-Path $ModelPath -Leaf) -BuildType 'Release' `
+        -ModelFixture (Split-Path $serverModelPath -Leaf) -BuildType 'Release' `
         -ServerFlags $serverFlags -Seed $Seed -DurationSeconds ($DurationMin * 60) `
         -MetricsBeforePath (Join-Path $OutDir 'metrics-before.txt') `
         -MetricsDuringPath (Join-Path $OutDir 'metrics-during.txt') `
         -MetricsAfterPath  (Join-Path $OutDir 'metrics-after.txt') `
         -ResourceSamplesPath (Join-Path $OutDir 'resource-samples.csv') `
-        -StubData -Verdict BLOCKED -Notes "Model fixture not found at $ModelPath"
+        -StubData -Verdict BLOCKED -Notes "Model fixture not found at $serverModelPath"
     exit 0
 }
 
@@ -87,7 +93,7 @@ Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue |
 Start-Sleep -Seconds 1
 
 $proc = Start-Process -FilePath $serverExe `
-    -ArgumentList ($serverFlags + @('--model',$ModelPath,'--host','127.0.0.1',"--port","$Port")) `
+    -ArgumentList ($serverFlags + @('--model',$serverModelPath,'--host','127.0.0.1',"--port","$Port")) `
     -RedirectStandardOutput (Join-Path $OutDir 'server.out.log') `
     -RedirectStandardError  (Join-Path $OutDir 'server.err.log') `
     -NoNewWindow -PassThru
@@ -125,7 +131,14 @@ while ((Get-Date) -lt $end) {
             $rowCount++
         } catch {}
     }
-    $body = '{"prompt":"S12-S07 non-protected pressure","n_predict":2,"temperature":0,"seed":42,"cache_prompt":true}'
+    $prompt = "S12-S07 non-protected pressure unique $rowCount seed $Seed alpha beta gamma delta epsilon zeta eta theta"
+    $body = @{
+        prompt = $prompt
+        n_predict = 2
+        temperature = 0
+        seed = $Seed
+        cache_prompt = $true
+    } | ConvertTo-Json -Compress
     try {
         Invoke-WebRequest -Uri "http://127.0.0.1:$Port/completion" -Method POST `
             -Body $body -ContentType 'application/json' -UseBasicParsing -TimeoutSec 30 | Out-Null
@@ -144,10 +157,10 @@ while ((Get-Date) -lt $end) {
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
 Write-StressEvidence -OutDir $OutDir -ScenarioId 'S12-S07' -Variant 'protected-8MiB' `
-    -ModelFixture (Split-Path $ModelPath -Leaf) -BuildType 'Release' `
+    -ModelFixture (Split-Path $serverModelPath -Leaf) -BuildType 'Release' `
     -ServerFlags $serverFlags -RequestCount $rowCount -Seed $Seed `
     -DurationSeconds ($DurationMin * 60) `
     -MetricsBeforePath (Join-Path $OutDir 'metrics-before.txt') `
     -MetricsDuringPath (Join-Path $OutDir 'metrics-during.txt') `
     -MetricsAfterPath  (Join-Path $OutDir 'metrics-after.txt') `
-    -ResourceSamplesPath $csvPath -Verdict PENDING -Notes "Live run; QA evaluates"
+    -ResourceSamplesPath $csvPath -Verdict PENDING -Notes "Live run; QA evaluates; primary model $(Split-Path $ModelPath -Leaf); pressure model $(Split-Path $serverModelPath -Leaf)"

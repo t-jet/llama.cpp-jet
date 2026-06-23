@@ -34,6 +34,7 @@ param(
     [string] $CachePromptEvidenceDir = '',
     [string] $ModelPath              = '',
     [string] $S06PressureModelPath   = '',
+    [string] $S07PressureModelPath   = '',
     [string] $RunRoot                = '',
     [string] $BuildDir               = '',
     [string] $AgenticPromptPath      = '',
@@ -60,6 +61,9 @@ if (-not $ModelPath) {
 }
 if (-not $S06PressureModelPath) {
     $S06PressureModelPath = Join-Path $src '._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf'
+}
+if (-not $S07PressureModelPath) {
+    $S07PressureModelPath = Join-Path $src '._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf'
 }
 if (-not $RunRoot) {
     $RunRoot = Join-Path $src "._test_output\stage20-stress-longrun-$dateTag"
@@ -122,6 +126,12 @@ function Write-BatchGate {
 function Write-RowGate {
     param([pscustomobject] $Row, [string] $OutDir, [int] $ExitCode)
     $requiredNames = @('server.out.log','server.err.log','metrics-before.txt','metrics-after.txt')
+    if ($Row.Base -eq 'L02') {
+        $requiredNames += @('l02-comparison.json','evidence-summary.md')
+    }
+    if ($Row.Base -eq 'L03') {
+        $requiredNames += @('l03-mixed-workload.json','evidence-summary.md')
+    }
     $present = @()
     $missing = @()
     foreach ($name in $requiredNames) {
@@ -195,7 +205,7 @@ function Get-Stage20Flags {
     [void]$flags.Add('hybrid')
     [void]$flags.Add('--cache-cold-max-mib')
     [void]$flags.Add("$($CacheColdMaxMib)")
-    if ($Row.Base -ne 'S06') {
+    if ($Row.Base -notin @('S06','S07')) {
         [void]$flags.Add('--cache-ram')
         [void]$flags.Add("$($CacheRamMib)")
     }
@@ -251,6 +261,35 @@ function Format-S06HotBudget {
     return "effective_cache_ram_mib=$HotBudgetMiB source=S06-HotBudgetMiB wrapper_cache_ram_mib=$CacheRamMib stage17_cache_ram_appended=false"
 }
 
+function Format-S07HotBudget {
+    param([int] $HotBudgetMiB)
+    return "effective_cache_ram_mib=$HotBudgetMiB source=S07-HotBudgetMiB wrapper_cache_ram_mib=$CacheRamMib stage17_cache_ram_appended=false"
+}
+
+function Format-S07PressureWorkload {
+    $fixtureState = if (Test-Path $S07PressureModelPath) { 'available' } else { 'missing' }
+    return "pressure_model=$S07PressureModelPath pressure_model_state=$fixtureState mtp_variant=2 unique_nonprotected_prompt_per_request=true expected_payload_fit=below_8MiB primary_model=$ModelPath"
+}
+
+function Format-L02ComparisonPlan {
+    param([int] $DurationMin)
+    $rowSeconds = [Math]::Max(1, $DurationMin * 60)
+    $legacySeconds = [Math]::Max(1, [int][Math]::Floor($rowSeconds / 2))
+    $hybridSeconds = [Math]::Max(1, $rowSeconds - $legacySeconds)
+    return "rowCapSeconds=$rowSeconds legacy_control_seconds=$legacySeconds hybrid_stage23_seconds=$hybridSeconds legacy_mode=legacy hybrid_mode=hybrid comparison_artifact=l02-comparison.json legacy_filters=cache-cold-max-mib,cache-cold-path,cache-prompt-evidence,cache-prompt-evidence-dir"
+}
+
+function Format-L03MixedWorkloadPlan {
+    param([int] $DurationHours, [int] $DurationMin)
+    $rowSeconds = (($DurationHours * 60) + $DurationMin) * 60
+    if ($rowSeconds -le 0) { $rowSeconds = 2 * 3600 }
+    $exactSeconds = [Math]::Max(1, [int][Math]::Floor($rowSeconds * 30 / 100))
+    $checkpointSeconds = [Math]::Max(1, [int][Math]::Floor($rowSeconds * 30 / 100))
+    $nearSeconds = [Math]::Max(1, [int][Math]::Floor($rowSeconds * 20 / 100))
+    $newSeconds = [Math]::Max(1, $rowSeconds - $exactSeconds - $checkpointSeconds - $nearSeconds)
+    return "rowCapSeconds=$rowSeconds exact_cache_prompt_seconds=$exactSeconds checkpoint_dependent_seconds=$checkpointSeconds near_non_exact_seconds=$nearSeconds new_uncached_seconds=$newSeconds artifact=l03-mixed-workload.json"
+}
+
 function Format-S06PressureWorkload {
     $fixtureState = if (Test-Path $S06PressureModelPath) { 'available' } else { 'missing' }
     return "pressure_model=$S06PressureModelPath pressure_model_state=$fixtureState mtp_variant=2 unique_prompt_per_request=true expected_payload_fit=below_16MiB"
@@ -283,6 +322,16 @@ if ($DryRun) {
             if ($r.Base -eq 'S06') {
                 Write-SideLog "DryRun S06 hot_budget $(Format-S06HotBudget -HotBudgetMiB 16)"
                 Write-SideLog "DryRun S06 pressure_workload $(Format-S06PressureWorkload)"
+            }
+            if ($r.Base -eq 'S07') {
+                Write-SideLog "DryRun S07 hot_budget $(Format-S07HotBudget -HotBudgetMiB 8)"
+                Write-SideLog "DryRun S07 pressure_workload $(Format-S07PressureWorkload)"
+            }
+            if ($r.Base -eq 'L02') {
+                Write-SideLog "DryRun L02 comparison_plan $(Format-L02ComparisonPlan -DurationMin $r.Min)"
+            }
+            if ($r.Base -eq 'L03') {
+                Write-SideLog "DryRun L03 mixed_workload_plan $(Format-L03MixedWorkloadPlan -DurationHours $r.Hours -DurationMin $r.Min)"
             }
         }
     }
@@ -332,7 +381,9 @@ for ($i = 0; $i -lt $total; $i += $batchSize) {
         # Stage 20 wrapper default 'new' maps to chat_template_new.jinja,
         # which is the 'marked' variant in the underlying scripts.
         $scriptJinja = if ($JinjaVariant -eq 'new') { 'marked' } else { 'original' }
-        $rowMtpVariant = if ($r.Base -eq 'S06' -and (Test-Path $S06PressureModelPath)) { '2' } else { '1' }
+        $rowMtpVariant = if ($r.Base -eq 'S06' -and (Test-Path $S06PressureModelPath)) { '2' }
+                         elseif ($r.Base -eq 'S07' -and (Test-Path $S07PressureModelPath)) { '2' }
+                         else { '1' }
         $argList = @(
             '-NoProfile', '-File', $scriptPath,
             '-BuildDir', $buildDir,
@@ -352,6 +403,10 @@ for ($i = 0; $i -lt $total; $i += $batchSize) {
                 $argList += @('-HotBudgetMiB', '16')
                 $argList += @('-PressureModelPath', $S06PressureModelPath)
             }
+            if ($r.Base -eq 'S07') {
+                $argList += @('-HotBudgetMiB', '8')
+                $argList += @('-PressureModelPath', $S07PressureModelPath)
+            }
         }
         $launchLog = Join-Path $outDir 'launch.log'
         $launchErr = Join-Path $outDir 'launch.err'
@@ -369,6 +424,16 @@ for ($i = 0; $i -lt $total; $i += $batchSize) {
             if ($r.Base -eq 'S06') {
                 Write-SideLog "S06 hot_budget $(Format-S06HotBudget -HotBudgetMiB 16)"
                 Write-SideLog "S06 pressure_workload $(Format-S06PressureWorkload)"
+            }
+            if ($r.Base -eq 'S07') {
+                Write-SideLog "S07 hot_budget $(Format-S07HotBudget -HotBudgetMiB 8)"
+                Write-SideLog "S07 pressure_workload $(Format-S07PressureWorkload)"
+            }
+            if ($r.Base -eq 'L02') {
+                Write-SideLog "L02 comparison_plan $(Format-L02ComparisonPlan -DurationMin $r.Min)"
+            }
+            if ($r.Base -eq 'L03') {
+                Write-SideLog "L03 mixed_workload_plan $(Format-L03MixedWorkloadPlan -DurationHours $r.Hours -DurationMin $r.Min)"
             }
         } catch {
             Write-SideLog "LAUNCH_FAIL $($r.Base) err=$($_.Exception.Message)"

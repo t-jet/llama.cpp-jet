@@ -1560,6 +1560,33 @@ Action:
   Don't leave a parent entry over cap because the new detailed part is under
   cap.
 
+## Improvement: Multi-leg row runner port contract
+
+Condition:
+- When reviewing a runner-contract fix where one logical row starts more than
+  one server leg or uses `Port + N` internally
+
+Action:
+- Do verify the wrapper port allocation, batching rule, dry-run side log, and
+  next-row interaction. Require a code fix when approved execution can batch
+  the row with a colliding neighbor; otherwise record an explicit handoff
+  constraint such as focused row only or `BatchSize 1`.
+
+## Improvement: Mixed-workload runner evidence with collapsed public profiles
+
+Condition:
+- When reviewing a mixed-workload runner fix where the fixture's public prompt
+  evidence collapses every request into one product profile or one lookup
+  outcome
+
+Action:
+- Do distinguish fixture/product profile classification from harness prompt
+  classes. Accept the runner contract only when a machine-readable artifact
+  records per-class plan and counts, request status, metrics deltas, redacted
+  evidence counts, checksum or lookup-path spread, and a non-PENDING summary.
+  Record the collapsed public profile as a QA evidence limitation, not a
+  blocker, unless the approved row requires product-visible profile diversity.
+
 ## Post-task review 2026-06-21 (Stage 23 S03 startup-crash fix review)
 
 Task completed:
@@ -1625,6 +1652,83 @@ Similar memory check:
 Memory update:
 - No new improvement; existing ignored-doc, byte-hygiene, line-cap, and
   gate-wording rules were reinforced.
+
+## Post-task review 2026-06-22 (Stage 23 S07 pressure-workload bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the S07 pressure-workload fixture substitution without running the
+  full live row or editing product code. Confirmed the Qwen3.5 payload was
+  rejected before hot admission under the 8 MiB hot budget, verified S07 uses
+  the Qwen3-0.6B pressure fixture while keeping Stage 23 flags and primary
+  model notes, checked S06/S04 dry-run guards, accepted the `.test_reports`
+  stage23 Markdown whitelist, wrote a PASS review artifact, and updated the
+  Stage 23 gate docs. Direct byte checks, no-index whitespace checks, parser
+  checks, dry-runs, and line counts covered the new report and near-cap
+  implementation entry.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a pressure row whose public workload cannot emit trusted
+    protected-root metadata but existing guidance names a focused controller
+    evidence substitute
+- Action:
+  - Do separate live payload-pressure acceptance from trusted protected-root
+    evidence. Accept the workload fix when pressure is proved and require the
+    focused protected-root evidence in the QA rerun instead of blocking on
+    degraded public counters.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Evidence-source consistency in test plan; Misconfigured-probe diagnosis vs
+    product bug; Untracked or partly-tracked review doc paths; Entry docs near
+    line cap.
+- Decision: No update. Existing evidence-source and ignored-doc rules covered
+  the decision once the Stage 4 script guidance was checked.
+
+Memory update:
+- No new improvement; existing evidence-source, ignored-doc, and line-cap rules
+  were reinforced.
+
+## Post-task review 2026-06-22 (Stage 23 S07 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the narrow S07 runner-contract fix without running the live row or
+  editing product code. Confirmed the duplicate `--cache-ram` root cause,
+  verified S07 omits wrapper cache RAM while receiving `-HotBudgetMiB 8`,
+  checked S06 still receives `-HotBudgetMiB 16`, verified S04 still receives
+  wrapper `--cache-ram 512`, wrote a PASS report in the ignored
+  `.test_reports` tree, and updated Stage 23 implementation/index/tracker gate
+  state. Parser checks, scoped dry-runs, byte checks, no-index whitespace
+  checks, and line counts covered the new report and near-cap implementation
+  entry.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner-contract fix that changes per-row wrapper flag
+    suppression
+- Action:
+  - Do verify the fixed row, the adjacent suppressed row, and one default row
+    with wrapper dry-runs before passing the contract.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Entry docs near line cap;
+    Gate wording with open findings; prior S06/S05 runner-contract post-task
+    notes.
+- Decision: No update. Existing ignored-report, dry-run, line-cap, and gate
+  wording rules already covered the task.
+
+Memory update:
+- No new improvement; existing runner-contract review, ignored-doc, line-cap,
+  and gate-wording rules were reinforced.
 
 ## Post-task review 2026-06-22 (Stage 23 S06 pressure-workload bugfix review)
 
@@ -1731,3 +1835,68 @@ Similar memory check:
 Memory update:
 - No new improvement; existing ignored-doc, byte-hygiene, line-cap, and
   gate-wording rules were reinforced.
+
+## Post-task review 2026-06-22 (Stage 23 L02 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the L02 paired legacy-control/hybrid runner fix, wrote a PASS
+  durable report, updated current Stage 23 gate docs, verified parser and
+  wrapper dry-runs, checked the child smoke artifacts, and kept the near-cap
+  implementation entry at 300 lines.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a runner-contract fix where one logical row starts more than
+    one server leg or uses `Port + N` internally
+- Action:
+  - Do verify wrapper port allocation, batching, dry-run side logs, and
+    next-row interaction; require a code fix for approved colliding batches or
+    record a focused-row/`BatchSize 1` handoff constraint.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Runner-contract dry-run review notes existed for per-row flag suppression,
+    but not for multi-leg port use.
+- Decision: Add new improvement because this task exposed a separate wrapper
+  batching and port-allocation review point.
+
+Memory update:
+- Added `Multi-leg row runner port contract`.
+
+## Post-task review 2026-06-22 (Stage 23 L03 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the L03 mixed-workload runner fix before QA rerun, wrote a PASS
+  durable report, updated current Stage 23 gate docs, verified parser and
+  wrapper/child dry-runs, inspected the child smoke artifacts, and kept the
+  near-cap implementation entry at 299 lines. The main judgment point was
+  accepting harness prompt-class diversity even though the Qwen3.5 MTP public
+  prompt evidence still reports one product profile.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a mixed-workload runner fix where public prompt evidence
+    collapses all requests into one profile or outcome
+- Action:
+  - Do separate product profile classification from harness prompt-class
+    coverage, and require machine-readable plan/count/metric/checksum evidence
+    before accepting the rerun gate.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Evidence-source consistency in test plan; Workload follow-up design after
+    infrastructure PASS; Untracked or partly-tracked review doc paths.
+- Decision: Add new improvement because this task needed a specific review
+  threshold for runner-class evidence when public product profile labels are
+  fixture-collapsed.
+
+Memory update:
+- Added `Mixed-workload runner evidence with collapsed public profiles`.

@@ -86,7 +86,7 @@ Condition:
 - QA execution session will create ad hoc artifact directories and may also run scripts that generate their own reports
 
 Action:
-- Decide final session report suffix before collecting ad hoc artifacts. Check the durable report path, the matching non-durable output root, and any matching cold root before writing the first artifact. If any matching root already exists, treat that suffix as used and advance to the next chronological suffix. Store artifacts under the final suffix so evidence links do not point at a different report number.
+- Decide final session report suffix before collecting ad hoc artifacts. Check the durable report path, the matching non-durable output root, and any matching cold root before writing the first artifact. If any matching root already exists, or if a failed bootstrap creates a partial empty output/cold root before preflight files are written, treat that suffix as used and advance to the next chronological suffix. Record the skipped suffix and reason in the durable report. Store artifacts under the final suffix so evidence links do not point at a different report number.
 
 ## Improvement: separate plan updates from product handoffs
 
@@ -651,6 +651,22 @@ Action:
 - Don't accept the row from wrapper exit code or row_gate alone. Wait until the row cap or wrapper completion if the child script swallows request errors, then classify from required-file presence, launch stderr, server liveness, and server log tail. If final `/metrics` fails with connection refused after request traffic, mark the row as FAIL/BLOCKED per the stricter acceptance gate and stop the matrix when the plan requires bug handoff.
 - Do check the row script's actual evidence contract before treating a missing optional cap artifact as row failure. Some S/L row scripts complete a fixed-duration loop, scrape `metrics-after.txt`, write `evidence-summary.md`, and stop the server without producing `cap-exit.json`; in that shape, classify from the completed duration, wrapper exit, row gate, after metrics, logs, and prompt/cold evidence rather than failing solely on absent `cap-exit.json`.
 
+## Improvement: require actual comparison artifacts for comparison rows
+
+Condition:
+- A QA execution row is named as a comparison row, legacy comparison, baseline comparison, or paired benchmark comparison, and the wrapper exits 0 with `row_gate` success
+
+Action:
+- Do inspect the child row script, live flags, `evidence-summary.md`, and row output for both comparison legs or a durable baseline/comparison artifact before passing the row. If the script runs only one mode, leaves the row summary at `PENDING`, or says QA must compare to a paired benchmark that was not produced, classify as `BLOCKED-runner-contract` even when metrics, redacted evidence, CUDA, and error scans are clean. Recover timing stats from logs if useful, but do not treat recovered timings as a substitute for the missing comparison contract.
+
+## Improvement: verify workload identity for named workload rows
+
+Condition:
+- A QA execution row is named as a mixed workload, profile mix, prompt mix, exact/near/new split, pressure workload, or other workload-shape row, and the wrapper exits 0 with complete basic evidence
+
+Action:
+- Do inspect the child row script, `evidence-summary.md`, prompt evidence profiles, request bodies or labels, and metrics before passing the row. If the live run proves only a single repeated prompt or stale legacy-control workload instead of the named workload shape, classify it as `BLOCKED-runner-contract` even when the row ran for the full cap, `row_gate` and `batch_end` are present, scans are clean, and cold budget is within limit.
+
 
 
 ## Improvement: cache validation position matters for bounded-error exit
@@ -686,4 +702,44 @@ Condition:
 - A stress or longrun row is named or specified as a pressure row, budget row, eviction row, queue row, demotion row, or cold-store row, especially when wrapper flags or row-local flags control the effective hot or cold budget
 
 Action:
-- Do inspect the live `evidence-summary.md`, server startup/state logs, resource samples, and after metrics to confirm both the effective budget and an observed pressure path. If duplicate flags leave the live server using a larger budget than the row's pressure setup (for example local `--cache-ram 16` followed by wrapper `--cache-ram 512`), classify as `BLOCKED-runner-contract`. If the effective pressure budget is correct but metrics and artifacts still show 0 demotions, 0 skips, 0 evictions, 0 cold files, 0 resident entries, or otherwise no required pressure signal, also classify as `BLOCKED-runner-contract` rather than PASS even when wrapper exit, row_gate, evidence files, redacted evidence, and error scans are clean. Route to Manager for scope/runner disposition before the next row opens.
+- Do inspect the live `evidence-summary.md`, server startup/state logs, resource samples, and after metrics to confirm both the effective budget and an observed pressure path. If a pressure row uses a row-only fixture substitution, verify both identities: the live server loads the pressure fixture and the durable report still records the primary stage fixture in notes. If duplicate flags leave the live server using a larger budget than the row's pressure setup (for example local `--cache-ram 16` or `--cache-ram 8` followed by wrapper `--cache-ram 512`), classify as `BLOCKED-runner-contract`. For protected-root pressure rows, require non-zero protected-root decision, demotion, eviction, protected payload byte, or equivalent stats-capable evidence; 0 protected-root metrics means the row did not prove the scenario. If the effective pressure budget is correct but metrics and artifacts still show 0 demotions, 0 skips, 0 evictions, 0 cold files, 0 resident entries, 0 protected-root pressure decisions, or otherwise no required pressure signal, also classify as `BLOCKED-runner-contract` rather than PASS even when wrapper exit, row_gate, evidence files, redacted evidence, and error scans are clean. Route to Manager for scope/runner disposition before the next row opens.
+
+## Improvement: capture GPU process evidence during live rows
+
+Condition:
+- A QA execution row requires CUDA runtime evidence and the row is long enough to sample while `llama-server.exe` is still running
+
+Action:
+- Do start a timed `nvidia-smi` sampler or capture `nvidia-smi` after the wrapper side log reports the launched server PID, before waiting for the row to finish. Keep startup CUDA log lines as backend evidence, but do not rely on an after-live `nvidia-smi` sample for process GPU-memory proof because the row script may have already stopped the server.
+
+## Improvement: persist background wrapper exit codes
+
+Condition:
+- A QA execution wrapper is launched with `Start-Process` or another background process so the session can poll side logs, sample GPU state, or collect live evidence while the row runs
+
+Action:
+- Do keep the returned process object or process id, call `WaitForExit()` before classifying the row, and write the wrapper `ExitCode` to a preflight artifact. Do not rely only on `row_gate`, `batch_end`, or wrapper `ok=True` side-log lines when the active gate explicitly asks for wrapper exit 0; those lines can support the finding, but the OS exit code should be preserved as first-class evidence.
+
+## Improvement: apply longrun resource thresholds after warmup
+
+Condition:
+- A longrun row evidence summary defines working-set or handle-count thresholds "after warmup", and early samples show one-time growth before the process plateaus
+
+Action:
+- Do calculate full-run and post-warmup windows separately before classifying the row. Use the row's snapshot cadence or first 30 minutes as the warmup boundary when the plan does not define a stricter one. Report the full-run growth as context, but base the stability verdict on the post-warmup window plus liveness, final metrics, error scans, and process status.
+
+## Improvement: avoid colon-adjacent PowerShell interpolation in QA helpers
+
+Condition:
+- Writing one-off PowerShell analysis helpers that format strings containing a variable followed immediately by a colon, such as evidence scan labels or file counters
+
+Action:
+- Do use the `-f` format operator or `${name}` braces instead of `"$name:..."`. PowerShell parses `$name:` as a scoped variable prefix and can fail before evidence analysis runs.
+
+## Improvement: write QA step exit evidence immediately
+
+Condition:
+- Running PowerShell QA preflight, build, or test steps through helper functions that collect step results for a later summary file
+
+Action:
+- Do write each step's exit code, elapsed time, and log path to disk immediately after the step finishes, or use an explicit script-scoped collection. Do not rely on appending to an outer variable from inside a function unless the scope is explicit, because PowerShell can leave the final summary empty even when the commands ran correctly.

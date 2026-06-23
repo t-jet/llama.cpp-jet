@@ -1175,6 +1175,31 @@ Memory update:
 - Final improvement outcome stored:
   - No new or strengthened entry.
 
+## Internal Post-Task Record (2026-06-22, Stage 23 S07 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix stayed in S07 runner and docs scope. S07 now keeps its protected-root hot cache budget by removing duplicate wrapper `--cache-ram 512` from the encoded Stage 17 flag list for S07 only, while required Stage 23 flags still pass through. Dry-run and side-log assertions prove S07 has effective 8 MiB, S06 still has effective 16 MiB, and S04 still keeps wrapper 512 MiB. No product code, public flags, metrics, tests, fixtures, commits, pushes, or full live S07 rerun were used.
+
+Improvement outcome candidate:
+- Condition:
+  - When a child runner intentionally sets a row-specific server flag and the parent wrapper also passes the same flag through encoded or appended server args
+- Action:
+  - Do remove or reorder the parent duplicate for that row, pass the child override explicitly, and add dry-run side-log assertions for both the row-specific final value and a neighboring row that still uses the parent default.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Row-specific server flags need final-value assertions.
+- Decision:
+  - No update. Existing rule already covers the S07 duplicate `--cache-ram` precedence fix and the required row/default dry-run assertions.
+
+Memory update:
+- Final improvement outcome stored:
+  - No new or strengthened entry.
+
 ## Internal Post-Task Record (2026-06-21, Stage 23 S06 runner-contract fix)
 
 Task completed:
@@ -1207,6 +1232,38 @@ Condition:
 Action:
 - Do remove or reorder the parent duplicate for that row, pass the child override explicitly when possible, and add dry-run side-log assertions for both the row-specific final value and a neighboring row that still uses the parent default. Do not rely on "flag present" checks when duplicate CLI flags use last-value-wins behavior.
 
+## Improvement: Decode encoded PowerShell flag arrays into explicit lists
+
+Condition:
+- When a child PowerShell runner decodes a Base64/JSON server-flag array and then filters or indexes the decoded values
+
+Action:
+- Do decode into an explicit `System.Collections.Generic.List[string]`, iterate that list, and write a per-leg `server-flags.txt` proof before launch. Don't assume a helper returning `[string[]]` stays array-shaped across script boundaries, because a collapsed scalar string can make `$flags[$i]` index characters and pass a lone `-` or unfiltered duplicate flags to `llama-server`.
+
+## Internal Post-Task Record (2026-06-22, Stage 23 L02 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Runner-only fix met scope and produced dry-run plus 60 second live smoke evidence. The smoke caught two PowerShell array-shape bugs before handoff: filtered Stage 17 flags collapsed to a lone `-`, and helper output polluted the comparison leg array. Adding explicit list decoding and per-leg flag files made the contract auditable.
+
+Improvement outcome candidate:
+- Condition:
+  - When a child PowerShell runner decodes a Base64/JSON server-flag array and then filters or indexes decoded values
+- Action:
+  - Do decode into an explicit typed list and write per-leg flag proof before launch; don't trust helper-returned arrays to stay array-shaped across script boundaries.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Pass server-flag arrays to child PowerShell rows with encoded args.
+- Decision:
+  - Add new. The existing entry covers transport through the wrapper boundary, but not child-side scalar collapse and character indexing after decode.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Decode encoded PowerShell flag arrays into explicit lists".
+
 ## Improvement: Pressure workloads need admit-size proof
 
 Condition:
@@ -1214,6 +1271,42 @@ Condition:
 
 Action:
 - Do first prove a single payload can be admitted under that budget by checking live save size or a short smoke. If the minimum payload is larger than the budget, changing prompt count or identity cannot create demotion pressure; adjust the fixture or workload shape so payloads fit, then run a short smoke long enough to cross the next pressure boundary before documenting the fix.
+
+## Improvement: Protected-root rows need protected-counter proof
+
+Condition:
+- When fixing a protected-root pressure runner with public HTTP prompts or chat messages
+
+Action:
+- Do distinguish generic payload pressure from trusted protected-root pressure. Verify `llamacpp_cache_protected_root_decisions_total`, `cache_protected_root_payload_decisions_total`, protected payload bytes, or protected demotion counters separately from payload eviction/demotion counters. If public requests only produce degraded metadata and protected counters stay zero, document that as a residual review decision instead of claiming full protected-root proof from payload pressure alone.
+
+## Internal Post-Task Record (2026-06-22, Stage 23 S07 pressure-workload fix)
+
+Task completed:
+- Partial.
+
+Effectiveness assessment:
+- The S07 workload fix stayed in runner/docs scope and proved the Qwen3.5 oversize blocker is removed by switching S07 to the small pressure fixture and unique pressure prompts. The smoke admitted entries and produced payload demotions/eviction under 8 MiB with zero oversize rejects. It also exposed a narrower evidence gap: public S07 protected-looking prompts still produce degraded metadata, so protected-root counters remain zero and need Architect disposition before QA rerun acceptance.
+
+Improvement outcome candidate:
+- Condition:
+  - When fixing a protected-root pressure runner with public HTTP prompts or chat messages
+- Action:
+  - Do distinguish generic payload pressure from trusted protected-root pressure; verify protected-root counters separately and document a residual review decision if public degraded metadata keeps them at zero.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Pressure workloads need admit-size proof.
+- Decision:
+  - Add new. The existing rule covers admission-size proof but not protected-root-specific counter proof.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When fixing a protected-root pressure runner with public HTTP prompts or chat messages
+  - Action:
+    - Do distinguish generic payload pressure from trusted protected-root pressure and document residual review scope if protected counters stay zero.
 
 ## Internal Post-Task Record (2026-06-21, Stage 23 S03 product-crash fix)
 
@@ -1235,6 +1328,62 @@ Similar memory check:
   - Windows access violations need symbolized offset triage.
 - Decision:
   - No update. Existing rule already requires Application Error lookup and image-base plus offset symbolization before stopping at the last cache warning.
+
+Memory update:
+- Final improvement outcome stored:
+  - No new or strengthened entry.
+
+## Internal Post-Task Record (2026-06-22, Stage 23 L03 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Runner-only fix replaced a legacy-control longrun with a mixed workload contract and kept docs/evidence in sync. The smoke showed the MTP fixture still reports prompt-evidence profile `checkpoint_dependent` for all public requests, so the artifact needed separate harness prompt-class counts plus distinct token-span/lookup-path counts to prove the row is no longer one repeated absent-control path.
+
+Improvement outcome candidate:
+- Condition:
+  - When a mixed workload runner uses a model fixture whose public prompt-evidence profile can collapse to one model-level profile
+- Action:
+  - Do record harness prompt-class counts and prompt-evidence path diversity, such as token-span checksums or outcome/checksum pairs, in the row artifact; don't rely only on public `profile` labels to prove workload mix.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Mixed workload artifacts need path diversity
+
+Condition:
+- When a mixed workload runner uses a model fixture whose public prompt-evidence profile can collapse to one model-level profile
+
+Action:
+- Do record harness prompt-class counts and prompt-evidence path diversity, such as token-span checksums or outcome/checksum pairs, in the row artifact. Don't rely only on public `profile` labels to prove workload mix.
+
+## Internal Post-Task Record (2026-06-23, Stage 23 final test-results review)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Final S/L review stayed in evidence-review and durable-doc pointer scope. It reconciled split PASS evidence across the initial CUDA restart and focused reruns, verified reviewed runner-contract fixes were followed by fresh PASS reruns, kept S07 and L03 advisories non-blocking because their accepted substitute artifacts were present, and checked report/tracker/index hygiene without rerunning tests or editing product code.
+
+Improvement outcome candidate:
+- Condition:
+  - When a final stage closure review must combine accepted evidence from multiple reruns and prior blocked reports
+- Action:
+  - Do build a row-by-row accepted-evidence table, separate superseded FAIL/BLOCKED reports from accepted PASS reruns, and keep accepted non-blocking advisories visible without reopening the gate.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Test-results review gate classification, Non-gating metric anomalies need explicit follow-up classification, Protected-root rows need protected-counter proof, and Mixed workload artifacts need path diversity.
+- Decision:
+  - No update. Existing entries already cover classification, substitute evidence, non-blocking advisory handling, and mixed-workload diversity.
 
 Memory update:
 - Final improvement outcome stored:

@@ -7,4 +7,5 @@
 !merge-log-*.md
 !stage14-integration-cherry-pick-*.md
 !stage15-benchmark-*.md
+!stage23-*.md
 !coverage-run-*/coverage-report.md
