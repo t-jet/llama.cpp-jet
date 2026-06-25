@@ -222,683 +222,17 @@ static uint32_t server_n_outputs_max(const common_params & params) {
 }
 
 // state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
-enum slot_state {
-    SLOT_STATE_IDLE,
-    SLOT_STATE_WAIT_OTHER, // after assigning a task, but waiting for parent slot to process prompt
-    SLOT_STATE_STARTED,    // after assigning a task and about to process prompt
-    SLOT_STATE_PROCESSING_PROMPT,
-    SLOT_STATE_DONE_PROMPT,
-    SLOT_STATE_GENERATING,
-};
-
 enum server_state {
     SERVER_STATE_LOADING_MODEL,  // Server is starting up, model not fully loaded yet
     SERVER_STATE_READY,          // Server is ready and model is loaded
 };
 
-struct server_slot {
-    int id;
+// server_slot is defined in server-slot.h (included via server-context.h ->
+// server-cache-hybrid.h) so the hybrid cache transaction methods in
+// server-cache-hybrid.cpp can access slot members directly. The full struct
+// was moved out of this file in Stage 25 to enable B-1 routing
+// (tx_save / tx_load / tx_restore / tx_apply_restore).
 
-    llama_context * ctx_tgt = nullptr;
-    llama_context * ctx_dft = nullptr;
-
-    // multimodal
-    mtmd_context * mctx = nullptr;
-
-    // speculative decoding
-    common_speculative * spec;
-
-    llama_tokens spec_draft;
-    llama_tokens spec_prompt;
-    std::vector<int32_t> spec_i_batch;
-    common_prompt_checkpoint spec_ckpt;
-
-    // TODO: move members that belong to the task (such as `generated_text`, `has_new_line`) to task_results_state
-    //       see https://github.com/ggml-org/llama.cpp/pull/18283#issuecomment-3710175837
-    std::unique_ptr<const server_task> task;
-    std::unique_ptr<const server_task> task_prev; // used for debugging
-
-    // used to determine the slot that has been used the longest
-    int64_t t_last_used = -1;
-
-    // generation props
-    int32_t n_ctx       = 0;  // context size per slot
-    int32_t n_keep      = 0;
-    int32_t n_decoded   = 0;
-    int32_t n_remaining = -1;
-    int32_t i_batch     = -1;
-
-    int32_t n_prompt_tokens_cache     = 0;
-    int32_t n_prompt_tokens_processed = 0;
-    bool    hybrid_cache_restored     = false;
-
-    size_t last_nl_pos = 0;
-
-    std::string  generated_text;
-    std::string  debug_generated_text;
-    llama_tokens generated_tokens;
-
-    std::vector<completion_token_output> generated_token_probs;
-
-    bool has_next_token = true;
-    bool has_new_line   = false;
-    bool truncated      = false;
-
-    stop_type stop;
-
-    std::string stopping_word;
-
-    // state
-    slot_state state = SLOT_STATE_IDLE;
-
-    server_prompt prompt;
-    prepared_prompt_metadata prompt_metadata;
-    bool checkpoints_enabled = true;
-    uint64_t hybrid_cache_branch_node_id = 0;
-
-    static size_t checkpoints_size(const server_prompt & src_prompt) {
-        size_t total = 0;
-        for (const auto & ckpt : src_prompt.checkpoints) {
-            total += ckpt.size();
-        }
-        return total;
-    }
-
-    size_t trim_checkpoints(server_prompt & dst_prompt, size_t max_bytes, const char * reason) const {
-        size_t total = checkpoints_size(dst_prompt);
-        size_t removed = 0;
-
-        while (dst_prompt.checkpoints.size() > 1 && total > max_bytes) {
-            const auto & cur = dst_prompt.checkpoints.front();
-
-            SLT_WRN(*this,
-                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                    reason,
-                    cur.pos_min,
-                    cur.pos_max,
-                    cur.n_tokens,
-                    (float) cur.size() / 1024 / 1024);
-
-            total -= cur.size();
-            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
-            removed++;
-        }
-
-        return removed;
-    }
-
-    size_t trim_checkpoints_for_allocation(server_prompt & dst_prompt, size_t max_bytes, size_t reserve_bytes, const char * reason) const {
-        if (max_bytes == 0 || reserve_bytes == 0) {
-            return 0;
-        }
-
-        size_t total = checkpoints_size(dst_prompt);
-        size_t removed = 0;
-
-        while (!dst_prompt.checkpoints.empty() && total + reserve_bytes > max_bytes) {
-            const auto & cur = dst_prompt.checkpoints.front();
-
-            SLT_WRN(*this,
-                    "erasing old context checkpoint due to %s limit (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                    reason,
-                    cur.pos_min,
-                    cur.pos_max,
-                    cur.n_tokens,
-                    (float) cur.size() / 1024 / 1024);
-
-            total -= cur.size();
-            dst_prompt.checkpoints.erase(dst_prompt.checkpoints.begin());
-            removed++;
-        }
-
-        return removed;
-    }
-
-    void disable_checkpoints(const char * reason) {
-        if (checkpoints_enabled) {
-            checkpoints_enabled = false;
-
-            const size_t n_cleared = prompt.checkpoints.size();
-            prompt.checkpoints.clear();
-            spec_ckpt.clear();
-
-            SLT_WRN(*this,
-                    "disabling further context checkpoints for this task after %s; cleared %zu saved checkpoints\n",
-                    reason,
-                    n_cleared);
-        }
-    }
-
-    bool checkpoint_update_tgt(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
-        if (ctx_tgt == nullptr) {
-            return true;
-        }
-
-        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_tgt, id, flags);
-
-        try {
-            ckpt.data_tgt.resize(ckpt_size);
-        } catch (const std::bad_alloc & e) {
-            SLT_ERR(*this, "failed to allocate target checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
-            ckpt.clear_tgt();
-            return false;
-        }
-
-        const size_t n = llama_state_seq_get_data_ext(ctx_tgt, ckpt.data_tgt.data(), ckpt_size, id, flags);
-        if (n != ckpt_size) {
-            SLT_ERR(*this, "failed to save target checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
-            ckpt.clear_tgt();
-            return false;
-        }
-
-        return true;
-    }
-
-    bool checkpoint_update_dft(common_prompt_checkpoint & ckpt, llama_state_seq_flags flags) const {
-        if (ctx_dft == nullptr) {
-            return true;
-        }
-
-        const size_t ckpt_size = llama_state_seq_get_size_ext(ctx_dft, id, flags);
-
-        try {
-            ckpt.data_dft.resize(ckpt_size);
-        } catch (const std::bad_alloc & e) {
-            SLT_ERR(*this, "failed to allocate draft checkpoint state (%zu bytes): %s\n", ckpt_size, e.what());
-            ckpt.clear_dft();
-            return false;
-        }
-
-        const size_t n = llama_state_seq_get_data_ext(ctx_dft, ckpt.data_dft.data(), ckpt_size, id, flags);
-        if (n != ckpt_size) {
-            SLT_ERR(*this, "failed to save draft checkpoint state: expected %zu bytes, got %zu\n", ckpt_size, n);
-            ckpt.clear_dft();
-            return false;
-        }
-
-        return true;
-    }
-
-    bool prompt_save(server_prompt_cache & prompt_cache, bool move_metadata = false) {
-        GGML_ASSERT(prompt.data.size() == 0);
-
-        const size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        const size_t cur_size_dft = ctx_dft ? llama_state_seq_get_size_ext(ctx_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-
-        const size_t cur_size = cur_size_tgt + cur_size_dft;
-
-        SRV_WRN(" - saving prompt with length %d, total state size = %.3f MiB (draft: %.3f MiB)\n",
-                (int) prompt.tokens.size(), cur_size / (1024.0 * 1024.0), cur_size_dft / (1024.0 * 1024.0));
-
-        auto * cur = prompt_cache.alloc(prompt, cur_size_tgt, cur_size_dft);
-        if (cur == nullptr) {
-            return false;
-        }
-
-        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (n_tgt != cur_size_tgt) {
-            SLT_ERR(*this, "failed to save target state: expected %zu bytes, got %zu\n", cur_size_tgt, n_tgt);
-            prompt_cache.discard(cur);
-            return false;
-        }
-
-        if (ctx_dft) {
-            const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
-            if (n_dft != cur_size_dft) {
-                SLT_ERR(*this, "failed to save draft state: expected %zu bytes, got %zu\n", cur_size_dft, n_dft);
-                prompt_cache.discard(cur);
-                return false;
-            }
-        }
-
-        if (move_metadata) {
-            cur->tokens = std::move(prompt.tokens);
-            cur->checkpoints = std::move(prompt.checkpoints);
-        } else {
-            cur->tokens = prompt.tokens.clone();
-            cur->checkpoints = prompt.checkpoints;
-        }
-
-        trim_checkpoints(*cur, cur_size, "prompt cache checkpoint memory");
-
-        return true;
-    }
-
-    bool prompt_load(server_prompt_cache & prompt_cache, const server_tokens & tokens) {
-        bool res = prompt_cache.load(prompt, tokens, ctx_tgt, ctx_dft, id);
-        if (!res) {
-            SLT_WRN(*this, "%s", "failed to load prompt from cache\n");
-        }
-
-        return res;
-    }
-
-    void prompt_clear(bool allow_processing) {
-        if (!allow_processing) {
-            GGML_ASSERT(!is_processing());
-        }
-
-        SLT_INF(*this, "clearing prompt with %zu tokens\n", prompt.tokens.size());
-
-        common_context_seq_rm(ctx_tgt, id, -1, -1);
-        if (ctx_dft) {
-            common_context_seq_rm(ctx_dft, id, -1, -1);
-        }
-
-        prompt.tokens.clear();
-        prompt_metadata.clear();
-        hybrid_cache_restored = false;
-        if (hybrid_cache_branch_node_id != 0) {
-            if (callback_on_branch_ref_release) {
-                callback_on_branch_ref_release(hybrid_cache_branch_node_id);
-            }
-            hybrid_cache_branch_node_id = 0;
-        }
-    }
-
-    std::vector<common_adapter_lora_info> lora;
-    int32_t alora_invocation_start = -1;
-
-    // sampling
-    json json_schema;
-
-    common_sampler_ptr smpl;
-
-    llama_token sampled; // in speculative mode, this is the last accepted token
-
-    // stats
-    size_t n_sent_text = 0; // number of sent text character
-
-    int64_t t_print_last = 0;
-    int64_t t_start_process_prompt;
-    int64_t t_start_generation;
-
-    double t_prompt_processing = 0.0; // ms
-    double t_token_generation = 0.0;  // ms
-
-    std::function<void(int /* id_slot */)> callback_on_release;
-    std::function<void(uint64_t /* node_id */)> callback_on_branch_ref_release;
-
-    // Speculative decoding stats
-    int32_t n_draft_total = 0;      // Total draft tokens generated
-    int32_t n_draft_accepted = 0;   // Draft tokens actually accepted
-
-    void reset() {
-        SLT_DBG(*this, "%s", "\n");
-
-        n_prompt_tokens_cache = 0;
-        hybrid_cache_restored = false;
-
-        last_nl_pos    = 0;
-        generated_text = "";
-        has_new_line   = false;
-        truncated      = false;
-        stop           = STOP_TYPE_NONE;
-        stopping_word  = "";
-        n_sent_text    = 0;
-        checkpoints_enabled = true;
-
-        if (can_speculate()) {
-            spec_draft.clear();
-            spec_i_batch.clear();
-            spec_ckpt.clear();
-        }
-        generated_tokens.clear();
-        generated_token_probs.clear();
-        json_schema = json();
-
-        // clear speculative decoding stats
-        n_draft_total = 0;
-        n_draft_accepted = 0;
-
-        task_prev = std::move(task);
-        task.reset();
-
-        llama_set_sampler(ctx_tgt, id, nullptr);
-
-        // clear alora start
-        alora_invocation_start = -1;
-    }
-
-    void init_sampler() const {
-        common_sampler_reset(smpl.get());
-
-        if (!task->need_sampling()) {
-            return;
-        }
-
-        const int64_t t_start = ggml_time_us();
-
-        int n_text = 0;
-
-        for (int i = 0; i < (int) prompt.tokens.size(); i++) {
-            const llama_token id = prompt.tokens[i];
-
-            if (id != LLAMA_TOKEN_NULL) {
-                common_sampler_accept(smpl.get(), id, false);
-                n_text++;
-            }
-        }
-
-        SLT_TRC(*this, "init sampler, took %0.2f ms, tokens: text = %d, total = %d\n",
-                (ggml_time_us() - t_start) / 1000.0, n_text, (int) prompt.tokens.size());
-    }
-
-    bool need_embd() const {
-        GGML_ASSERT(task);
-        return task->need_embd() ||
-            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_nextn(spec)));
-    }
-
-    bool need_embd_nextn() const {
-        GGML_ASSERT(task);
-        return spec && common_speculative_need_embd_nextn(spec);
-    }
-
-    // if the context does not have a memory module then all embeddings have to be computed within a single ubatch
-    // also we cannot split if the pooling would require any past tokens
-    // (MTP supports splitting — uses task->need_embd() not need_embd())
-    bool can_split() const {
-        GGML_ASSERT(task);
-
-        return
-            !task->need_embd() ||
-            (llama_get_memory(ctx_tgt) && llama_pooling_type(ctx_tgt) == LLAMA_POOLING_TYPE_LAST);
-    }
-
-    bool can_batch_with(server_slot & other_slot) const {
-        GGML_ASSERT(task);
-
-        return task->type == other_slot.task->type && are_lora_equal(lora, other_slot.lora);
-    }
-
-    bool has_budget(const common_params & global_params) {
-        GGML_ASSERT(task);
-
-        if (task->params.n_predict == -1 && global_params.n_predict == -1) {
-            return true; // limitless
-        }
-
-        n_remaining = -1;
-
-        if (task->params.n_predict != -1) {
-            n_remaining = task->params.n_predict - n_decoded;
-        } else if (global_params.n_predict != -1) {
-            n_remaining = global_params.n_predict - n_decoded;
-        }
-
-        return n_remaining > 0; // no budget
-    }
-
-    bool is_processing() const {
-        return state != SLOT_STATE_IDLE;
-    }
-
-    bool can_speculate() const {
-        return !!spec;
-    }
-
-    void add_token(const completion_token_output & token) {
-        if (!is_processing()) {
-            SLT_WRN(*this, "%s", "slot is not processing\n");
-            return;
-        }
-
-        generated_token_probs.push_back(token);
-    }
-
-    int get_n_draft_max() const {
-        GGML_ASSERT(task);
-
-        if (!can_speculate()) {
-            return 0;
-        }
-
-        // determine the max draft that fits the current slot state
-        // note: slot.prompt is not yet expanded with the `id` token sampled above
-        //       also, need to leave space for 1 extra token to allow context shifts
-        int n_draft_max = n_ctx - prompt.n_tokens() - 2;
-
-        if (n_remaining > 0) {
-            n_draft_max = std::min(n_draft_max, n_remaining - 1);
-        }
-
-        SLT_DBG(*this, "max possible draft: %d\n", n_draft_max);
-
-        return n_draft_max;
-    }
-
-    void update_batch(llama_batch & batch) {
-        if (spec_draft.empty()) {
-            // no speculative decoding
-            i_batch = batch.n_tokens;
-
-            common_batch_add(batch, sampled, prompt.tokens.pos_next(), { this->id }, true);
-
-            SLT_DBG(*this, "slot decode token, id=%d, n_ctx = %d, n_tokens = %d, truncated = %d\n",
-                    sampled, n_ctx, prompt.n_tokens(), truncated);
-        } else {
-            SLT_DBG(*this, "generate_draft: id=%d, #tokens=%zu, #draft=%zu, pos_next=%d\n",
-                    sampled, prompt.tokens.size(), spec_draft.size(), prompt.tokens.pos_next());
-
-            GGML_ASSERT(spec_i_batch.empty());
-
-            spec_i_batch.push_back(batch.n_tokens);
-            for (size_t i = 0; i < spec_draft.size(); i++) {
-                spec_i_batch.push_back(batch.n_tokens + i + 1);
-            }
-
-            auto pos0 = prompt.tokens.pos_next();
-
-            common_batch_add(batch, sampled, pos0++, { this->id }, true);
-            for (auto token : spec_draft) {
-                common_batch_add(batch, token, pos0++, { this->id }, true);
-            }
-        }
-
-        prompt.tokens.push_back(sampled);
-        prompt.tokens.insert(spec_draft);
-    }
-
-    void release() {
-        if (is_processing()) {
-            GGML_ASSERT(task);
-
-            SLT_INF(*this, "stop processing: n_tokens = %d, truncated = %d\n", prompt.n_tokens(), truncated);
-
-            t_last_used        =  ggml_time_us();
-            t_token_generation = (ggml_time_us() - t_start_generation) / 1e3;
-
-            state = SLOT_STATE_IDLE;
-
-            // do not keep context of the child slots - the parent's context is enough
-            if (task->is_child()) {
-                prompt_clear(false);
-            }
-
-            reset();
-
-            callback_on_release(id);
-        }
-    }
-
-    result_timings get_timings() const {
-        result_timings timings;
-        timings.cache_n = n_prompt_tokens_cache;
-
-        timings.prompt_n            = n_prompt_tokens_processed;
-        timings.prompt_ms           = t_prompt_processing;
-        timings.prompt_per_token_ms = t_prompt_processing / n_prompt_tokens_processed;
-        timings.prompt_per_second   = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
-
-        timings.predicted_n            = n_decoded;
-        timings.predicted_ms           = t_token_generation;
-        timings.predicted_per_token_ms = t_token_generation / n_decoded;
-        timings.predicted_per_second   = 1e3 / t_token_generation * n_decoded;
-
-        // Add speculative metrics
-        if (n_draft_total > 0) {
-            timings.draft_n          = n_draft_total;
-            timings.draft_n_accepted = n_draft_accepted;
-        }
-
-        return timings;
-    }
-
-    size_t find_stopping_strings(const std::string & text, const size_t last_token_size, bool is_full_stop) {
-        GGML_ASSERT(task);
-
-        size_t stop_pos = std::string::npos;
-
-        for (const std::string & word : task->params.antiprompt) {
-            size_t pos;
-
-            if (is_full_stop) {
-                const size_t tmp      = word.size() + last_token_size;
-                const size_t from_pos = text.size() > tmp ? text.size() - tmp : 0;
-
-                pos = text.find(word, from_pos);
-            } else {
-                // otherwise, partial stop
-                pos = string_find_partial_stop(text, word);
-            }
-
-            if (pos != std::string::npos && (stop_pos == std::string::npos || pos < stop_pos)) {
-                if (is_full_stop) {
-                    stop           = STOP_TYPE_WORD;
-                    stopping_word  = word;
-                    has_next_token = false;
-                }
-                stop_pos = pos;
-            }
-        }
-
-        return stop_pos;
-    }
-
-    void print_timings_tg() {
-        if (n_decoded < 100) {
-            return;
-        }
-
-        const int64_t t_now = ggml_time_us();
-
-        if (t_now - t_print_last < 3*1000*1000) {
-            return;
-        }
-
-        t_print_last = t_now;
-
-        const double n_gen_second = 1e3 / t_token_generation * n_decoded;
-
-        SLT_INF(*this, "n_decoded = %6d, tg = %6.2f t/s\n", n_decoded, n_gen_second);
-    }
-
-    void print_timings_pp() const {
-        const double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
-        const double f_progress = (float) prompt.n_tokens() / task->n_tokens();
-
-        if (t_prompt_processing < 3000.0) {
-            return;
-        }
-
-        SLT_INF(*this, "prompt processing, n_tokens = %6d, progress = %.2f, t = %6.2f s / %.2f tokens per second\n",
-                n_prompt_tokens_processed, f_progress, t_prompt_processing / 1e3, n_prompt_second);
-    }
-
-    void print_timings() const {
-        const double t_prompt        =       t_prompt_processing / n_prompt_tokens_processed;
-        const double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
-
-        const double t_gen        =       t_token_generation / n_decoded;
-        const double n_gen_second = 1e3 / t_token_generation * n_decoded;
-
-        SLT_INF(*this,
-                "prompt eval time = %10.2f ms / %5d tokens (%8.2f ms per token, %8.2f tokens per second)\n",
-                t_prompt_processing, n_prompt_tokens_processed, t_prompt, n_prompt_second);
-
-        SLT_INF(*this,
-                "       eval time = %10.2f ms / %5d tokens (%8.2f ms per token, %8.2f tokens per second)\n",
-                t_token_generation, n_decoded, t_gen, n_gen_second);
-
-        SLT_INF(*this,
-                "      total time = %10.2f ms / %5d tokens\n",
-                t_prompt_processing + t_token_generation, n_prompt_tokens_processed + n_decoded);
-
-        SLT_INF(*this,
-                "   graphs reused = %10d\n",
-                llama_perf_context(ctx_tgt).n_reused);
-
-        if (n_draft_total > 0) {
-            const float draft_ratio = (float) n_draft_accepted / n_draft_total;
-            SLT_INF(*this,
-                    "draft acceptance = %0.5f (%5d accepted / %5d generated)\n",
-                    draft_ratio, n_draft_accepted, n_draft_total);
-        }
-
-        common_speculative_print_stats(spec);
-    }
-
-    json to_json(bool only_metrics = false) const {
-        json res;
-
-        res = {
-            {"id",            id},
-            {"n_ctx",         n_ctx},
-            {"speculative",   can_speculate()},
-            {"is_processing", is_processing()},
-        };
-
-        const auto & ptask = task ? task : task_prev;
-
-        if (ptask) {
-            res["id_task"] = ptask->id;
-            res["n_prompt_tokens"]           = (int32_t) prompt.tokens.size();
-            res["n_prompt_tokens_processed"] = n_prompt_tokens_processed;
-            res["n_prompt_tokens_cache"]     = n_prompt_tokens_cache;
-            res["params"] = ptask->params.to_json(only_metrics);
-            res["next_token"] = {
-                {
-                    {"has_next_token", has_next_token},
-                    {"has_new_line",   has_new_line},
-                    {"n_remain",       n_remaining},
-                    {"n_decoded",      n_decoded},
-                }
-            };
-
-            if (!only_metrics) {
-                res["prompt"] = ptask->tokens.detokenize(ctx_tgt, true);
-                res["generated"] = generated_text.empty() ? debug_generated_text : generated_text;
-            }
-        }
-
-        return res;
-    }
-
-    void copy_state_to(server_slot & other) const {
-        GGML_ASSERT(state == SLOT_STATE_DONE_PROMPT);
-
-        common_context_seq_rm(ctx_tgt, other.id,     -1, -1);
-        common_context_seq_cp(ctx_tgt, id, other.id, -1, -1);
-
-        if (ctx_dft) {
-            common_context_seq_rm(ctx_dft, other.id,     -1, -1);
-            common_context_seq_cp(ctx_dft, id, other.id, -1, -1);
-        }
-
-        other.n_decoded   = n_decoded;
-        other.n_remaining = n_remaining;
-        other.i_batch     = i_batch;
-
-        other.t_start_process_prompt    = t_start_process_prompt;
-        other.t_prompt_processing       = t_prompt_processing;
-        other.n_prompt_tokens_cache     = n_prompt_tokens_cache;
-        other.n_prompt_tokens_processed = n_prompt_tokens_processed;
-
-        other.prompt = prompt.clone();
-        other.init_sampler();
-    }
-};
 
 
 
@@ -6360,353 +5694,35 @@ bool hybrid_cache_controller::acquire_branch_node_ref_for_slot(server_slot & slo
 }
 
 bool hybrid_cache_controller::save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) {
-    if (slot.prompt.tokens.empty()) {
-        SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
-        return false;
-    }
-
-    const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    const size_t total_size = state_size_tgt + state_size_dft;
-    const bool protected_root = !metadata.degraded() &&
-        (metadata.protect_system || metadata.protect_messages ||
-         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
-             return boundary.protect;
-         }));
-    const std::string namespace_id = compute_namespace_id(metadata);
-
-    SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
-            slot.id,
-            slot.prompt.tokens.size(),
-            total_size / (1024.0 * 1024.0),
-            state_size_tgt / (1024.0 * 1024.0),
-            state_size_dft / (1024.0 * 1024.0));
-
-    const bool runtime_has_draft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-
-    if (ctx_tgt && state_size_tgt == 0) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
-        return false;
-    }
-
-    if (runtime_has_draft && state_size_dft == 0) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
-        n_pairing_violations++;
-        return false;
-    }
-
-    if (hot_payload_budget_enabled() && total_size > limit_size) {
-        if (protected_root) {
-            n_protected_root_decisions++;
-            n_protected_root_admission_rejections++;
-        }
-        SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
-                namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
-        return false;
-    }
-
-    // Stage 21 fix: save only the prompt tokens, not the full slot (prompt + generated)
-    // slot.task->tokens contains the original prompt tokens submitted by the user
-    // slot.prompt.tokens has accumulated all tokens including those generated during completion
-    if (!slot.task) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because task is null\n");
-        return false;
-    }
-    server_tokens entry_tokens = slot.task->tokens.clone();
-
-    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
-    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
-        n_cache_equivalent_branch_deduplications++;
-        refresh_existing_entry(existing, protected_root);
-        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
-        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
-                entry_tokens.size(), namespace_id.c_str());
-        return true;
-    }
-
-    std::vector<uint8_t> target_payload;
-    std::vector<uint8_t> draft_payload;
-
-    if (ctx_tgt && state_size_tgt > 0) {
-        try {
-            target_payload.resize(state_size_tgt);
-        } catch (const std::bad_alloc & e) {
-            SRV_ERR(" - hybrid cache: failed to allocate target state buffer (%zu bytes): %s\n", state_size_tgt, e.what());
-            return false;
-        }
-
-        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_payload.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (n_tgt != state_size_tgt) {
-            SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
-            return false;
-        }
-    }
-
-    if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
-        try {
-            draft_payload.resize(state_size_dft);
-        } catch (const std::bad_alloc & e) {
-            SRV_ERR(" - hybrid cache: failed to allocate draft state buffer (%zu bytes): %s\n", state_size_dft, e.what());
-            return false;
-        }
-
-        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_payload.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (n_dft != state_size_dft) {
-            SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
-            return false;
-        }
-    }
-
-    std::string descriptor_failure;
-    if (existing != entries.end()) {
-        n_cache_equivalent_branch_deduplications++;
-        if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
-            SRV_WRN(" - hybrid cache: metadata-only re-materialization rejected (%s)\n", descriptor_failure.c_str());
-            return false;
-        }
-        existing->protected_root = existing->protected_root || protected_root;
-        existing->checkpoints.clear();
-        existing->metadata = metadata;
-        if (!slot.prompt.checkpoints.empty()) {
-            std::string checkpoint_failure;
-            if (!admit_latest_checkpoint_and_store_metadata(*existing, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
-                SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
-            }
-        }
-        sync_branch_node_from_entry(*existing);
-        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
-        SRV_INF(" - hybrid cache: re-materialized slot %d (namespace: %s, entries: %zu)\n",
-                slot.id, existing->namespace_id.c_str(), entries.size());
-        return true;
-    }
-
-    const uint64_t parent_node_id = select_mismatch_parent_for_admission(entry_tokens, namespace_id);
-    auto it_new = admit_entry_with_payload(
-        std::move(entry_tokens),
-        metadata,
-        namespace_id,
-        protected_root,
-        std::move(target_payload),
-        std::move(draft_payload),
-        runtime_has_draft,
-        parent_node_id,
-        &descriptor_failure);
-    if (it_new == entries.end()) {
-        SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
-        return false;
-    }
-    it_new->checkpoints.clear();
-    if (!slot.prompt.checkpoints.empty()) {
-        std::string checkpoint_failure;
-        if (!admit_latest_checkpoint_and_store_metadata(*it_new, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
-            SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
-        }
-    }
-    acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
-
-    SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
-            slot.id, it_new->namespace_id.c_str(), entries.size());
-
-    return true;
+    // Stage 25: route the slot lifecycle through the canonical transactional
+    // entry point. tx_save acquires cache_state_mutex_ once and runs the
+    // save body inline; this delegates atomicity ownership to the controller
+    // per design Part 3 row 19.
+    return tx_save(slot, metadata);
 }
 
 // Non-destructive cache restore for hybrid mode
+// Stage 25: split into tx_restore (planning under lock) + apply-outside-lock
+// (llama_context mutation) + tx_apply_restore (finalize under lock) per
+// OQ-25-01 SPLIT. tx_restore owns atomicity for cache-state mutations;
+// the apply step is bounded by disk I/O time only, not by the cache-state
+// mutex.
 // This method attempts to load a matching cache entry without requiring the slot to be cleared first
 // Returns true if a match was found and successfully restored
 bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const server_task & task) {
-    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
-    const cache_workload_profile profile = detect_workload_profile();
-    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-    const bool runtime_has_draft = need_dft;
-    const payload_pair_state pair_state = runtime_has_draft ?
-        payload_pair_state::target_and_draft :
-        payload_pair_state::target_only;
-    record_workload_profile(profile);
-    
-    SRV_DBG(" - hybrid cache: try_restore - looking up %zu tokens in namespace %s\n",
-            task.tokens.size(), lookup_namespace_id.c_str());
-
-    record_branch_lookup(lookup_namespace_id, "token_span");
-    
-    const auto lookup_tokens = cache_tokens_to_vector(task.tokens);
-    auto forest_candidates = forest.find_nodes_by_token_span(lookup_namespace_id, lookup_tokens, lookup_tokens.size());
-    std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
-    for (const auto & boundary : task.prompt_metadata.boundaries) {
-        if (boundary.token_start != 0 || boundary.checksum == 0 || boundary.token_end == 0 ||
-            boundary.token_end > lookup_tokens.size()) {
-            continue;
-        }
-        record_branch_lookup(lookup_namespace_id, "checksum_span");
-        auto checksum_candidates = forest.find_nodes_by_checksum_span(
-            lookup_namespace_id, boundary.checksum, boundary.token_end);
-        for (uint64_t node_id : checksum_candidates) {
-            if (seen_candidates.insert(node_id).second) {
-                forest_candidates.push_back(node_id);
-            }
-        }
-    }
-    std::vector<uint64_t> compatible_candidates;
-    for (uint64_t node_id : forest_candidates) {
-        auto it = find_entry_by_branch_node(node_id);
-        if (it == entries.end()) {
-            continue;
-        }
-        if (!validate_namespace_compatibility(lookup_namespace_id, it->namespace_id)) {
-            n_namespace_validation_failures++;
-            SRV_DBG("%s", " - hybrid cache: try_restore - skipping entry with different namespace\n");
-            continue;
-        }
-        n_namespace_validation_passes++;
-        compatible_candidates.push_back(node_id);
-
-        const int common_prefix = it->tokens.get_common_prefix(task.tokens);
-        
-        // For hybrid cache, we need the entire task prompt to match the entry prefix
-        // The entry may have more tokens (continuation), but the task prompt must be fully contained
-        if (common_prefix == (int)task.tokens.size()) {
-            SRV_INF(" - hybrid cache: try_restore - found match: task %d tokens, entry %d tokens, prefix %d\n", 
-                    (int)task.tokens.size(), it->n_tokens(), common_prefix);
-        } else {
-            SRV_DBG(" - hybrid cache: try_restore - partial match %d tokens (entry: %d, task: %zu)\n",
-                    common_prefix, it->n_tokens(), task.tokens.size());
-        }
-    }
-    std::list<hybrid_cache_entry>::iterator it_best =
-        select_restore_candidate(compatible_candidates, task.tokens, profile);
-
-    if (it_best == entries.end()) {
-        SRV_INF("%s", " - hybrid cache: try_restore - no exact match found\n");
-        n_misses++;
-        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
-        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
-        const cache_restore_miss_reason reason = prefix_candidate ?
-            cache_restore_miss_reason::unsafe_prefix_rejected :
-            classify_restore_miss(task.tokens, lookup_namespace_id);
-        record_restore_miss(reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
-        return false;
-    }
-    n_branch_lookup_hits++;
-
-    if (it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
-        SRV_INF(" - hybrid cache: try_restore - prefix candidate rejected by Stage 17 policy (entry tokens: %d, task tokens: %zu)\n",
-                it_best->n_tokens(), task.tokens.size());
-        n_misses++;
-        record_restore_miss(cache_restore_miss_reason::unsafe_prefix_rejected, profile, pair_state, task, lookup_namespace_id, &(*it_best));
+    cache_response plan = tx_restore(slot, task);
+    if (!plan.found) {
         return false;
     }
 
-    // Exact match found - restore state
-    int match_len = it_best->n_tokens();
-    SRV_INF(" - hybrid cache: try_restore - restoring %d tokens (namespace: %s, use_count: %zu)\n",
-            match_len, it_best->namespace_id.c_str(), it_best->use_count);
+    // === Apply step (OUTSIDE cache_state_mutex_ per OQ-25-01 SPLIT) ===
+    // Mutates llama_context inference state and slot prompt state.
+    // The cache_state_mutex_ is not held during this section so other
+    // slot transactions can proceed; the cache-state finalize runs
+    // under lock at the end via tx_apply_restore.
 
-    const hot_payload_record * payload = nullptr;
-    std::string restore_failure;
-    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
-    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    if (profile == cache_workload_profile::checkpoint_dependent &&
-        selected_payload_kind == payload_kind::checkpoint) {
-        std::string checkpoint_path_failure;
-        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
-            n_misses++;
-            n_fallback_restores++;
-            SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent restore rejected (%s)\n",
-                    checkpoint_path_failure.c_str());
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        selected_payload_kind = payload_kind::checkpoint;
-        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    }
-
-    const uint64_t selected_node_id = it_best->branch_node_id;
-    bool metadata_validation_mismatch = false;
-    bool metadata_source_unavailable = false;
-    auto restore_source = select_restore_source_for_metadata_only(
-        it_best, lookup_namespace_id, lookup_tokens, &metadata_validation_mismatch, &metadata_source_unavailable);
-    if (metadata_validation_mismatch) {
-        n_cache_validation_mismatches++;
-        n_cache_mismatch_parent_selections++;
-        n_misses++;
-        SRV_WRN(" - hybrid cache: try_restore - metadata-only validation mismatch (namespace: %s, selected node: %" PRIu64 ")\n",
-                lookup_namespace_id.c_str(), selected_node_id);
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    if (metadata_source_unavailable || restore_source == entries.end()) {
-        n_misses++;
-        SRV_DBG(" - hybrid cache: try_restore - metadata-only source payload is unavailable (namespace: %s, selected node: %" PRIu64 ")\n",
-                lookup_namespace_id.c_str(), selected_node_id);
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    if (restore_source != it_best) {
-        const uint64_t source_node_id = restore_source->branch_node_id;
-        it_best = restore_source;
-        selected_payload_kind = select_restore_payload_kind(*it_best, profile);
-        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-        if (profile == cache_workload_profile::checkpoint_dependent &&
-            selected_payload_kind == payload_kind::checkpoint) {
-            std::string checkpoint_path_failure;
-            if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
-                n_misses++;
-                n_fallback_restores++;
-                SRV_WRN(" - hybrid cache: try_restore - checkpoint-dependent source rejected (%s)\n",
-                        checkpoint_path_failure.c_str());
-                record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-                return false;
-            }
-            selected_payload_kind = payload_kind::checkpoint;
-            selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-        }
-        SRV_INF(" - hybrid cache: try_restore - using source payload node %" PRIu64 " to re-materialize metadata-only node %" PRIu64 " after prompt replay\n",
-                source_node_id, selected_node_id);
-    }
-    match_len = it_best->n_tokens();
-
-    // Phase 6: Check if the payload is in cold state - attempt promotion
-    auto descriptor_it = payload_descriptors.find(selected_payload_id);
-    if (descriptor_it != payload_descriptors.end()) {
-        if (descriptor_it->second.residency == payload_residency_state::cold) {
-            SRV_INF(" - hybrid cache: try_restore - payload %" PRIu64 " is cold, initiating promotion\n",
-                    selected_payload_id);
-            promote_payload(selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
-            // Promotion is asynchronous; return false (cache miss) since payload isn't available yet
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        if (descriptor_it->second.residency == payload_residency_state::promoting) {
-            SRV_WRN(" - hybrid cache: try_restore - payload %" PRIu64 " is promoting, cannot restore yet\n",
-                    selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-    }
-
-    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
-        SRV_ERR(" - hybrid cache: try_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
-        if (selected_payload_kind == payload_kind::checkpoint) {
-            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
-            if (failed_descriptor_it != payload_descriptors.end()) {
-                record_checkpoint_restore(failed_descriptor_it->second, false);
-            } else {
-                n_checkpoint_restore_failures++;
-            }
-        }
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
-    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
-
+    // Snapshot pre-state for rollback. Reads llama_context + slot
+    // state, neither of which is cache state, so no lock required.
     server_prompt prompt_before = slot.prompt.clone();
     const int cache_before = slot.n_prompt_tokens_cache;
     const int processed_before = slot.n_prompt_tokens_processed;
@@ -6722,7 +5738,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot target state\n");
             n_restore_failures++;
             n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            tx_apply_restore(slot, plan, false);
             return false;
         }
     }
@@ -6733,7 +5749,7 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to snapshot draft state\n");
             n_restore_failures++;
             n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            tx_apply_restore(slot, plan, false);
             return false;
         }
     }
@@ -6746,14 +5762,14 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore target state\n");
         n_restore_failures++;
         n_fallback_restores++;
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+        tx_apply_restore(slot, plan, false);
         return false;
     }
     if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
         SRV_ERR("%s", " - hybrid cache: try_restore - cannot clear empty pre-restore draft state\n");
         n_restore_failures++;
         n_fallback_restores++;
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+        tx_apply_restore(slot, plan, false);
         return false;
     }
     const auto rollback_restore = [&]() {
@@ -6781,318 +5797,72 @@ bool hybrid_cache_controller::try_restore_from_cache(server_slot & slot, const s
         }
     };
 
-    // Restore target state
-    if (ctx_tgt && !payload->target.empty()) {
+    // Apply target state from plan.target_bytes (captured under lock by tx_restore)
+    if (ctx_tgt && !plan.target_bytes.empty()) {
         const size_t n_tgt = llama_state_seq_set_data_ext(
             ctx_tgt,
-            payload->target.data(),
-            payload->target.size(),
+            plan.target_bytes.data(),
+            plan.target_bytes.size(),
             slot.id,
-            restore_flags);
+            plan.restore_flags);
 
-        if (n_tgt != payload->target.size()) {
+        if (n_tgt != plan.target_bytes.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore target state\n");
             rollback_restore();
             n_restore_failures++;
             n_restore_target_apply_failures++;
             n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            tx_apply_restore(slot, plan, false);
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored target state (%zu bytes)\n", n_tgt);
     }
 
-    // Restore draft state
-    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
+    // Apply draft state from plan.draft_bytes
+    if (ctx_dft && slot.ctx_dft && !plan.draft_bytes.empty()) {
         const size_t n_dft = llama_state_seq_set_data_ext(
             ctx_dft,
-            payload->draft.data(),
-            payload->draft.size(),
+            plan.draft_bytes.data(),
+            plan.draft_bytes.size(),
             slot.id,
-            restore_flags);
+            plan.restore_flags);
 
-        if (n_dft != payload->draft.size()) {
+        if (n_dft != plan.draft_bytes.size()) {
             SRV_ERR("%s", " - hybrid cache: try_restore - failed to restore draft state\n");
             rollback_restore();
             n_restore_failures++;
             n_restore_draft_apply_failures++;
             n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            tx_apply_restore(slot, plan, false);
             return false;
         }
         SRV_DBG(" - hybrid cache: try_restore - restored draft state (%zu bytes)\n", n_dft);
     }
 
-    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
-    it_best->mark_used(next_use_sequence());
-    sync_branch_node_from_entry(*it_best);
-    update_lru_index(it_best, old_key);
-    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
-
-    // Update slot state with restored data
-    slot.prompt.tokens = it_best->tokens.clone();
-    slot.prompt.tokens.keep_first(std::min<size_t>(restored_token_count, it_best->tokens.size()));
-
-    slot.prompt.checkpoints = it_best->checkpoints;
-    slot.n_prompt_tokens_cache = restored_token_count;
-    slot.n_prompt_tokens_processed = restored_token_count;
+    // Update slot prompt state from the entry state captured by tx_restore.
+    // server_tokens is non-copyable, so use clone() to deep-copy.
+    slot.prompt.tokens = plan.entry_tokens.clone();
+    slot.prompt.tokens.keep_first(std::min<size_t>(plan.restored_token_count, plan.entry_tokens.size()));
+    slot.prompt.checkpoints = plan.entry_checkpoints;
+    slot.n_prompt_tokens_cache = plan.restored_token_count;
+    slot.n_prompt_tokens_processed = plan.restored_token_count;
     slot.hybrid_cache_restored = true;
-    slot.prompt_metadata = it_best->metadata;
-    
-    n_hits++;
-    if (selected_payload_kind == payload_kind::checkpoint) {
-        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
-        if (success_descriptor_it != payload_descriptors.end()) {
-            record_checkpoint_restore(success_descriptor_it->second, true);
-        } else {
-            n_checkpoint_restore_successes++;
-        }
-    }
-    record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, profile, pair_state, task, lookup_namespace_id);
+    slot.prompt_metadata = plan.entry_metadata;
 
-    SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d (hits: %zu, misses: %zu)\n",
-            restored_token_count, slot.id, n_hits, n_misses);
+    // === Finalize under lock (cache-state owner-view sync + metrics) ===
+    tx_apply_restore(slot, plan, true);
+
+    SRV_INF(" - hybrid cache: try_restore - successfully restored %d tokens into slot %d\n",
+            plan.restored_token_count, slot.id);
 
     return true;
 }
-
 bool hybrid_cache_controller::load_slot(server_slot & slot, const server_task & task) {
-    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
-    auto it_best = find_best_match(task.tokens, task.prompt_metadata);
-    const cache_workload_profile profile = detect_workload_profile();
-    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-    const bool runtime_has_draft = need_dft;
-    const payload_pair_state pair_state = runtime_has_draft ?
-        payload_pair_state::target_and_draft :
-        payload_pair_state::target_only;
-
-    if (it_best == entries.end()) {
-        SRV_INF("%s", " - hybrid cache: no match found\n");
-        n_misses++;
-        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
-        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
-        const cache_restore_miss_reason reason = prefix_candidate ?
-            cache_restore_miss_reason::unsafe_prefix_rejected :
-            classify_restore_miss(task.tokens, lookup_namespace_id);
-        record_restore_miss(reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
-        return false;
-    }
-
-    const int match_len = it_best->tokens.get_common_prefix(task.tokens);
-    SRV_INF(" - hybrid cache: found match with %d tokens (matched: %d/%zu, namespace: %s)\n",
-            it_best->n_tokens(), match_len, task.tokens.size(), it_best->namespace_id.c_str());
-
-    if (match_len != it_best->n_tokens() || it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
-        SRV_WRN(" - hybrid cache: rejecting non-exact restore candidate (%d/%d tokens, task tokens: %zu)\n",
-                match_len, it_best->n_tokens(), task.tokens.size());
-        n_misses++;
-        record_restore_miss(cache_restore_miss_reason::unsafe_prefix_rejected, profile, pair_state, task, lookup_namespace_id, &(*it_best));
-        return false;
-    }
-
-    const hot_payload_record * payload = nullptr;
-    std::string restore_failure;
-    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
-    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    if (profile == cache_workload_profile::checkpoint_dependent &&
-        selected_payload_kind == payload_kind::checkpoint) {
-        std::string checkpoint_path_failure;
-        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
-            n_misses++;
-            n_fallback_restores++;
-            SRV_WRN(" - hybrid cache: load_slot - checkpoint-dependent restore rejected (%s)\n",
-                    checkpoint_path_failure.c_str());
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        selected_payload_kind = payload_kind::checkpoint;
-        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
-    }
-
-    // Phase 6: Check if the payload is in cold/demoting/promoting state
-    auto descriptor_it = payload_descriptors.find(selected_payload_id);
-    if (descriptor_it != payload_descriptors.end()) {
-        if (descriptor_it->second.residency == payload_residency_state::cold) {
-            SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
-                    selected_payload_id);
-            promote_payload(selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        if (descriptor_it->second.residency == payload_residency_state::promoting) {
-            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is promoting, cannot restore yet\n",
-                    selected_payload_id);
-            if (selected_payload_kind == payload_kind::checkpoint) {
-                record_checkpoint_restore(descriptor_it->second, false);
-            }
-            n_misses++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-    }
-
-    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
-        SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
-        if (selected_payload_kind == payload_kind::checkpoint) {
-            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
-            if (failed_descriptor_it != payload_descriptors.end()) {
-                record_checkpoint_restore(failed_descriptor_it->second, false);
-            } else {
-                n_checkpoint_restore_failures++;
-            }
-        }
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
-    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
-
-    server_prompt prompt_before = slot.prompt.clone();
-    const int cache_before = slot.n_prompt_tokens_cache;
-    const int processed_before = slot.n_prompt_tokens_processed;
-    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
-    std::vector<uint8_t> target_before;
-    std::vector<uint8_t> draft_before;
-    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    if (state_size_tgt_before > 0) {
-        target_before.resize(state_size_tgt_before);
-        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (n_tgt != state_size_tgt_before) {
-            SRV_ERR("%s", " - hybrid cache: failed to snapshot target state\n");
-            n_restore_failures++;
-            n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-    }
-    if (state_size_dft_before > 0) {
-        draft_before.resize(state_size_dft_before);
-        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
-        if (n_dft != state_size_dft_before) {
-            SRV_ERR("%s", " - hybrid cache: failed to snapshot draft state\n");
-            n_restore_failures++;
-            n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-    }
-
-    const auto clear_live_state = [&](llama_context * ctx) {
-        llama_memory_t mem = llama_get_memory(ctx);
-        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
-    };
-    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
-        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore target state\n");
-        n_restore_failures++;
-        n_fallback_restores++;
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
-        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore draft state\n");
-        n_restore_failures++;
-        n_fallback_restores++;
-        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-        return false;
-    }
-    const auto rollback_restore = [&]() {
-        bool ok = true;
-        if (ctx_tgt) {
-            if (!target_before.empty()) {
-                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
-            } else {
-                ok = clear_live_state(ctx_tgt) && ok;
-            }
-        }
-        if (ctx_dft && slot.ctx_dft) {
-            if (!draft_before.empty()) {
-                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
-            } else {
-                ok = clear_live_state(ctx_dft) && ok;
-            }
-        }
-        slot.prompt = prompt_before.clone();
-        slot.n_prompt_tokens_cache = cache_before;
-        slot.n_prompt_tokens_processed = processed_before;
-        slot.prompt_metadata = metadata_before;
-        if (!ok) {
-            n_restore_rollback_failures++;
-        }
-    };
-
-    if (ctx_tgt && !payload->target.empty()) {
-        const size_t n_tgt = llama_state_seq_set_data_ext(
-            ctx_tgt,
-            payload->target.data(),
-            payload->target.size(),
-            slot.id,
-            restore_flags);
-
-        if (n_tgt != payload->target.size()) {
-            SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
-            rollback_restore();
-            n_restore_failures++;
-            n_restore_target_apply_failures++;
-            n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
-    }
-
-    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
-        const size_t n_dft = llama_state_seq_set_data_ext(
-            ctx_dft,
-            payload->draft.data(),
-            payload->draft.size(),
-            slot.id,
-            restore_flags);
-
-        if (n_dft != payload->draft.size()) {
-            SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
-            rollback_restore();
-            n_restore_failures++;
-            n_restore_draft_apply_failures++;
-            n_fallback_restores++;
-            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
-            return false;
-        }
-        SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
-    }
-
-    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
-    it_best->mark_used(next_use_sequence());
-    sync_branch_node_from_entry(*it_best);
-    update_lru_index(it_best, old_key);
-    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
-
-    slot.prompt.tokens = it_best->tokens.clone();
-    slot.prompt.tokens.keep_first(std::min<size_t>(restored_token_count, it_best->tokens.size()));
-
-    slot.prompt.checkpoints = it_best->checkpoints;
-    slot.n_prompt_tokens_cache = restored_token_count;
-    slot.n_prompt_tokens_processed = restored_token_count;
-    slot.prompt_metadata = it_best->metadata;
-    n_hits++;
-    if (selected_payload_kind == payload_kind::checkpoint) {
-        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
-        if (success_descriptor_it != payload_descriptors.end()) {
-            record_checkpoint_restore(success_descriptor_it->second, true);
-        } else {
-            n_checkpoint_restore_successes++;
-        }
-    }
-    record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, profile, pair_state, task, lookup_namespace_id);
-
-    SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
-            restored_token_count, slot.id, it_best->use_count);
-
-    return true;
+    // Stage 25: route the slot lifecycle through the canonical
+    // transactional entry point. tx_load acquires cache_state_mutex_
+    // once and runs the legacy load body inline; this delegates
+    // atomicity ownership to the controller per design Part 3 row 21.
+    return tx_load(slot, task);
 }
 
 legacy_cache_controller::legacy_cache_controller(

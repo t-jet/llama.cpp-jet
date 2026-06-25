@@ -53,17 +53,17 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 
 ---
 
-### Stage 6: Cold Layer and Asynchronous I/O
+### Stage 6: Cold Layer and Transactional I/O
 
-**Objective:** Add cold storage for payload bytes and asynchronous promotion/demotion.
+**Objective:** Add cold storage for payload bytes and a transactional I/O path that runs inside the cache-state lock.
 
 **Deliverables:**
 
 - Implement `server_cache_store_cold` module: versioned filesystem-based store, disabled unless explicitly configured
 - Define cold store descriptor format with integrity checksums and version metadata
 - Implement atomic write/rename for persistence
-- Create `server_cache_io_worker` for asynchronous promotion/demotion outside `server_context` thread
-- Add hot/cold promotion protocol: request, validation, notification
+- Create `server_cache_io` synchronous helper invoked inline under `cache_state_mutex_` from inside `tx_demote_payload` and `tx_promote_payload` (Stage 25). The helper runs on the slot thread; no background thread or async drain mutates cache state.
+- Add hot/cold promotion protocol that completes inside the same critical section as the descriptor transition
 - Add cold store root configuration only for the persistence stage; this is deferred from the initial upstream target
 - Keep `--cache-ram` as the hot-payload budget; add separate metadata/cold budgets only if later implementation evidence shows operators need them
 - Add budget validation at startup with explicit diagnostic failures
@@ -73,13 +73,13 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 **Exit criteria:**
 
 - Payloads can be offloaded to disk and restored on demand
-- Cold I/O happens asynchronously without blocking `server_context`
+- Cold I/O happens inside the cache-state lock as part of `tx_*` transactions; no background thread mutates cache state
 - Integrity checks (checksums, versions) protect against corruption
 - Budgets are configurable and enforced without changing the initial upstream CLI surface unnecessarily
 - Startup validation rejects invalid budget configurations
 - Target/draft pairing preserved across cold transitions
 
-**Test coverage:** Cold store persistence, promotion/demotion protocol, integrity validation, paired offload, budget validation at startup
+**Test coverage:** Cold store persistence, inline promotion/demotion under lock, integrity validation, paired offload, budget validation at startup
 
 ---
 
@@ -299,6 +299,7 @@ Each stage builds on the previous one and maintains these invariants:
 - **Incremental value:** Each stage adds measurable capability or reduces risk
 - **Isolated testing:** Each stage's new behavior is testable in isolation
 - **Explicit failures:** Unsupported paths fail explicitly, not silently
+- **Transactional cache method (Stage 25):** every cache-state mutation runs inside a single critical section under `cache_state_mutex_`; slot lifecycle is bound to `tx_restore`, `tx_apply_restore`, `tx_save`, and `tx_load`; no background thread or async drain mutates cache state.
 - **Upstream-aware:** Stage 11 re-runs the staged plan against the live upstream, since new cache, checkpoint, or speculative decoding work there can invalidate or require rework on any prior stage
 - **Upstream-recurrent:** Stage 14 runs a second upstream merge cycle after Stage 12 and Stage 13 land; new cache, endpoint, MTMD, or speculative decoding work in upstream can invalidate Stage 12 stress harness outputs or Stage 13 endpoint corrections, so the rework assessment must cover Stages 1-13, not just 1-10
 - **Endpoint parity:** Stage 13 keeps compatible public endpoint schemas stable while applying all enabled cache behavior through internal metadata and command-line configuration
@@ -324,12 +325,13 @@ The staging allows for early feedback, risk reduction, and parallel workstream o
 | Upstream integration cycles (Stage 11, Stage 14) | [upstream-merge-guide.md](../../upstream-merge-guide.md), Implementation Notes |
 | Eviction policy evolution (R20a, R20b) | Residency and Eviction Rules, ADR-005 |
 | Code quality and best practices (R130, R131) | ADR-008 |
+| Atomic transactional cache method (Stage 25) | Method, Design Principles, Logical Model, ADR-007, Stage 6 cold layer, [Phase 25 design](../cache-handling-phase25-design.md) |
 | Multimodal safety (R87-R89) | Runtime Semantics, Failure and Fallback Rules, Phase 3 |
 | Testability and verification (R99-R106, R125-R129) | Verification Strategy, ADR-008 |
 | Security review and abuse handling (R121-R123, R132-R133) | Security Review, Cold Layer Contract, ADR-008 |
 
 ## Final Recommendation
 
-Implement the alternate cache mode as a new hybrid controller behind an explicit mode gate. Keep exact full-state blobs, make checkpoints first-class reusable branch nodes, store branch metadata permanently in RAM, and move both full-state and checkpoint payloads through a paired hot/cold residency system. Preserve the current default path unchanged, keep prompt preparation in the HTTP layer, and make correctness, integrity, and explicit fallback behavior more important than hit rate.
+Implement the alternate cache mode as a new hybrid controller behind an explicit mode gate. Keep exact full-state blobs, make checkpoints first-class reusable branch nodes, store branch metadata permanently in RAM, and move both full-state and checkpoint payloads through a paired hot/cold residency system. Preserve the current default path unchanged, keep prompt preparation in the HTTP layer, and make correctness, integrity, and explicit fallback behavior more important than hit rate. Stage 25 binds the slot lifecycle to atomic transactions (`tx_restore`, `tx_apply_restore`, `tx_save`, `tx_load`) so demote, evict, admit, and cold restore happen synchronously with no background drain.
 
 That design is the smallest architecture that satisfies the requirements without forcing a rewrite of the current server.

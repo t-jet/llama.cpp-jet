@@ -4,7 +4,7 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 
 ### ADR-009: Distinguish Payload Eviction from Branch Pruning and Support Metadata-Only Branch Nodes
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R38a, R38b, R38c, R71a, R71b, R71c, R71d, R71e, R76a, R79a, R79b, R38a, R55a
 
 Context:

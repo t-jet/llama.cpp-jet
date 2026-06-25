@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <thread>
 #include <vector>
@@ -77,6 +78,27 @@ public:
     // Drain the result queue and return all pending completion results.
     // Called by the controller at safe scheduling points (before update() or restore).
     std::vector<io_completion_result> drain_results();
+
+    // Stage 25: synchronous inline worker call. Runs the cold-store read or
+    // write on the calling thread and returns the completion result. Used
+    // by tx_demote_payload and tx_promote_payload under cache_state_mutex_
+    // so the demotion or promotion is observed as a single atomic transition
+    // by other threads. Returns std::nullopt when no cold store is configured.
+    std::optional<io_completion_result> execute_inline(const io_work_item & item);
+
+    // Stage 25: synchronous helpers built on execute_inline. The legacy
+    // enqueue_demotion / enqueue_promotion paths are retained for source
+    // compatibility with the existing async tests (TP-21, TP-22, TP-23) but
+    // the slot lifecycle now calls tx_demote_payload / tx_promote_payload.
+    std::optional<io_completion_result> execute_demotion_inline(
+        uint64_t payload_id,
+        const cold_descriptor_snapshot & descriptor_snapshot,
+        const std::vector<uint8_t> & target_bytes,
+        const std::vector<uint8_t> & draft_bytes);
+    std::optional<io_completion_result> execute_promotion_inline(
+        uint64_t payload_id,
+        cold_ref ref,
+        const cold_descriptor_snapshot & descriptor_snapshot);
 
     // Check if the worker is running
     bool is_running() const { return running_.load(); }

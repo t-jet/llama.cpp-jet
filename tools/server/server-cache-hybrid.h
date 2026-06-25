@@ -5,11 +5,13 @@
 #include "server-cache-policy-lru.h"
 #include "server-cache-store-cold.h"
 #include "server-cache-io-worker.h"
+#include "server-slot.h"
 #include "server-task.h"
 
 #include <chrono>
 #include <list>
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -18,7 +20,10 @@
 #include <cstdint>
 
 // Forward declarations
-struct server_slot;
+// server_slot is fully defined in server-slot.h (included above) so the
+// hybrid cache transaction layer (tx_save / tx_load / tx_restore /
+// tx_apply_restore) can access slot members directly. The full struct was
+// moved out of server-context.cpp in Stage 25 to enable B-1 routing.
 
 // Phase 3: Comprehensive namespace compatibility key (Gap 2.2)
 // Tracks all runtime configuration that affects cache compatibility
@@ -278,6 +283,17 @@ struct debug_attach_options {
 //   - LRU eviction policy
 //   - Protected roots
 //   - Multi-namespace support
+//
+// Stage 25: atomic transactional cache writes. All cache-state mutations
+// happen inside a critical section guarded by cache_state_mutex_. The slot
+// lifecycle calls tx_save / tx_restore / tx_apply_restore / tx_load (public
+// methods) which acquire the mutex once at entry. The recursive mutex allows
+// the documented inner-call set:
+//   tx_save -> tx_evict_entry
+//   tx_restore -> tx_promote_payload (inline cold read)
+//   tx_update -> tx_evict_entry
+// The mutex is not held during the live-slot apply step (OQ-25-01 SPLIT);
+// tx_apply_restore re-acquires for owner-view sync and metrics finalize.
 class hybrid_cache_controller : public cache_controller {
 public:
     hybrid_cache_controller(
@@ -315,7 +331,65 @@ public:
 
     // Process pending I/O completion results from the worker.
     // Must be called from the server_context thread at safe scheduling points.
+    // Stage 25: under the synchronous transaction model there are no queued
+    // completions; this is a no-op kept for source compatibility with the
+    // existing TP-21, TP-22, TP-23 test access path.
     void process_completions();
+
+    // Stage 25: atomic transactional cache writes. The tx_* methods below
+    // acquire cache_state_mutex_ once at entry and release once at exit.
+    // They are the new canonical entry points for slot lifecycle work.
+    // tx_save / tx_load wrap the legacy save / load flows; tx_restore
+    // performs plan selection under lock and returns a cache_response the
+    // slot thread applies outside the lock; tx_apply_restore re-acquires
+    // the lock to finalize owner-view sync and metrics (OQ-25-01 SPLIT).
+    bool tx_save(server_slot & slot, const prepared_prompt_metadata & metadata);
+    bool tx_load(server_slot & slot, const server_task & task);
+    // Stage 25: synchronous inline demotion / promotion. tx_demote_payload
+    // runs the cold-store write inline on the calling thread under the
+    // cache-state mutex and applies the success/failure path immediately,
+    // so the descriptor residency transitions in one call.
+    bool tx_demote_payload(uint64_t payload_id);
+    bool tx_promote_payload(uint64_t payload_id);
+    // Stage 25: transactional eviction. Wraps evict_entry_by_id with the
+    // lock guard. Preserves the over-hot-budget guard from D-EXEC-24-01
+    // and the token-limit guaranteed-progress fallback from D-EXEC-24-02.
+    bool tx_evict_entry(uint64_t entry_id, server_cache_eviction_reason reason);
+    // Stage 25: transactional update. The eviction loop, cold cleanup,
+    // branch-metadata prune, and token-limit loop run inside one
+    // critical section. No more completion drain.
+    void tx_update();
+
+    // Stage 25: cache_response holds the restore plan computed under lock.
+    // tx_restore returns it; the slot thread applies target/draft bytes
+    // to the live llama_context outside the lock; tx_apply_restore
+    // re-acquires the lock to finalize owner-view sync and metrics.
+    // entry_tokens / entry_checkpoints / entry_metadata are captured at
+    // tx_restore time so the apply step can update slot prompt state
+    // without re-locking the cache (the apply step is OUTSIDE the lock
+    // per OQ-25-01 SPLIT; re-looking up the entry after lock release
+    // would race with eviction).
+    struct cache_response {
+        bool found = false;
+        cache_restore_miss_reason miss_reason = cache_restore_miss_reason::exact_entry_absent;
+        uint64_t entry_id = 0;
+        payload_kind selected_payload_kind = payload_kind::exact_blob;
+        llama_state_seq_flags restore_flags = LLAMA_STATE_SEQ_FLAGS_NONE;
+        int restored_token_count = 0;
+        std::vector<uint8_t> target_bytes;
+        std::vector<uint8_t> draft_bytes;
+        bool runtime_has_draft = false;
+        cache_workload_profile profile = cache_workload_profile::plain_transformer;
+        payload_pair_state pair_state = payload_pair_state::target_only;
+        std::string lookup_namespace_id;
+        bool fallback_used = false;
+        // Captured entry state for apply-outside-lock (OQ-25-01 SPLIT).
+        server_tokens entry_tokens;
+        std::list<common_prompt_checkpoint> entry_checkpoints;
+        prepared_prompt_metadata entry_metadata;
+    };
+    cache_response tx_restore(server_slot & slot, const server_task & task);
+    void tx_apply_restore(server_slot & slot, const cache_response & plan, bool apply_ok);
 
     // Phase 3: Build comprehensive compatibility key (Gap 2.2)
     cache_compatibility_key build_compatibility_key() const;
@@ -440,6 +514,27 @@ public:
         cold_store.debug_set_read_failure_for_tests(fail);
     }
 
+    // Stage 25: test-only debug accessor for the cache-state mutex so the
+    // TP-25-UT1 and TP-25-UT10 contention tests can hold the lock from a
+    // worker thread without going through a public tx_* method.
+    std::recursive_mutex & debug_get_cache_state_mutex_for_tests() { return cache_state_mutex_; }
+
+    // Stage 25: test-only debug hooks for the transaction layer. These
+    // expose the new tx_* methods and the reentrancy counter so TP-25-UT1
+    // through TP-25-UT10 can assert on atomicity, isolation, and the
+    // bounded diagnostic counters.
+    bool debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    hybrid_cache_controller::cache_response debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task);
+    void debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok);
+    size_t debug_get_transaction_depth_for_tests() const { return server_context_tx_depth_; }
+    size_t debug_get_reentrancy_depth_limit_for_tests() const { return reentrancy_depth_limit_; }
+    size_t debug_get_transaction_wait_exceeded_for_tests() const { return n_transaction_wait_exceeded; }
+    size_t debug_get_apply_restore_syncs_for_tests() const { return n_apply_restore_owner_view_syncs; }
+    void debug_set_reentrancy_depth_limit_for_tests(size_t limit) { reentrancy_depth_limit_ = limit; }
+    bool debug_force_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    bool debug_force_deep_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    bool debug_force_locked_sleep_for_tests(int sleep_ms);
+
     // Step 8: Test accessors for cold_store and io_worker
     server_cache_store_cold & debug_cold_store_for_tests() { return cold_store; }
     server_cache_io_worker & debug_io_worker_for_tests() { return io_worker; }
@@ -531,6 +626,21 @@ private:
     bool debug_demote_first_checkpoint_for_tests();
     int debug_select_stage9_restore_source_tokens_for_tests(server_tokens tokens, const std::string & namespace_id, cache_workload_profile profile);
     bool debug_request_stage9_checkpoint_promotion_for_tests(server_tokens tokens, const std::string & namespace_id);
+    // Stage 25: production-side stubs for the transaction-layer debug
+    // hooks. Match the public signatures so the test-only code paths
+    // compile out cleanly in production builds.
+    bool debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    hybrid_cache_controller::cache_response debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task);
+    void debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok);
+    size_t debug_get_transaction_depth_for_tests() const { return server_context_tx_depth_; }
+    size_t debug_get_reentrancy_depth_limit_for_tests() const { return reentrancy_depth_limit_; }
+    size_t debug_get_transaction_wait_exceeded_for_tests() const { return n_transaction_wait_exceeded; }
+    size_t debug_get_apply_restore_syncs_for_tests() const { return n_apply_restore_owner_view_syncs; }
+    void debug_set_reentrancy_depth_limit_for_tests(size_t limit) { reentrancy_depth_limit_ = limit; }
+    bool debug_force_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    bool debug_force_deep_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
+    bool debug_force_locked_sleep_for_tests(int sleep_ms);
+    std::recursive_mutex & debug_get_cache_state_mutex_for_tests() { return cache_state_mutex_; }
 #endif
 
     // Phase 1/2: List-based storage (non-destructive, no removal on load)
@@ -565,6 +675,31 @@ private:
     // Phase 6: Cold store and async I/O worker
     server_cache_store_cold cold_store;
     server_cache_io_worker io_worker;
+
+    // Stage 25: atomic transactional cache writes.
+    // The recursive mutex guards the controller's mutable state for the
+    // duration of one slot request. The documented inner-call set is
+    // tx_save -> tx_evict_entry, tx_restore -> tx_promote_payload (inline),
+    // tx_update -> tx_evict_entry. Cross-thread reentrance is impossible
+    // because the worker thread no longer mutates controller state (Option B
+    // worker retirement per OQ-25-02).
+    std::recursive_mutex cache_state_mutex_;
+
+    // Stage 25: reentrancy counter for the server-context thread. Slot
+    // threads use server_slot::cache_tx_depth (defined where server_slot
+    // lives). The counter is incremented at lock_guard entry and
+    // decremented at lock_guard exit. OQ-25-06 chose slot context member
+    // (not thread_local) so the counter persists across thread joins.
+    size_t server_context_tx_depth_ = 0;
+    size_t reentrancy_depth_limit_ = 4;
+
+    // Stage 25: bounded diagnostic threshold. The slot thread records a
+    // transaction_wait_exceeded diagnostic when its wait exceeds the
+    // threshold (default 500 ms; OQ-25-03). The diagnostic is bounded and
+    // does not abort the wait.
+    std::chrono::milliseconds transaction_wait_threshold_{500};
+    size_t n_transaction_wait_exceeded = 0;
+    size_t n_apply_restore_owner_view_syncs = 0;
 
     // Phase 6 Step 11: Per-payload promotion failure injection set
 #ifdef LLAMA_SERVER_CACHE_TESTS
@@ -693,6 +828,15 @@ private:
         const server_tokens & tokens,
         const std::string & namespace_id);
     void record_branch_lookup(const std::string & namespace_id, const char * method);
+
+    // Stage 25: developer-time guard. Asserts the calling thread already
+    // holds cache_state_mutex_. Uses try_lock + immediate unlock so the
+    // helper compiles to a no-op in release builds that define NDEBUG.
+    void tx_assert_mutex_held() const;
+    // Stage 25: developer-time guard for unexpected reentrance. Called from
+    // helper entry points that must NOT run inside a transaction except via
+    // the documented inner-call set. Release build is a no-op.
+    void tx_assert_not_reentrant() const;
 
     bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
     void evict_until_within_budget();

@@ -42,6 +42,16 @@ Action:
 - Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
 - Verified 2026-06-18 (Stage 19 implementation plan): `create_file` produced an LF-with-CRLF file on Windows (CRLF=298, LF=298, no BOM) and the durable-doc convention requires LF-only; the existing "Preserve local line endings in patch edits" improvement gives the fix recipe (replace CRLF with LF, save with `UTF8Encoding($false)` to skip BOM), but a separate byte-level check is needed to detect the issue on newly created untracked files because the lint pass and `Get-Content | Measure-Object -Line` both report a normal line count.
 
+## Improvement: Markdown lint catches what byte-level checks miss
+
+Condition:
+
+- When creating durable planning markdown files via `create_file` on Windows (or any path that produces a new untracked markdown file)
+
+Action:
+
+- Do run BOTH byte-level verification (CR=0, LF matches line count, no BOM, no non-ASCII, no trailing whitespace) AND a markdown lint pass (or a manual check for list style consistency and trailing newline) before declaring the file ready; byte-level checks catch line-ending and BOM issues but not markdown semantics like MD004 (unordered list marker style `+` vs `-`), MD047 (single trailing newline at end of file), or MD009 (trailing spaces inside lines). Verified 2026-06-25 (Stage 25 implementation plan): a 7-file plan via parallel `create_file` passed all byte-level checks (CR=0 across all 7, LF counts matched line counts, no BOM, no non-ASCII, no trailing whitespace) but the markdown lint pass surfaced MD004 on `+ parts 1-9` (used `+` as the first unordered list marker while the rest of the file used `-`) and MD047 on 6 of 7 files (no trailing newline). Fix the markdown issues with single-line edits BEFORE the LF conversion pass so the LF pass preserves the fixes and the file ends with exactly one trailing newline. Don't rely on byte-level verification alone; pair it with a markdown lint pass for durable-doc files.
+
 ## Improvement: Windows server pytest path
 
 Condition:
@@ -1778,3 +1788,43 @@ Similar memory check:
 Memory update:
 - Final improvement outcome stored above under "Improvement: Avoid PowerShell
   automatic match variable names".
+
+## Improvement: i/lf vs w/crlf index mismatch inflates git diff stat
+
+Condition:
+
+- When `git ls-files --eol` reports `i/lf w/crlf` (or any i/X w/Y mismatch) for a file and `git diff --shortstat` shows thousands of insertions and deletions even when only a small content change was made (e.g., 464 actual content insertions but 4822/4385 diff churn reported)
+
+Action:
+
+- Do report content diff stats via `git diff -w --shortstat` (whitespace-insensitive) instead of raw stat, and document the i/X w/Y mismatch in the implementation log so reviewers see the true content delta. Verified 2026-06-25 (Stage 25 implementation): `tools/server/server-cache-hybrid.cpp` was `i/lf w/crlf` pre-existing; raw diff said `4822 insertions, 4385 deletions` while `-w` said `464 insertions, 27 deletions`. The actual content change was small; the churn was a pre-existing line-ending mismatch between git's index object store and the worktree. Don't normalize the whole file to LF just to clean the stat when that would create line-ending churn against the local file style; if normalization is needed, save with `New-Object System.Text.UTF8Encoding($false)` to skip the BOM and verify with byte-level CR/LF counts. Record both the raw and the -w stat in the implementation log so the reviewer can see the actual content delta.
+
+## Improvement: Extract struct to header before moving function bodies across TUs
+
+Condition:
+
+- When a binding requires extracting a function body from one translation unit (TU) into another and the function takes a struct/class parameter whose full type is defined inline in the source TU (not in a header)
+
+Action:
+
+- Do first check the destination TU has access to the full type, not just the forward declaration. If the type is defined inline in the source TU, extract it to a header before moving the function body. The same enum / struct members the type references (e.g., a `slot_state` enum used by the type's `state` member) must also move to the header so the type compiles standalone. After extraction, the source TU must include the new header. The test stub that worked around the missing header (e.g., a minimal `struct server_slot { int id; ...; }` with only the fields the old body touched) must be removed in the test TU since the test now sees the full struct through the same include chain. Verified 2026-06-25 (Stage 25 B-1 rework): the binding required moving save/restore/load bodies from `server-context.cpp` into `server-cache-hybrid.cpp` `tx_save` / `tx_restore` / `tx_apply_restore` / `tx_load`. The new bodies access `slot.id`, `slot.prompt.tokens`, `slot.task`, `slot.ctx_dft`, `slot.prompt.checkpoints`, etc. But `server_slot` was previously defined inline at `server-context.cpp:239..901` and only forward-declared in `server-cache-hybrid.h:22`. The first build of the moved bodies failed with `C2027: use of undefined type 'server_slot'` for every slot.* access. The fix was to extract `server_slot` to a new header `tools/server/server-slot.h`, also move `slot_state` enum (which `server_slot.state` uses as its member type) into the header, include `server-slot.h` from `server-cache-hybrid.h`, remove the inline definition from `server-context.cpp`, and remove the test stub `struct server_slot { int id; llama_context * ctx_tgt; llama_context * ctx_dft; }` from `tests/test-cache-controller.cpp` because the full struct is now visible through the include chain. Both binaries then built clean and 132/132 tests passed. Don't assume a forward declaration is enough when the moved function body accesses member fields; verify by attempting the move and checking the build for C2027 errors before declaring the binding complete.
+
+## Improvement: PowerShell `Set-Content -NoNewline` collapses lines on Windows
+
+Condition:
+
+- When manipulating CRLF text files on Windows by reading with `Get-Content` and writing back with `Set-Content -NoNewline` (e.g., to remove a block of lines from a `.cpp` file)
+
+Action:
+
+- Do not use `Set-Content -NoNewline` to write a multi-line array back to a file; `-NoNewline` strips the newline after each item and the array is joined into a single string, collapsing all lines into one. Use Python's `open(path, 'wb').writelines(list)` instead, where each list element is a string ending in `\n`. For CRLF files, either pre-join with `\r\n` per element or use `f.write(line)` after manually managing line endings. The failure mode is silent: the file looks collapsed in line-count but appears the right byte size in `[System.IO.File]::ReadAllBytes().Length` until you `Get-Content` and see one giant line. Verified 2026-06-25 (Stage 25 B-1 rework): a 6484-line `server-context.cpp` was collapsed to ~6 lines by `Set-Content -NoNewline` and only recovered via `git checkout HEAD -- tools/server/server-context.cpp`. The replacement Python script using `readlines()` + slicing + `writelines()` preserved the line structure cleanly. Don't reach for PowerShell `Set-Content -NoNewline` for line-range edits; use Python's `writelines()` or split/join with explicit `\n`.
+
+## Improvement: Classify silent-crash integration failures by matching summary.json error_counts hash to prior-stage signatures
+
+Condition:
+
+- When reviewing a test-results gate for a new stage whose integration tier runs the same runner and fixture as a prior stage that already produced a BLOCKED-structural-not-infra silent-crash defect (e.g., D-EXEC-24-03 with hash 3d9b93fa2cc8247c), and the new stage's summary.json for both hybrid legs reports the same error_counts hash as the prior-stage crash
+
+Action:
+
+- Do read summary.json.error_counts keys for every hybrid leg in the new report and compare each key byte-for-byte against the prior-stage crash signature hash before classifying the failure. Same hash = prior-stage carry-over (classify as BLOCKED-structural-not-infra with reference to the original D-EXEC-XX number, not as a new product bug). Different or absent hash = new stage-specific defect, route to bug-fix loop. Verify hash equality by extracting error_counts keys via (Get-Content summary.json | ConvertFrom-Json).error_counts.PSObject.Properties.Name, not by substring match on the leg summary prose, because the prose may mention prior hashes as context. Verified 2026-06-25 (Stage 25 test-results review): both S02 hybrid and S03 hybrid legs in test-report-20260625-01.md had error_counts = { 3d9b93fa2cc8247c: 1 }, identical to Stage 24 -06 D-EXEC-24-03. Without the hash check, the S02 hybrid crash at req 48 (where Stage 24 -06 was PASS) would have looked like a regression; the hash match confirmed D-EXEC-24-03 carry-over, not a new Stage 25 defect. Don't classify integration FAIL as new product bug based on request-index comparison alone; the request index at which a silent crash manifests can vary with cache pressure and parallelism, but the crash hash is a stable fingerprint.

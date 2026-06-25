@@ -8,7 +8,7 @@ This document follows a C5-style extension of the C4 model:
 
 1. Identify the architecture drivers from the requirements.
 2. Compare them with the current `llama-server` cache, checkpoint, and slot lifecycle.
-3. Describe the target architecture in five views: Context, Container, Component, Code, and Decision/Delivery.
+3. Describe the target architecture in five views: Context, Container, Component, Code, and Decision/Delivery. The target cache-state method is atomic transactional: every demote, evict, restore, admit, and cold-store transition runs synchronously inside a `tx_*` transaction invoked from the slot request that triggered it. This is the Stage 25 baseline.
 4. Capture each significant decision as an ADR with researched alternatives, rationale, and consequences.
 5. Map the design to phased delivery, security review, observability, and verification.
 
@@ -25,6 +25,7 @@ The proposed architecture introduces an alternate, explicitly selected `hybrid` 
 - cache hits are non-destructive and branch nodes are shared across slots
 - a reuse-aware policy replaces FIFO and integrates protected roots, hot/cold residency, and explicit diagnostics
 - multiple models or workload profiles can operate concurrently with shared global budgets and namespace isolation
+- every cache-state mutation runs inside an atomic transactional section under a single recursive mutex on the hybrid controller, with the slot lifecycle bound to `tx_restore`, `tx_apply_restore`, `tx_save`, and `tx_load`. Background demotion, promotion, eviction, and admission are not permitted; the I/O worker is repurposed as a synchronous helper invoked inline under lock (Stage 25).
 
 The design is intentionally conservative about integration risk. The current legacy cache path remains structurally intact. New behavior is introduced through a mode gate, a cache-controller interface, and dedicated components for branch graph management, residency policy, payload stores, and prepared-prompt boundary metadata.
 
@@ -46,6 +47,7 @@ The design is intentionally conservative about integration risk. The current leg
 | Equivalent-branch deduplication | R83a | When multiple requests converge on the same validated prompt path, reuse or join the equivalent branch node rather than create duplicate nodes. Use deterministic tie-breaking for convergence selection. |
 | Eviction policy selection and configuration | R20a, R20b | Use byte-accounted LRU as the first policy. Add a CLI selector only after another policy is implemented, so the upstream surface does not grow before operators have a real choice. |
 | Code quality and best practices | R130, R131 | Follow SOLID, KISS, DRY, and YAGNI principles. Factor repeated policy, serialization, residency, and restore logic into shared helpers or components. Avoid copy-pasted logic unless duplication is clearly justified by correctness, isolation, or performance. |
+| Atomic transactional cache method | Stage 25 | All cache-state mutations (demote, evict, admit, cold restore, owner-view sync) run inside a single critical section under one recursive mutex on the hybrid controller. The slot lifecycle is bound to `tx_restore`, `tx_apply_restore`, `tx_save`, and `tx_load`. No background thread or async drain mutates cache state. Invariants I-25-01 atomicity, I-25-02 isolation, and I-25-03 durability-within-transaction are recorded in [Phase 25 design](../cache-handling-phase25-design.md). |
 
 ## Current Architecture Baseline
 
@@ -78,6 +80,7 @@ The current server has five behaviors that matter directly to this design.
 - Treat target and draft state as one atomic cache object.
 - Prefer exact blob restore for plain-transformer workloads and checkpoint-first traversal for checkpoint-dependent workloads.
 - Keep all correctness checks explicit and fail closed when compatibility or integrity is uncertain.
+- Make every cache-state mutation atomic and transactional. Slot requests acquire a single recursive mutex on the hybrid controller for the duration of `tx_restore`, `tx_apply_restore`, `tx_save`, and `tx_load`. Demotion, eviction, cold promotion, and new-entry admission happen inline inside the transaction; no background thread or async drain touches cache state (Stage 25).
 
 ### Upstream Compatibility Targets
 
@@ -93,7 +96,7 @@ The design should fit the current `llama-server` architecture rather than create
 
 ### Logical Model
 
-The hybrid mode introduces four core concepts:
+The hybrid mode introduces five core concepts:
 
 1. `PreparedPromptMetadata`
    Captures boundaries, stable spans, protection hints, and request-local cache markers after prompt preparation and tokenization.
@@ -106,6 +109,9 @@ The hybrid mode introduces four core concepts:
 
 4. `RestorePlan`
    An explicit plan produced by the hybrid cache controller for exact-blob restore, checkpoint-first restore, or safe fallback.
+
+5. `Transaction`
+   A single critical section during which the slot request that triggered it performs its required cache modifications (demote, evict, admit, cold restore, owner-view sync) as if all of them happened at one instant. The slot lifecycle exposes four transaction entry points: `tx_restore`, `tx_apply_restore`, `tx_save`, and `tx_load`. Every transaction holds the recursive `cache_state_mutex_` for the duration of its work (Stage 25).
 
 ### Workload Profiles
 
@@ -126,7 +132,7 @@ The workload profile is derived from model/runtime capabilities and request conf
 | `server-cache-graph.*` | Shared branch graph/forest metadata, indexes, and branch traversal. |
 | `server-cache-policy.*` | LRU baseline policy, protected-root handling, and extension point for SLRU/2Q. |
 | `server-cache-store.*` | Payload descriptors, serializer contracts, hot store, and cold store abstractions. |
-| `server-cache-io.*` | Asynchronous cold-store promotion/demotion worker with deterministic test hooks. |
+| `server-cache-io.*` | Synchronous cold-store helper invoked inline under `cache_state_mutex_` from inside a `tx_*` transaction. The worker thread is repurposed as a synchronous helper; no background thread mutates cache state (Stage 25). |
 | `server-cache-boundaries.*` | Prepared-prompt boundary metadata types and normalization helpers. |
 | `server-task.*` updates | Task-level cache metadata transport from HTTP layer to `server_context`. |
 | `server_context.*` updates | Slot lifecycle hooks that call into the cache controller instead of manipulating hybrid state directly. |

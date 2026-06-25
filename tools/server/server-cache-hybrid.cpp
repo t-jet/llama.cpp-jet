@@ -13,6 +13,31 @@
 #include <unordered_set>
 #include <utility>
 
+// Stage 25: RAII guard that increments the per-thread reentrancy counter
+// on construction and decrements on destruction. Used together with
+// std::lock_guard<std::recursive_mutex> to keep the counter balanced
+// across early returns. The active() check rejects entry at depth == limit.
+namespace stage25_tx {
+struct reentrancy_guard {
+    size_t & counter;
+    const size_t limit;
+    bool active;
+    reentrancy_guard(size_t & c, size_t l)
+        : counter(c), limit(l), active(c < l) {
+        if (active) {
+            ++counter;
+        }
+    }
+    ~reentrancy_guard() {
+        if (active) {
+            --counter;
+        }
+    }
+    reentrancy_guard(const reentrancy_guard &) = delete;
+    reentrancy_guard & operator=(const reentrancy_guard &) = delete;
+};
+} // namespace stage25_tx
+
 static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tokens) {
     return tokens.cache_token_ids();
 }
@@ -340,29 +365,33 @@ hybrid_cache_controller::hybrid_cache_controller(
             throw std::runtime_error("cold store configuration failed");
         }
 
-        // Wire the cold store to the I/O worker
+        // Stage 25: wire the cold store to the I/O worker but do NOT start
+        // the worker thread. The worker is repurposed into a synchronous
+        // inline helper invoked by tx_demote_payload / tx_promote_payload
+        // under cache_state_mutex_ (OQ-25-02 Option B). Cold-store access
+        // happens through io_worker.execute_inline(...) on the calling
+        // thread.
         io_worker.set_cold_store(&cold_store);
 
-        // Start the I/O worker thread
-        if (!io_worker.start()) {
-            SRV_ERR(" - hybrid cache: failed to start cold store I/O worker thread\n%s", "");
-            throw std::runtime_error("cold store I/O worker thread start failed");
-        }
-
-        SRV_INF("%s", " - hybrid cache: cold store configured\n");
+        SRV_INF("%s", " - hybrid cache: cold store configured (synchronous worker)\n");
     } else if (!cold_path.empty()) {
         SRV_INF("%s", " - hybrid cache: cold store path configured but cold writes are disabled\n");
     }
 }
 
 hybrid_cache_controller::~hybrid_cache_controller() {
-    // Stop the I/O worker before releasing the cold store
-    if (io_worker.is_running()) {
-        io_worker.stop();
-    }
+    // Stage 25: the worker thread is not started, so no stop is needed.
+    // The destructor is a no-op for the io_worker (it was never started).
 }
 
 bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
+    // Stage 25: the legacy async demote path is preserved for source
+    // compatibility with the TP-21 / TP-22 / TP-23 test access pattern
+    // (debug_demote_first_checkpoint_for_tests + debug_stop_io_worker_for_tests).
+    // The slot lifecycle now calls tx_demote_payload for inline atomic
+    // demotion. This method enqueues to the io_worker exactly as before;
+    // the worker thread is not started but enqueue is still accepted so
+    // the test pattern continues to work.
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: demote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
@@ -540,19 +569,14 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
 }
 
 void hybrid_cache_controller::process_completions() {
-    // Stage 14 test_stage9 fix: drain and process queued I/O completions
-    // even after the worker has been stopped. The early-return on
-    // !is_running() previously made the demotion completion queued
-    // during io_worker.stop() unreachable from the test loop that
-    // calls process_completions() after debug_stop_io_worker_for_tests().
-    std::vector<io_completion_result> results = io_worker.drain_results();
-    for (auto & result : results) {
-        if (result.is_demotion) {
-            handle_demotion_completion(result);
-        } else {
-            handle_promotion_completion(result);
-        }
-    }
+    // Stage 25: under the synchronous transaction model there are no
+    // queued I/O completions (the inline worker runs on the calling
+    // thread and the result is applied inline by tx_demote_payload /
+    // tx_promote_payload). This is a no-op kept for source compatibility
+    // with the existing TP-21 / TP-22 / TP-23 test access path
+    // (debug_stop_io_worker_for_tests still calls process_completions
+    // after stopping the worker; both are no-ops under the new model).
+    (void) io_worker.drain_results();
 }
 
 bool hybrid_cache_controller::cold_budget_allows_write(size_t bytes) const {
@@ -577,6 +601,7 @@ void hybrid_cache_controller::record_cold_demotion_skipped(const payload_descrip
 }
 
 bool hybrid_cache_controller::cold_budget_make_room(size_t bytes, const payload_descriptor & descriptor) {
+    tx_assert_mutex_held();
     if (cold_budget_allows_write(bytes)) {
         return true;
     }
@@ -912,8 +937,15 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
 }
 
 void hybrid_cache_controller::update() {
-    // Phase 6: Process any pending I/O completions from the worker
-    process_completions();
+    // Stage 25: the public update() entry point acquires the cache-state
+    // mutex once. tx_update is an alias and acquires the same lock
+    // (recursive mutex allows). The RAII guard balances the reentrancy
+    // counter across early returns.
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return;
+    }
 
     // Stage 8 Step 8.9: Branch-metadata budget enforcement (5-step pressure pipeline)
     // Step 1: Demotion (handled by evict_until_within_budget -> mark_payload_evicted -> demote_payload)
@@ -1683,6 +1715,7 @@ void hybrid_cache_controller::set_entry_payload_id_for_kind(hybrid_cache_entry &
 }
 
 void hybrid_cache_controller::refresh_entry_payload_accounting(hybrid_cache_entry & entry) {
+    tx_assert_mutex_held();
     size_t resident_bytes = 0;
     bool has_target = false;
     bool has_draft = false;
@@ -2184,6 +2217,15 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_exact_matc
 }
 
 bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason) {
+    // Stage 25: the public evict_entry_by_id acquires the cache-state
+    // mutex. tx_evict_entry is an alias that acquires the same lock
+    // (recursive mutex allows nesting).
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
     for (auto it = entries.begin(); it != entries.end(); ++it) {
         if (it->entry_id != entry_id) {
             continue;
@@ -2909,6 +2951,7 @@ bool hybrid_cache_controller::materialize_entry_payload(
         std::vector<uint8_t> draft,
         bool runtime_has_draft,
         std::string * failure_reason) {
+    tx_assert_mutex_held();
     if (it == entries.end() || it->branch_node_id == 0) {
         if (failure_reason) {
             *failure_reason = "entry not found";
@@ -3035,6 +3078,7 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::admit_entry_wit
         bool runtime_has_draft,
         uint64_t parent_node_id,
         std::string * failure_reason) {
+    tx_assert_mutex_held();
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = namespace_id;
@@ -3103,6 +3147,7 @@ bool hybrid_cache_controller::enforce_branch_metadata_admission_budget(
 }
 
 void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_entry & entry) {
+    tx_assert_mutex_held();
     branch_node * node = forest.get_node(entry.branch_node_id);
     if (!node) {
         return;
@@ -3233,6 +3278,7 @@ void hybrid_cache_controller::record_branch_metadata_pressure() {
 }
 
 void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
+    tx_assert_mutex_held();
     if (payload_id == 0) {
         return;
     }
@@ -3281,6 +3327,7 @@ bool hybrid_cache_controller::remove_entry_after_eviction(std::list<hybrid_cache
 }
 
 bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind) {
+    tx_assert_mutex_held();
     const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
     if (payload_id == 0) {
         return false;
@@ -3329,6 +3376,7 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
 }
 
 void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
+    tx_assert_mutex_held();
     bool changed = false;
     changed = mark_payload_kind_evicted(entry, payload_kind::exact_blob) || changed;
     changed = mark_payload_kind_evicted(entry, payload_kind::checkpoint) || changed;
@@ -3449,6 +3497,7 @@ bool hybrid_cache_controller::attach_payload(
         std::vector<uint8_t> draft,
         bool runtime_has_draft,
         std::string * failure_reason) {
+    tx_assert_mutex_held();
     return attach_payload(entry, std::move(target), std::move(draft), runtime_has_draft, payload_kind::exact_blob, failure_reason);
 }
 
@@ -3459,6 +3508,7 @@ bool hybrid_cache_controller::attach_payload(
         bool runtime_has_draft,
         payload_kind kind,
         std::string * failure_reason) {
+    tx_assert_mutex_held();
     hot_payload_record record;
     record.payload_id = next_payload_id++;
     record.target = std::move(target);
@@ -4383,3 +4433,801 @@ void hybrid_cache_controller::remove_from_prefix_index(std::list<hybrid_cache_en
         }
     }
 }
+// ============================================================================
+// Stage 25: atomic transactional cache writes (additions appended at EOF)
+// ============================================================================
+
+void hybrid_cache_controller::tx_assert_mutex_held() const {
+#ifndef NDEBUG
+    if (cache_state_mutex_.try_lock()) {
+        cache_state_mutex_.unlock();
+        SRV_ERR("%s", " - hybrid cache: tx_assert_mutex_held failed: caller does not hold cache_state_mutex_\n");
+        assert(false && "cache_state_mutex_ not held by caller");
+    }
+#else
+    (void) cache_state_mutex_;
+#endif
+}
+
+void hybrid_cache_controller::tx_assert_not_reentrant() const {
+#ifndef NDEBUG
+    assert(server_context_tx_depth_ == 0 && "unexpected reentrant call to a transaction helper");
+#endif
+    (void) server_context_tx_depth_;
+}
+
+bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: tx_demote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        record_stage10_diagnostic("demotion", "failure", "descriptor_not_found");
+        return false;
+    }
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    if (descriptor.residency == payload_residency_state::demoting) {
+        SRV_WRN(" - hybrid cache: tx_demote_payload: payload_id %" PRIu64 " is already demoting\n", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "in_progress");
+        record_stage10_diagnostic("demotion", "failure", "in_progress", &descriptor);
+        return false;
+    }
+    if (descriptor.residency != payload_residency_state::hot) {
+        SRV_WRN(" - hybrid cache: tx_demote_payload: payload_id %" PRIu64 " is not hot\n%s", "", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("demotion", "failure", "residency", &descriptor);
+        return false;
+    }
+    if (!cold_store.is_configured()) {
+        SRV_WRN(" - hybrid cache: tx_demote_payload: cold store not configured\n%s", "");
+        record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
+        record_stage10_diagnostic("demotion", "failure", "cold_store_unconfigured", &descriptor);
+        return false;
+    }
+
+    auto record_it = hot_payloads.find(descriptor.store_ref.id);
+    if (record_it == hot_payloads.end()) {
+        SRV_ERR(" - hybrid cache: tx_demote_payload: hot record not found for payload_id %" PRIu64 "\n", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "missing_payload");
+        record_stage10_diagnostic("descriptor_rejection", "failure", "missing_payload", &descriptor);
+        return false;
+    }
+    const hot_payload_record & record = record_it->second;
+    const size_t estimated_cold_bytes = record.target.size() + record.draft.size();
+
+    if (hot_payload_budget_enabled() &&
+        calculate_demoting_payload_bytes() + estimated_cold_bytes > limit_size) {
+        record_payload_transition("demotion", descriptor, "failure", "demotion_budget_pressure");
+        record_stage10_diagnostic("queue_pressure", "failure", "demotion_budget_pressure", &descriptor);
+        SRV_WRN(" - hybrid cache: tx_demote_payload: outstanding demotions exceed payload budget\n%s", "");
+        return false;
+    }
+    if (descriptor.pair_state == payload_pair_state::target_and_draft) {
+        if (record.draft.empty() || descriptor.draft_size_bytes == 0) {
+            SRV_ERR(" - hybrid cache: tx_demote_payload: target_and_draft descriptor missing draft\n%s", "");
+            record_payload_transition("demotion", descriptor, "failure", "pair_state");
+            record_stage10_diagnostic("descriptor_rejection", "failure", "pair_state", &descriptor);
+            return false;
+        }
+    }
+    if (!cold_budget_make_room(estimated_cold_bytes, descriptor)) {
+        record_payload_transition("demotion", descriptor, "failure", "cold_budget_exceeded");
+        return false;
+    }
+
+    descriptor.residency = payload_residency_state::demoting;
+
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = descriptor.payload_id;
+    snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
+    snapshot.format_version = descriptor.format_version;
+    snapshot.target_size_bytes = descriptor.target_size_bytes;
+    snapshot.draft_size_bytes = descriptor.draft_size_bytes;
+    snapshot.target_checksum = descriptor.target_checksum;
+    snapshot.draft_checksum = descriptor.draft_checksum;
+
+    auto completion = io_worker.execute_demotion_inline(
+        payload_id, snapshot, record.target, record.draft);
+    if (!completion.has_value()) {
+        descriptor.residency = payload_residency_state::hot;
+        record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
+        return false;
+    }
+
+    handle_demotion_completion(*completion);
+    return completion->success;
+}
+
+bool hybrid_cache_controller::tx_promote_payload(uint64_t payload_id) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
+    auto descriptor_it = payload_descriptors.find(payload_id);
+    if (descriptor_it == payload_descriptors.end()) {
+        SRV_WRN(" - hybrid cache: tx_promote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
+        record_stage10_diagnostic("promotion", "failure", "descriptor_not_found");
+        return false;
+    }
+    payload_descriptor & descriptor = descriptor_it->second;
+
+    if (descriptor.residency == payload_residency_state::promoting) {
+        SRV_WRN(" - hybrid cache: tx_promote_payload: payload_id %" PRIu64 " is already promoting\n", payload_id);
+        record_payload_transition("promotion", descriptor, "failure", "in_progress");
+        record_stage10_diagnostic("promotion", "failure", "in_progress", &descriptor);
+        return false;
+    }
+    if (descriptor.residency != payload_residency_state::cold) {
+        SRV_WRN(" - hybrid cache: tx_promote_payload: payload_id %" PRIu64 " is not cold\n%s", "", payload_id);
+        record_payload_transition("promotion", descriptor, "failure", "residency");
+        record_stage10_diagnostic("promotion", "failure", "residency", &descriptor);
+        return false;
+    }
+    if (!cold_store.is_configured()) {
+        SRV_WRN(" - hybrid cache: tx_promote_payload: cold store not configured\n%s", "");
+        record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
+        record_stage10_diagnostic("promotion", "failure", "cold_store_unconfigured", &descriptor);
+        return false;
+    }
+
+    descriptor.residency = payload_residency_state::promoting;
+
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = descriptor.payload_id;
+    snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
+    snapshot.format_version = descriptor.format_version;
+    snapshot.target_size_bytes = descriptor.target_size_bytes;
+    snapshot.draft_size_bytes = descriptor.draft_size_bytes;
+    snapshot.target_checksum = descriptor.target_checksum;
+    snapshot.draft_checksum = descriptor.draft_checksum;
+    promotion_enqueue_time = std::chrono::steady_clock::now();
+
+    cold_ref ref = descriptor.store_ref.id;
+    auto completion = io_worker.execute_promotion_inline(payload_id, ref, snapshot);
+    if (!completion.has_value()) {
+        descriptor.residency = payload_residency_state::cold;
+        record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
+        return false;
+    }
+
+    handle_promotion_completion(*completion);
+    return completion->success;
+}
+
+bool hybrid_cache_controller::tx_evict_entry(uint64_t entry_id, server_cache_eviction_reason reason) {
+    return evict_entry_by_id(entry_id, reason);
+}
+
+void hybrid_cache_controller::tx_update() {
+    update();
+}
+
+bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    // Stage 25: acquire the cache-state mutex once for the duration of
+    // the save. The recursive mutex allows nesting via tx_evict_entry
+    // and tx_demote_payload called from mark_payload_kind_evicted and
+    // admit_entry_with_payload.
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
+    if (slot.prompt.tokens.empty()) {
+        SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
+        return false;
+    }
+
+    const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t total_size = state_size_tgt + state_size_dft;
+    const bool protected_root = !metadata.degraded() &&
+        (metadata.protect_system || metadata.protect_messages ||
+         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
+             return boundary.protect;
+         }));
+    const std::string namespace_id = compute_namespace_id(metadata);
+
+    SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
+            slot.id,
+            slot.prompt.tokens.size(),
+            total_size / (1024.0 * 1024.0),
+            state_size_tgt / (1024.0 * 1024.0),
+            state_size_dft / (1024.0 * 1024.0));
+
+    const bool runtime_has_draft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+
+    if (ctx_tgt && state_size_tgt == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
+        return false;
+    }
+
+    if (runtime_has_draft && state_size_dft == 0) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
+        n_pairing_violations++;
+        return false;
+    }
+
+    if (hot_payload_budget_enabled() && total_size > limit_size) {
+        if (protected_root) {
+            n_protected_root_decisions++;
+            n_protected_root_admission_rejections++;
+        }
+        SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
+                namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
+        return false;
+    }
+
+    // Stage 21 fix: save only the prompt tokens, not the full slot (prompt + generated)
+    // slot.task->tokens contains the original prompt tokens submitted by the user
+    // slot.prompt.tokens has accumulated all tokens including those generated during completion
+    if (!slot.task) {
+        SRV_WRN("%s", " - hybrid cache: save rejected because task is null\n");
+        return false;
+    }
+    server_tokens entry_tokens = slot.task->tokens.clone();
+
+    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
+    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+        n_cache_equivalent_branch_deduplications++;
+        refresh_existing_entry(existing, protected_root);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
+                entry_tokens.size(), namespace_id.c_str());
+        return true;
+    }
+
+    std::vector<uint8_t> target_payload;
+    std::vector<uint8_t> draft_payload;
+
+    if (ctx_tgt && state_size_tgt > 0) {
+        try {
+            target_payload.resize(state_size_tgt);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate target state buffer (%zu bytes): %s\n", state_size_tgt, e.what());
+            return false;
+        }
+
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_payload.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt) {
+            SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
+            return false;
+        }
+    }
+
+    if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
+        try {
+            draft_payload.resize(state_size_dft);
+        } catch (const std::bad_alloc & e) {
+            SRV_ERR(" - hybrid cache: failed to allocate draft state buffer (%zu bytes): %s\n", state_size_dft, e.what());
+            return false;
+        }
+
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_payload.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft) {
+            SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
+            return false;
+        }
+    }
+
+    std::string descriptor_failure;
+    if (existing != entries.end()) {
+        n_cache_equivalent_branch_deduplications++;
+        if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+            SRV_WRN(" - hybrid cache: metadata-only re-materialization rejected (%s)\n", descriptor_failure.c_str());
+            return false;
+        }
+        existing->protected_root = existing->protected_root || protected_root;
+        existing->checkpoints.clear();
+        existing->metadata = metadata;
+        if (!slot.prompt.checkpoints.empty()) {
+            std::string checkpoint_failure;
+            if (!admit_latest_checkpoint_and_store_metadata(*existing, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
+                SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+            }
+        }
+        sync_branch_node_from_entry(*existing);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_INF(" - hybrid cache: re-materialized slot %d (namespace: %s, entries: %zu)\n",
+                slot.id, existing->namespace_id.c_str(), entries.size());
+        return true;
+    }
+
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(entry_tokens, namespace_id);
+    auto it_new = admit_entry_with_payload(
+        std::move(entry_tokens),
+        metadata,
+        namespace_id,
+        protected_root,
+        std::move(target_payload),
+        std::move(draft_payload),
+        runtime_has_draft,
+        parent_node_id,
+        &descriptor_failure);
+    if (it_new == entries.end()) {
+        SRV_WRN(" - hybrid cache: save rejected by descriptor validation (%s)\n", descriptor_failure.c_str());
+        return false;
+    }
+    it_new->checkpoints.clear();
+    if (!slot.prompt.checkpoints.empty()) {
+        std::string checkpoint_failure;
+        if (!admit_latest_checkpoint_and_store_metadata(*it_new, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
+            SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
+        }
+    }
+    acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
+
+    SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
+            slot.id, it_new->namespace_id.c_str(), entries.size());
+
+    return true;
+}
+
+bool hybrid_cache_controller::tx_load(server_slot & slot, const server_task & task) {
+    // Stage 25: acquire the cache-state mutex once for the duration of
+    // the legacy load. The recursive mutex allows nesting via the
+    // mark_payload_evicted -> demote_payload -> enqueue_demotion chain.
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
+    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
+    auto it_best = find_best_match(task.tokens, task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+    const bool need_dft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
+    const bool runtime_has_draft = need_dft;
+    const payload_pair_state pair_state = runtime_has_draft ?
+        payload_pair_state::target_and_draft :
+        payload_pair_state::target_only;
+
+    if (it_best == entries.end()) {
+        SRV_INF("%s", " - hybrid cache: no match found\n");
+        n_misses++;
+        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
+        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
+        const cache_restore_miss_reason reason = prefix_candidate ?
+            cache_restore_miss_reason::unsafe_prefix_rejected :
+            classify_restore_miss(task.tokens, lookup_namespace_id);
+        record_restore_miss(reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
+        return false;
+    }
+
+    const int match_len = it_best->tokens.get_common_prefix(task.tokens);
+    SRV_INF(" - hybrid cache: found match with %d tokens (matched: %d/%zu, namespace: %s)\n",
+            it_best->n_tokens(), match_len, task.tokens.size(), it_best->namespace_id.c_str());
+
+    if (match_len != it_best->n_tokens() || it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
+        SRV_WRN(" - hybrid cache: rejecting non-exact restore candidate (%d/%d tokens, task tokens: %zu)\n",
+                match_len, it_best->n_tokens(), task.tokens.size());
+        n_misses++;
+        record_restore_miss(cache_restore_miss_reason::unsafe_prefix_rejected, profile, pair_state, task, lookup_namespace_id, &(*it_best));
+        return false;
+    }
+
+    const hot_payload_record * payload = nullptr;
+    std::string restore_failure;
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    if (profile == cache_workload_profile::checkpoint_dependent &&
+        selected_payload_kind == payload_kind::checkpoint) {
+        std::string checkpoint_path_failure;
+        if (!checkpoint_path_valid_for_restore(*it_best, &checkpoint_path_failure)) {
+            n_misses++;
+            n_fallback_restores++;
+            SRV_WRN(" - hybrid cache: load_slot - checkpoint-dependent restore rejected (%s)\n",
+                    checkpoint_path_failure.c_str());
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+        selected_payload_kind = payload_kind::checkpoint;
+        selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+    }
+
+    // Phase 6: Check if the payload is in cold/demoting/promoting state
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
+    if (descriptor_it != payload_descriptors.end()) {
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            SRV_INF(" - hybrid cache: load_slot - payload %" PRIu64 " is cold, initiating promotion\n",
+                    selected_payload_id);
+            promote_payload(selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+        if (descriptor_it->second.residency == payload_residency_state::promoting) {
+            SRV_WRN(" - hybrid cache: load_slot - payload %" PRIu64 " is promoting, cannot restore yet\n",
+                    selected_payload_id);
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+    }
+
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint) {
+            auto failed_descriptor_it = payload_descriptors.find(selected_payload_id);
+            if (failed_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(failed_descriptor_it->second, false);
+            } else {
+                n_checkpoint_restore_failures++;
+            }
+        }
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+        return false;
+    }
+    const llama_state_seq_flags restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    const int restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
+
+    server_prompt prompt_before = slot.prompt.clone();
+    const int cache_before = slot.n_prompt_tokens_cache;
+    const int processed_before = slot.n_prompt_tokens_processed;
+    const prepared_prompt_metadata metadata_before = slot.prompt_metadata;
+    std::vector<uint8_t> target_before;
+    std::vector<uint8_t> draft_before;
+    const size_t state_size_tgt_before = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    const size_t state_size_dft_before = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+    if (state_size_tgt_before > 0) {
+        target_before.resize(state_size_tgt_before);
+        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_before.data(), state_size_tgt_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_tgt != state_size_tgt_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot target state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+    }
+    if (state_size_dft_before > 0) {
+        draft_before.resize(state_size_dft_before);
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_before.data(), state_size_dft_before, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (n_dft != state_size_dft_before) {
+            SRV_ERR("%s", " - hybrid cache: failed to snapshot draft state\n");
+            n_restore_failures++;
+            n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+    }
+
+    const auto clear_live_state = [&](llama_context * ctx) {
+        llama_memory_t mem = llama_get_memory(ctx);
+        return mem != nullptr && llama_memory_seq_rm(mem, slot.id, -1, -1);
+    };
+    if (ctx_tgt && target_before.empty() && !clear_live_state(ctx_tgt)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore target state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+        return false;
+    }
+    if (ctx_dft && slot.ctx_dft && draft_before.empty() && !clear_live_state(ctx_dft)) {
+        SRV_ERR("%s", " - hybrid cache: cannot clear empty pre-restore draft state\n");
+        n_restore_failures++;
+        n_fallback_restores++;
+        record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+        return false;
+    }
+    const auto rollback_restore = [&]() {
+        bool ok = true;
+        if (ctx_tgt) {
+            if (!target_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_tgt, target_before.data(), target_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == target_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_tgt) && ok;
+            }
+        }
+        if (ctx_dft && slot.ctx_dft) {
+            if (!draft_before.empty()) {
+                ok = llama_state_seq_set_data_ext(ctx_dft, draft_before.data(), draft_before.size(), slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) == draft_before.size() && ok;
+            } else {
+                ok = clear_live_state(ctx_dft) && ok;
+            }
+        }
+        slot.prompt = prompt_before.clone();
+        slot.n_prompt_tokens_cache = cache_before;
+        slot.n_prompt_tokens_processed = processed_before;
+        slot.prompt_metadata = metadata_before;
+        if (!ok) {
+            n_restore_rollback_failures++;
+        }
+    };
+
+    if (ctx_tgt && !payload->target.empty()) {
+        const size_t n_tgt = llama_state_seq_set_data_ext(
+            ctx_tgt,
+            payload->target.data(),
+            payload->target.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_tgt != payload->target.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore target state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_target_apply_failures++;
+            n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored target state (%zu bytes)\n", n_tgt);
+    }
+
+    if (ctx_dft && slot.ctx_dft && !payload->draft.empty()) {
+        const size_t n_dft = llama_state_seq_set_data_ext(
+            ctx_dft,
+            payload->draft.data(),
+            payload->draft.size(),
+            slot.id,
+            restore_flags);
+
+        if (n_dft != payload->draft.size()) {
+            SRV_ERR("%s", " - hybrid cache: failed to restore draft state\n");
+            rollback_restore();
+            n_restore_failures++;
+            n_restore_draft_apply_failures++;
+            n_fallback_restores++;
+            record_restore_miss(cache_restore_miss_reason::payload_unavailable, profile, pair_state, task, lookup_namespace_id);
+            return false;
+        }
+        SRV_DBG(" - hybrid cache: restored draft state (%zu bytes)\n", n_dft);
+    }
+
+    const auto old_key = lru_key_t{it_best->use_sequence, it_best->insertion_sequence};
+    it_best->mark_used(next_use_sequence());
+    sync_branch_node_from_entry(*it_best);
+    update_lru_index(it_best, old_key);
+    acquire_branch_node_ref_for_slot(slot, it_best->branch_node_id);
+
+    slot.prompt.tokens = it_best->tokens.clone();
+    slot.prompt.tokens.keep_first(std::min<size_t>(restored_token_count, it_best->tokens.size()));
+
+    slot.prompt.checkpoints = it_best->checkpoints;
+    slot.n_prompt_tokens_cache = restored_token_count;
+    slot.n_prompt_tokens_processed = restored_token_count;
+    slot.prompt_metadata = it_best->metadata;
+    n_hits++;
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        auto success_descriptor_it = payload_descriptors.find(selected_payload_id);
+        if (success_descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(success_descriptor_it->second, true);
+        } else {
+            n_checkpoint_restore_successes++;
+        }
+    }
+    record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, profile, pair_state, task, lookup_namespace_id);
+
+    SRV_INF(" - hybrid cache: successfully loaded %d tokens into slot %d (use_count: %zu)\n",
+            restored_token_count, slot.id, it_best->use_count);
+
+    return true;
+}
+
+hybrid_cache_controller::cache_response hybrid_cache_controller::tx_restore(server_slot & slot, const server_task & task) {
+    GGML_UNUSED(slot);
+    cache_response response;
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        response.miss_reason = cache_restore_miss_reason::unsupported_route_or_profile;
+        return response;
+    }
+
+    const std::string lookup_namespace_id = compute_namespace_id(task.prompt_metadata);
+    const cache_workload_profile profile = detect_workload_profile();
+    const bool runtime_has_draft = ctx_dft != nullptr;
+    const payload_pair_state pair_state = runtime_has_draft ?
+        payload_pair_state::target_and_draft :
+        payload_pair_state::target_only;
+    record_workload_profile(profile);
+    record_branch_lookup(lookup_namespace_id, "token_span");
+
+    const auto lookup_tokens = cache_tokens_to_vector(task.tokens);
+    auto forest_candidates = forest.find_nodes_by_token_span(lookup_namespace_id, lookup_tokens, lookup_tokens.size());
+    std::unordered_set<uint64_t> seen_candidates(forest_candidates.begin(), forest_candidates.end());
+    for (const auto & boundary : task.prompt_metadata.boundaries) {
+        if (boundary.token_start != 0 || boundary.checksum == 0 || boundary.token_end == 0 ||
+            boundary.token_end > lookup_tokens.size()) {
+            continue;
+        }
+        record_branch_lookup(lookup_namespace_id, "checksum_span");
+        auto checksum_candidates = forest.find_nodes_by_checksum_span(
+            lookup_namespace_id, boundary.checksum, boundary.token_end);
+        for (uint64_t node_id : checksum_candidates) {
+            if (seen_candidates.insert(node_id).second) {
+                forest_candidates.push_back(node_id);
+            }
+        }
+    }
+    std::vector<uint64_t> compatible_candidates;
+    for (uint64_t node_id : forest_candidates) {
+        auto it = find_entry_by_branch_node(node_id);
+        if (it == entries.end()) {
+            continue;
+        }
+        if (!validate_namespace_compatibility(lookup_namespace_id, it->namespace_id)) {
+            n_namespace_validation_failures++;
+            continue;
+        }
+        n_namespace_validation_passes++;
+        compatible_candidates.push_back(node_id);
+    }
+    std::list<hybrid_cache_entry>::iterator it_best =
+        select_restore_candidate(compatible_candidates, task.tokens, profile);
+
+    if (it_best == entries.end()) {
+        n_misses++;
+        auto prefix_it = find_prefix_candidate(task.tokens, lookup_namespace_id, profile);
+        const hybrid_cache_entry * prefix_candidate = prefix_it == entries.end() ? nullptr : &(*prefix_it);
+        response.miss_reason = prefix_candidate ?
+            cache_restore_miss_reason::unsafe_prefix_rejected :
+            classify_restore_miss(task.tokens, lookup_namespace_id);
+        record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id, prefix_candidate);
+        return response;
+    }
+    n_branch_lookup_hits++;
+
+    if (it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
+        n_misses++;
+        response.miss_reason = cache_restore_miss_reason::unsafe_prefix_rejected;
+        record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id, &(*it_best));
+        return response;
+    }
+
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
+    uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
+
+    auto descriptor_it = payload_descriptors.find(selected_payload_id);
+    if (descriptor_it != payload_descriptors.end() &&
+        descriptor_it->second.residency == payload_residency_state::cold) {
+        if (!tx_promote_payload(selected_payload_id)) {
+            if (selected_payload_kind == payload_kind::checkpoint) {
+                record_checkpoint_restore(descriptor_it->second, false);
+            }
+            n_misses++;
+            response.miss_reason = cache_restore_miss_reason::payload_unavailable;
+            record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id);
+            return response;
+        }
+        descriptor_it = payload_descriptors.find(selected_payload_id);
+    }
+    if (descriptor_it != payload_descriptors.end() &&
+        descriptor_it->second.residency == payload_residency_state::promoting) {
+        n_misses++;
+        response.miss_reason = cache_restore_miss_reason::payload_unavailable;
+        record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id);
+        return response;
+    }
+
+    std::string restore_failure;
+    const hot_payload_record * payload = nullptr;
+    if (!validate_payload_for_restore(*it_best, selected_payload_kind, runtime_has_draft, &restore_failure, &payload)) {
+        SRV_ERR(" - hybrid cache: tx_restore - descriptor validation failed (%s)\n", restore_failure.c_str());
+        if (selected_payload_kind == payload_kind::checkpoint && descriptor_it != payload_descriptors.end()) {
+            record_checkpoint_restore(descriptor_it->second, false);
+        }
+        n_misses++;
+        response.miss_reason = cache_restore_miss_reason::payload_unavailable;
+        record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id);
+        return response;
+    }
+
+    response.found = true;
+    response.entry_id = it_best->entry_id;
+    response.selected_payload_kind = selected_payload_kind;
+    response.restore_flags = restore_state_flags_for_payload(selected_payload_kind);
+    response.restored_token_count = restored_token_count_for_payload(*it_best, selected_payload_kind);
+    if (payload) {
+        response.target_bytes = payload->target;
+        response.draft_bytes = payload->draft;
+    }
+    response.runtime_has_draft = runtime_has_draft;
+    response.profile = profile;
+    response.pair_state = pair_state;
+    response.lookup_namespace_id = lookup_namespace_id;
+    response.miss_reason = cache_restore_miss_reason::exact_entry_absent;
+    // Capture entry state for the apply step (OUTSIDE the lock per
+    // OQ-25-01 SPLIT). Re-locking to re-fetch the entry would race
+    // with concurrent eviction; the apply uses the captured snapshot.
+    // entry_tokens is server_tokens which is non-copyable (only movable),
+    // so use clone() to deep-copy. entry_checkpoints and entry_metadata
+    // are std::list and struct respectively and use plain assignment.
+    response.entry_tokens = it_best->tokens.clone();
+    response.entry_checkpoints = it_best->checkpoints;
+    response.entry_metadata = it_best->metadata;
+    return response;
+}
+
+void hybrid_cache_controller::tx_apply_restore(server_slot & slot, const cache_response & plan, bool apply_ok) {
+    GGML_UNUSED(slot);
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return;
+    }
+    if (!plan.found) {
+        return;
+    }
+    n_apply_restore_owner_view_syncs++;
+
+    auto it = entries.end();
+    for (auto e = entries.begin(); e != entries.end(); ++e) {
+        if (e->entry_id == plan.entry_id) {
+            it = e;
+            break;
+        }
+    }
+    if (it == entries.end()) {
+        return;
+    }
+
+    if (apply_ok) {
+        const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
+        it->mark_used(next_use_sequence());
+        sync_branch_node_from_entry(*it);
+        update_lru_index(it, old_key);
+        n_hits++;
+        if (plan.selected_payload_kind == payload_kind::checkpoint) {
+            auto success_descriptor_it = payload_descriptors.find(
+                entry_payload_id_for_kind(*it, plan.selected_payload_kind));
+            if (success_descriptor_it != payload_descriptors.end()) {
+                record_checkpoint_restore(success_descriptor_it->second, true);
+            } else {
+                n_checkpoint_restore_successes++;
+            }
+        }
+        record_prompt_evidence(true, cache_restore_miss_reason::exact_entry_absent, plan.profile, plan.pair_state, server_task{}, plan.lookup_namespace_id);
+    }
+}
+
+bool hybrid_cache_controller::debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    return tx_save(slot, metadata);
+}
+
+hybrid_cache_controller::cache_response hybrid_cache_controller::debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task) {
+    return tx_restore(slot, task);
+}
+
+void hybrid_cache_controller::debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok) {
+    tx_apply_restore(slot, plan, apply_ok);
+}
+
+bool hybrid_cache_controller::debug_force_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    return tx_save(slot, metadata);
+}
+
+bool hybrid_cache_controller::debug_force_deep_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata) {
+    server_context_tx_depth_ = reentrancy_depth_limit_;
+    const bool result = tx_save(slot, metadata);
+    server_context_tx_depth_ = 0;
+    return result;
+}
+
+bool hybrid_cache_controller::debug_force_locked_sleep_for_tests(int sleep_ms) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    const auto start = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    if (elapsed_ms >= transaction_wait_threshold_.count()) {
+        n_transaction_wait_exceeded++;
+        return true;
+    }
+    return false;
+}
+

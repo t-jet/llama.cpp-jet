@@ -97,3 +97,7 @@ QA should split Stage 5 draft coverage by mode:
 - negative compatibility checks that prevent reuse between all of the above modes
 
 Public HTTP evidence is enough for successful model-backed save and restore. Pair mismatch, corrupted descriptor, failed target apply, failed draft apply, rollback failure, and unsupported clear preflight still require focused controller or fault-injection evidence.
+
+## Transactional binding (Stage 25)
+
+The Stage 5 pairing rules apply unchanged under the Stage 25 atomic transactional method. Every descriptor save runs inside `tx_save` under `cache_state_mutex_`; every restore runs inside `tx_restore` plus `tx_apply_restore`; every demote and every cold promote runs inline as `tx_demote_payload` or `tx_promote_payload`. The pair-state semantics remain binary and the namespace rules remain unchanged. The transactional model only changes when the work happens and how mutations are serialized, not which mutations are legal.

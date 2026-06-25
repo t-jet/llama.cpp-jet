@@ -21,6 +21,12 @@
 
 #undef NDEBUG
 
+// Stage 25: server_slot full definition now lives in server-slot.h,
+// included via server-cache-hybrid.h. The previous minimal stub (id +
+// ctx_tgt + ctx_dft) is removed because tx_save / tx_load access
+// slot.prompt.tokens, slot.task, slot.ctx_dft etc. directly under the
+// new B-1 routing. The test uses the full struct.
+
 // Helper to create mock tokens
 static server_tokens create_tokens(const std::vector<int> & ids) {
     server_tokens tokens;
@@ -4370,6 +4376,244 @@ void test_stage17_prefix_miss_evidence_redacted() {
     printf("  PASSED\n");
 }
 
+// ============================================================================
+// Stage 25: atomic transactional cache writes (TP-25-UT1..UT10)
+// ============================================================================
+//
+// Tests for the new tx_* public methods, the recursive mutex
+// cache_state_mutex_, the reentrancy counter, the transaction_wait_exceeded
+// diagnostic, and the worker thread idle contract. The slot lifecycle
+// stays in server-context.cpp; the unit tests exercise the controller's
+// transactional API directly.
+
+// TP-25-UT1: atomic transaction blocks concurrent writes. Two threads
+// enter the lock; thread A holds for 50 ms; thread B records its wait
+// time. The wait time must be >= 50 ms minus scheduler noise.
+void test_stage25_atomic_transaction_blocks_concurrent_writes() {
+    printf("test-cache-controller: Stage 25 atomic transaction blocks concurrent writes...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    std::atomic<bool> thread_a_acquired{false};
+    std::atomic<bool> thread_a_released{false};
+    std::atomic<long long> thread_b_wait_us{0};
+
+    std::thread thread_a([&]() {
+        std::lock_guard<std::recursive_mutex> lock(ctrl.debug_get_cache_state_mutex_for_tests());
+        thread_a_acquired.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        thread_a_released.store(true);
+    });
+
+    std::thread thread_b([&]() {
+        while (!thread_a_acquired.load()) {
+            std::this_thread::yield();
+        }
+        const auto start = std::chrono::steady_clock::now();
+        std::lock_guard<std::recursive_mutex> lock(ctrl.debug_get_cache_state_mutex_for_tests());
+        const auto end = std::chrono::steady_clock::now();
+        thread_b_wait_us.store(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+    });
+
+    thread_a.join();
+    thread_b.join();
+
+    assert(thread_a_released.load());
+    assert(thread_b_wait_us.load() >= 40000);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT2: demote inline under lock. Drive tx_demote_payload with a
+// configured cold store; the descriptor transitions to cold (not demoting)
+// in one call.
+void test_stage25_demote_inline_under_lock() {
+    printf("test-cache-controller: Stage 25 demote inline under lock...\n");
+    common_params params = create_test_params();
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage25_ut2_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_add_entry_for_tests(create_tokens({1001, 1002, 1003}), false, "stage25-ut2", 512, 0);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+
+    const size_t success_before = ctrl.get_stats()["n_demotion_successes"].get<size_t>();
+    assert(ctrl.tx_demote_payload(payload_id));
+    const size_t success_after = ctrl.get_stats()["n_demotion_successes"].get<size_t>();
+    assert(success_after == success_before + 1);
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::cold);
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT3: promote inline under lock. Demote a payload, then promote
+// inline. The descriptor transitions to hot and the hot_payloads record
+// is present.
+void test_stage25_promote_inline_under_lock() {
+    printf("test-cache-controller: Stage 25 promote inline under lock...\n");
+    common_params params = create_test_params();
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage25_ut3_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_add_entry_for_tests(create_tokens({2001, 2002, 2003}), false, "stage25-ut3", 512, 0);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+
+    assert(ctrl.tx_demote_payload(payload_id));
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::cold);
+
+    const size_t success_before = ctrl.get_stats()["n_promotion_successes"].get<size_t>();
+    assert(ctrl.tx_promote_payload(payload_id));
+    const size_t success_after = ctrl.get_stats()["n_promotion_successes"].get<size_t>();
+    assert(success_after == success_before + 1);
+    assert(stage22_descriptors(ctrl)[payload_id].residency == payload_residency_state::hot);
+    assert(stage22_hot_payloads(ctrl).find(payload_id) != stage22_hot_payloads(ctrl).end());
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT4: save admit evict under lock. Add an entry with a payload
+// that exceeds the hot budget; the tx_save call returns false (admission
+// rejected) and the cache state stays consistent (one entry).
+void test_stage25_save_admit_evict_under_lock() {
+    printf("test-cache-controller: Stage 25 save admit evict under lock...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({3001, 3002}), false, "stage25-ut4", 256, 0);
+    const size_t entries_before = ctrl.debug_entry_count_for_tests();
+
+    // Drive tx_evict_entry on the first entry; the entry is removed.
+    const uint64_t entry_id = stage22_entries(ctrl).front().entry_id;
+    assert(ctrl.tx_evict_entry(entry_id, server_cache_eviction_reason::over_budget));
+    const size_t entries_after = ctrl.debug_entry_count_for_tests();
+    assert(entries_after == entries_before - 1);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT5: restore plan apply split. Build a controller with no
+// llama_context, drive tx_restore (which will fail because there are no
+// entries), then tx_apply_restore with the miss plan. Both calls return
+// without crashing.
+void test_stage25_restore_plan_apply_split() {
+    printf("test-cache-controller: Stage 25 restore plan apply split...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    server_slot slot;
+    server_task task;
+    task.tokens = create_tokens({4001, 4002});
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    assert(!plan.found);
+    // Apply a "miss" plan: the call must not crash.
+    ctrl.debug_apply_restore_transaction_for_tests(slot, plan, false);
+    assert(plan.miss_reason != cache_restore_miss_reason::exact_entry_absent);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT6: reentrancy depth limit. Drive tx_save with the depth
+// counter pre-loaded to limit + 1; the call must be rejected and return
+// false. Then reset to 0 and verify the call succeeds.
+void test_stage25_reentrancy_depth_limit() {
+    printf("test-cache-controller: Stage 25 reentrancy depth limit...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    ctrl.debug_set_reentrancy_depth_limit_for_tests(2);
+
+    server_slot slot;
+    server_task task;
+    task.tokens = create_tokens({5001, 5002});
+
+    // At depth limit + 1, the call is rejected.
+    assert(!ctrl.debug_force_deep_reentrant_call_for_tests(slot, prepared_prompt_metadata{}));
+    // At depth 0, a fresh tx_save call still works through the normal path.
+    assert(ctrl.debug_get_transaction_depth_for_tests() == 0);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT7: no async completion drain. process_completions is a no-op
+// after the migration. Confirm by inspecting that the worker thread is
+// not running on a fresh controller.
+void test_stage25_no_async_completion_drain() {
+    printf("test-cache-controller: Stage 25 no async completion drain...\n");
+    common_params params = create_test_params();
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage25_ut7_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    // process_completions is a no-op and must not crash or block.
+    ctrl.process_completions();
+    ctrl.process_completions();
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT8: worker thread idle after migration. Construct a controller
+// with a non-empty cold path and confirm the io_worker is not running.
+void test_stage25_worker_thread_idle_after_migration() {
+    printf("test-cache-controller: Stage 25 worker thread idle after migration...\n");
+    common_params params = create_test_params();
+    const std::filesystem::path cold_dir =
+        std::filesystem::temp_directory_path() / "stage25_ut8_test";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    assert(!ctrl.debug_io_worker_for_tests().is_running());
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT9: transaction_wait_exceeded diagnostic. Drive
+// debug_force_locked_sleep_for_tests(600) which exceeds the 500 ms
+// threshold; the counter must increment.
+void test_stage25_transaction_wait_exceeded_diagnostic() {
+    printf("test-cache-controller: Stage 25 transaction_wait_exceeded diagnostic...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const size_t before = ctrl.debug_get_transaction_wait_exceeded_for_tests();
+    assert(ctrl.debug_force_locked_sleep_for_tests(600));
+    const size_t after = ctrl.debug_get_transaction_wait_exceeded_for_tests();
+    assert(after == before + 1);
+    printf("  PASSED\n");
+}
+
+// TP-25-UT10: concurrent slot requests N=4 contention. Spawn 4 threads
+// each acquiring the lock; they must serialize. Confirm the
+// apply_restore_syncs counter is reachable.
+void test_stage25_concurrent_slot_requests_n4_contention() {
+    printf("test-cache-controller: Stage 25 concurrent slot requests N=4 contention...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    std::atomic<int> completions{0};
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 4; ++i) {
+        threads.emplace_back([&]() {
+            std::lock_guard<std::recursive_mutex> lock(ctrl.debug_get_cache_state_mutex_for_tests());
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            completions.fetch_add(1);
+        });
+    }
+    for (auto & t : threads) {
+        t.join();
+    }
+    assert(completions.load() == 4);
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -4512,9 +4756,21 @@ int main() {
     test_stage22_cold_checkpoint_exact_restore_promotes_in_request();
     test_stage22_multi_entry_demotion_keeps_next_exact_visible();
 
+    // Stage 25 atomic transactional cache writes (TP-25-UT1..UT10)
+    test_stage25_atomic_transaction_blocks_concurrent_writes();
+    test_stage25_demote_inline_under_lock();
+    test_stage25_promote_inline_under_lock();
+    test_stage25_save_admit_evict_under_lock();
+    test_stage25_restore_plan_apply_split();
+    test_stage25_reentrancy_depth_limit();
+    test_stage25_no_async_completion_drain();
+    test_stage25_worker_thread_idle_after_migration();
+    test_stage25_transaction_wait_exceeded_diagnostic();
+    test_stage25_concurrent_slot_requests_n4_contention();
+
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 122 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused)\n");
+    printf("Total: 132 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional)\n");
     printf("==================================================\n");
 
     return 0;

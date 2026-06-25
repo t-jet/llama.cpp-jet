@@ -50,7 +50,7 @@ The alternatives below were evaluated against the current implementation in `too
 
 ### ADR-001: Keep the Alternate Behavior Behind Explicit Cache Mode Dispatch
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R1-R4, R107-R111
 
 Context:
@@ -75,7 +75,7 @@ Consequences:
 
 ### ADR-002: Use a Workload-Profile-Aware Hybrid Restore Model
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R5-R14, R84-R86
 
 Context:
@@ -104,7 +104,7 @@ Consequences:
 
 ### ADR-003: Replace Flat Prompt Ownership with a Shared Branch Forest
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R69-R83
 
 Context:
@@ -130,7 +130,7 @@ Consequences:
 
 ### ADR-004: Capture Boundaries in the HTTP Prompt-Preparation Layer
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R27-R33, R115
 
 Context:
@@ -155,7 +155,7 @@ Consequences:
 
 ### ADR-005: Use Byte-Accounted LRU with Protected Roots as the Initial Policy
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R18-R26, R57-R60
 
 Context:
@@ -181,7 +181,7 @@ Consequences:
 
 ### ADR-006: Separate Metadata from Payload Bytes and Treat Target/Draft as an Atomic Pair
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R9-R10, R37-R48, R52, R104
 
 Context:
@@ -209,34 +209,36 @@ Consequences:
 - Pair integrity becomes explicit and testable.
 - Serialization and storage contracts must carry pairing metadata and compatibility information.
 
-### ADR-007: Use an Asynchronous Local Cold Store with Versioned Descriptors
+### ADR-007: Use a Synchronous Transactional Cold Store with Versioned Descriptors
 
-Status: Proposed  
+Status: Active (rewritten Stage 25)
 Requirement support: R49-R56, R122, R127
 
 Context:
 
-`server_context` runs on a dedicated single thread and already warns against heavy post-processing in that thread. A cold layer is required, but synchronous disk I/O in the scheduling thread would directly hurt multi-slot throughput.
+The cache controller mutates payload residency across hot and cold tiers, and `server_context` already warns against heavy post-processing in that thread. Stages 1-24 used a dedicated cache I/O worker thread that drained demotions and promotions asynchronously; that path produced race windows between the slot thread, the worker thread, and the `update` housekeeping sweep (see Stage 25 Part 1 inter-thread crossings). Stage 25 replaces the async path with a synchronous transactional model under a single recursive mutex on the hybrid controller.
 
 Decision:
 
-Use a local filesystem cold store with versioned payload descriptors and a dedicated cache I/O worker that performs promotion and demotion outside the `server_context` thread. `server_context` remains the policy owner, but not the disk-I/O executor.
+Use a local filesystem cold store with versioned payload descriptors. The cache I/O worker is repurposed into a synchronous helper invoked inline under `cache_state_mutex_` from inside `tx_demote_payload` and `tx_promote_payload`. Promotion and demotion run on the slot thread that initiated the transaction, holding the cache-state lock for the duration of the disk read or atomic write + rename. The worker thread stays asleep (or is removed) and no background drain mutates cache state.
 
 Alternatives considered:
 
-- Synchronous disk I/O inside `server_context`. Rejected because it makes cold restores and demotions block the entire inference scheduler.
+- Synchronous disk I/O inside `server_context` without transactionality. Rejected because it blocks the inference scheduler and reintroduces the same race windows the transactional model is designed to remove.
 - External distributed cache service. Rejected because the requirements explicitly exclude distributed cache/coherence in the first implementation.
 - Keep everything hot in RAM. Rejected because the requirements explicitly require a cold layer and hot/cold residency.
+- Keep the async I/O worker and only add a mutex. Rejected because the async completion handler remains split between slot thread and worker thread; the lock alone does not remove the `demoting` and `promoting` transient residency windows.
 
 Consequences:
 
-- Throughput and tail latency are better protected.
-- The design needs a small internal asynchronous protocol and a slot waiting state for pending promotion.
+- Throughput and tail latency on the slot critical path move from "background" to "foreground"; cold-promote latency and cold-write latency now extend the critical section. The Stage 25 design Part 4 estimates the regression for representative workloads.
+- No async protocol or slot waiting state is needed for cold promotion: the slot thread blocks on `cache_state_mutex_` until the cold read completes inside the same transaction.
 - Storage backends remain substitutable in tests through the cold-store abstraction.
+- The Stage 6 atomic write + rename invariant is preserved; Stage 25 only moves when the write happens.
 
 ### ADR-008: Make Diagnostics, Integrity Checks, and Deterministic Test Seams Mandatory
 
-Status: Proposed  
+Status: Proposed
 Requirement support: R61-R68, R66a, R107, R121-R129, R130, R131, R132-R133
 
 Context:

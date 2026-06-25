@@ -98,3 +98,12 @@ This part is durable. The Stage 11 follow-up design part is the
 implementation contract. The Manager accepts the architecture-level
 invariant; the Architect reviews the implementation contract; the
 Developer implements the contract; QA verifies the test plan rows.
+
+## Stage 25 cross-reference
+
+The atomic transactional cache method (Stage 25) does not change this
+invariant. The cap check sits in `src/llama-context.cpp`, upstream of
+the cache controller; the speculative decode path runs on the slot
+thread and never enters the cache-state mutex. Cache state mutations
+inside `tx_*` transactions cannot affect the cap because the cap is a
+property of the llama context, not the cache controller.

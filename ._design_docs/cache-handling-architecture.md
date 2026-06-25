@@ -1,8 +1,12 @@
 # Software Architecture: Alternate Hybrid Cache Mode for llama-server
 
-Status: Proposed  
-Date: 2026-05-24  
+Status: Target state - atomic transactional cache writes per Stage 25
+Date: 2026-06-25
 Primary source: `cache-handling-requirements.md`
+
+## Target state summary
+
+The hybrid cache controller operates as an atomic transactional state machine under a single recursive mutex. Every demote, evict, restore, admit, and cold-store transition runs synchronously inside a `tx_*` transaction invoked from the slot request that triggered it; no background thread or async drain mutates cache state. The transactional method, slot-lifecycle bindings (`tx_restore`, `tx_apply_restore`, `tx_save`, `tx_load`), and the three new invariants I-25-01 atomicity, I-25-02 isolation, and I-25-03 durability-within-transaction are recorded in [Stage 25 design](cache-handling-phase25-design.md) and applied throughout the parts below.
 
 ## Contents
 

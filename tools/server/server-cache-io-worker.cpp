@@ -142,6 +142,60 @@ std::vector<io_completion_result> server_cache_io_worker::drain_results() {
     return results;
 }
 
+std::optional<io_completion_result> server_cache_io_worker::execute_inline(const io_work_item & item) {
+    // Stage 25: run the work item on the calling thread under the caller's
+    // cache_state_mutex_. The thread primitive is not started so this path
+    // is the only synchronous entry point. Returns std::nullopt when no
+    // cold store is configured.
+    if (!cold_store_ || !cold_store_->is_configured()) {
+        return std::nullopt;
+    }
+    io_work_item local_item = item;
+    io_completion_result result;
+    if (local_item.type == io_task_type::demotion) {
+        result = process_demotion(local_item);
+    } else {
+        result = process_promotion(local_item);
+    }
+    return result;
+}
+
+std::optional<io_completion_result> server_cache_io_worker::execute_demotion_inline(
+        uint64_t payload_id,
+        const cold_descriptor_snapshot & descriptor_snapshot,
+        const std::vector<uint8_t> & target_bytes,
+        const std::vector<uint8_t> & draft_bytes) {
+    io_work_item item{};
+    item.type = io_task_type::demotion;
+    item.payload_id = payload_id;
+    item.pair_state = descriptor_snapshot.pair_state;
+    item.format_version = descriptor_snapshot.format_version;
+    item.target_size_bytes = descriptor_snapshot.target_size_bytes;
+    item.draft_size_bytes = descriptor_snapshot.draft_size_bytes;
+    item.target_checksum = descriptor_snapshot.target_checksum;
+    item.draft_checksum = descriptor_snapshot.draft_checksum;
+    item.target_bytes = target_bytes;
+    item.draft_bytes = draft_bytes;
+    return execute_inline(item);
+}
+
+std::optional<io_completion_result> server_cache_io_worker::execute_promotion_inline(
+        uint64_t payload_id,
+        cold_ref ref,
+        const cold_descriptor_snapshot & descriptor_snapshot) {
+    io_work_item item{};
+    item.type = io_task_type::promotion;
+    item.payload_id = payload_id;
+    item.ref = ref;
+    item.pair_state = descriptor_snapshot.pair_state;
+    item.format_version = descriptor_snapshot.format_version;
+    item.target_size_bytes = descriptor_snapshot.target_size_bytes;
+    item.draft_size_bytes = descriptor_snapshot.draft_size_bytes;
+    item.target_checksum = descriptor_snapshot.target_checksum;
+    item.draft_checksum = descriptor_snapshot.draft_checksum;
+    return execute_inline(item);
+}
+
 void server_cache_io_worker::worker_thread_func() {
     while (true) {
         io_work_item item;

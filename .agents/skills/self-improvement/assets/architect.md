@@ -90,6 +90,16 @@ Action:
 
 - Do convert to LF-only by reading raw bytes, filtering out `0x0D`, and writing with `[System.IO.File]::WriteAllBytes` (or `[System.IO.File]::WriteAllText` with explicit UTF8-no-BOM but only AFTER a byte-level CR strip). Do NOT trust `ReadAllText` + `WriteAllText` alone; on Windows the read preserves CR and the write preserves CR. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't trust `Measure-Object -Line` for line count; it counts only non-empty lines and can return a number much smaller than actual line count (e.g. 60 for an 86-line file). Do use `(Get-Content path).Count` or LF byte count for true line count. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
 
+## Improvement: Batch normalize LF and verify across multi-file durable design authoring
+
+Condition:
+
+- Authoring entry doc + N part files for a new stage design on Windows in one task; create_file inserts CRLF on every file; MD047 (trailing newline) and MD032 (blanks-around-lists) only surface after writing; risk of reporting "clean" when individual files have small whitespace defects that only lint catches
+
+Action:
+
+- Do write a small tmp-byte-scan script (drop 0x0D, ensure trailing LF, write back, verify CR=0, last=LF, no EF BB BF BOM) and run it over EVERY new file in one pass before the final git diff --check. Do not trust create_file's line endings on Windows; do not trust one normalize pass to fix every file (some tool edits may re-insert CRLF or strip trailing newline on a re-save). Do run the byte-scan loop and git diff --check --no-index per file in a loop, treating empty output as clean and exit code 1 as content-diff noise. Do not paste large inline PowerShell into a terminal call when the script tokenizes `$_` badly; do save the script to tmp and run via `-File`. Do not trust linter warning alone for MD047 (missing trailing newline) when --check exit code is also noisy; do verify last byte == LF in the byte-scan output. Do report each file's LF count, CR count, BOM status, and last-byte status in the post-task summary.
+
 ## Improvement: Self-claim format verification in review subjects
 
 Condition:
@@ -2298,3 +2308,184 @@ Similar memory check:
 Memory update:
 
 - Final improvement outcome stored: see "Improvement: Closure doc sweep applies verbatim Manager decisions and bypasses test-plan rework" above.
+
+## Improvement: Future-migration contract documented in main body
+
+Condition:
+
+- Reviewing multi-part design whose main body documents a future-migration contract (abort path with shadow fields, future API surface, planned refactor) that the current stage explicitly does not implement
+
+Action:
+
+- Do flag the unused future contract as non-blocking observation. Do recommend moving to OQ list, follow-up part file, or removing from main body. Do not block review when design correctly disclaims current non-implementation; reader may still misread contract as current behavior.
+
+## Post-task review 2026-06-25: Stage 25 atomic-transaction design review
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Reviewed Stage 25 atomic-transaction design across entry doc + 7 part files plus baseline architecture entry, part-2 restore flow, stage 17, stage 22, stage 24 part-16 closure. 0 BLOCKING, 3 non-blocking observations (vestigial inner-call `tx_restore -> tx_update`, unused shadow fields in failure-mode contract, plan/apply split wording clarity), 6 OQs for Manager gate.
+- Format claims (LF-only, no BOM, no trailing whitespace, under 300 lines) verified byte-level per existing memory rule. All 8 files clean. `git diff --check` exit 0 across entry doc + 7 part files.
+- Verdict PASS. Atomic-transaction protocol sound; user requirement coverage complete; preserved invariants all listed; performance impact acceptable; migration path viable.
+- Hard constraint "DO NOT modify design files" honored; gate wording not updated in entry doc per memory rule "Design-review PASS with Manager gate pending". PASS verdict recorded in review response only.
+
+Improvement outcome candidate:
+
+- Condition:
+  - When reviewing multi-part design whose main body documents a future-migration contract (abort path, shadow fields, future API surface, planned refactor) that the current stage explicitly disclaims
+- Action:
+  - Do flag the unused future contract as non-blocking observation; do recommend moving to OQ list, follow-up part file, or removing from main body; do not block review when design correctly disclaims current non-implementation
+
+Similar memory check:
+
+- Similar improvement found: No exact match
+- Existing improvement:
+  - "Cross-part protocol consistency in multi-part design" (covers state-mutation consistency between protocol steps and failure-mode handling, different scope)
+  - "Re-review corrected designs for new scope drift" (specific to re-reviews)
+- Decision:
+  - Add new, narrow improvement specific to future-contract documentation
+
+Memory update:
+
+- Final improvement outcome stored:
+  - Condition:
+    - When reviewing multi-part design whose main body documents a future-migration contract (abort path, shadow fields, future API surface, planned refactor) that the current stage explicitly disclaims as not implemented
+  - Action:
+    - Do flag the unused future contract as non-blocking observation; do recommend moving to OQ list, follow-up part file, or removing from main body; do not block review when design correctly disclaims current non-implementation; do record wording-clarity observation when reader may misread contract as current behavior
+
+## Improvement: Architecture rework with constraint to not split into new parts
+
+Condition:
+
+- Task asks to rework an existing multi-part architecture doc to reflect a new stage target state; constraint forbids adding new part files or new sections to keep part count stable
+
+Action:
+
+- Do rework wording inside existing sections to reference the new stage's tx_* methods, mutex, and invariants. Do preserve stage traceability per existing part. Do update tables (requirements, traceability, integration boundaries) inline. Do not add new section headings or new part files; rely on existing structure to carry new content. Do consolidate new content into existing paragraphs or table rows. Do cite the new stage by name and reference its design doc instead of duplicating content. Don't split content into new files even when the part exceeds 300 lines, if the over-300 condition is pre-existing and the user has not authorized a split. Don't add cross-cutting sections even if the rework would naturally fit them; rework existing sections instead.
+
+## Improvement: Verify which files actually changed before claiming preserved
+
+Condition:
+
+- Doc rework task that says "preserve parts X and Y" but the LF-normalize step touches every file in the directory
+
+Action:
+
+- Do run `git --no-pager diff -w --numstat -- <paths>` after edits to confirm content-only changes per file. Whitespace-ignored numstat isolates real content deltas; files with only CRLF to LF conversion show empty numstat. Do list explicit "Files preserved as-is" in the return message with the whitespace-ignored numstat as evidence. Don't claim a file is preserved just because no edit tool was called on it; the byte-level normalization pass may have rewritten it.
+
+## Post-task review 2026-06-25: Stage 25 architecture baseline rework
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Reworked architecture entry doc + parts 1-3, 5-7 to reflect Stage 25 atomic transactional method. Parts 4, 8, 9 preserved as-is per user instruction. Part count stayed at 9; no new part files or sections added.
+- Format claims verified byte-level on all 10 architecture files (LF-only, no BOM, no trailing whitespace, trailing LF). Entry doc stayed lean at 23 lines. Part 5 stayed at 337 lines (over 300 cap), pre-existing condition from when stages 4-14 were progressively added; the user prohibited splitting into new part files so the over-300 state was preserved as-is and noted in the return.
+- git diff --check exit 0 across all 10 files after final hygiene pass. Whitespace-ignored numstat confirmed parts 4, 8, 9 had zero content changes; parts 1-3, 5-7 had expected transactional-method references.
+- ADR-007 (asynchronous cold store) was the largest single rework: replaced decision text, alternatives, and consequences to reflect synchronous transactional model with worker repurposed as inline-under-lock helper. ADR status changed from Proposed to Active (rewritten Stage 25). Stage traceability preserved on every other ADR.
+
+Improvement outcome candidates:
+
+- Architecture rework with constraint to not split into new parts: see new improvement above. Added.
+- Verify which files actually changed before claiming preserved: see new improvement above. Added.
+
+Similar memory check:
+
+- Similar improvements found: none covering the rework-without-split constraint; existing "Closure doc sweep part-file split" covers the opposite case (closure adds part file).
+- Existing improvement "Self-claim format verification in review subjects" partially covers preservation verification but is specific to review subjects self-claiming format properties.
+
+Decision:
+
+- Add new improvement for rework-without-split constraint.
+- Add new improvement for content-only diff verification after LF normalize pass.
+
+Memory update:
+
+- Final improvement outcomes stored: see "Improvement: Architecture rework with constraint to not split into new parts" and "Improvement: Verify which files actually changed before claiming preserved" above.
+
+## Improvement: Plan-vs-design wording tension on folded-vs-retained helpers
+
+Condition:
+
+- Reviewing implementation plan where the design document says an existing helper is "folded into tx_X as inline worker call; no separate completion handler" but the plan text says the same helper "remains as a private helper used by the inline implementation" (or similar)
+
+Action:
+
+- Do cross-read design Part 3 (or equivalent migration table) row for each helper the plan claims to retain. Do flag plan/design wording tension as non-blocking observation, not blocking finding. Do recommend the implementation author pick one wording (either fully inlined or retained as private seam) and align the other doc to match before coding starts. Do not block plan review when the underlying operation result is identical and the wording difference is about source-organization preference. Do record the observation in the review's Required corrections or Non-blocking section so Developer can resolve during implementation.
+
+## Post-task review 2026-06-25: Stage 25 implementation plan review
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Reviewed 7 plan files (entry + 6 parts) against 7 design files (entry + 6 parts) + 9 architecture parts + current code (server-cache-hybrid.cpp/h, server-context.cpp, test-cache-controller.cpp). All 8 tx_* methods covered, 6 OQs resolved with rationale, 10 new tests scoped (TP-25-UT1..UT10), 8 risks identified with mitigation, 12-step order sound, lock semantics sound, worker retirement Option B applied, OQ-25-01 SPLIT correctly explained, slot lifecycle call sites at lines 6362/6516/6859 verified against code, and unchanged call sites at lines 1087/1858/1881/1886/4080/4201 verified.
+- Hygiene verified byte-level on all 7 plan files: LF-only, no BOM, no trailing whitespace. git diff --check --no-index per file returned empty (clean).
+- 3 of 8 open impl questions need architect confirmation (OQ-25-IMP-02 io_worker.execute_inline signature, OQ-25-IMP-03 tx_apply_restore argument shape, OQ-25-IMP-06 runner git SHA). The other 5 have sound proposed resolutions.
+- 1 design-vs-plan wording tension observed (handle_demotion_completion retention wording differs between design Part 3 row 3 and plan Part 1 Step 3).
+- 1 build-directory naming inconsistency observed in plan Part 3 (build-cov for Release tests vs build-coverage for Debug coverage).
+
+Improvement outcome candidate:
+
+- Plan-vs-design wording tension on folded-vs-retained helpers: see new improvement above. Added.
+
+Similar memory check:
+
+- Similar improvement found: none covering plan-review wording cross-check.
+- Existing improvement "Verify test-report counts before applying closure text" covers a different verification (counts, not wording).
+- Existing improvement "Self-claim format verification in review subjects" covers format claims, not implementation-vs-design wording.
+
+Decision:
+
+- Add new improvement for plan-vs-design wording cross-check on helpers that are partially folded.
+
+Memory update:
+
+- Final improvement outcome stored: see "Improvement: Plan-vs-design wording tension on folded-vs-retained helpers" above.
+
+## Improvement: Verify tx_* canonical entry points via caller search, not declaration
+
+Condition:
+
+- Reviewing implementation that introduces transactional API methods (tx_save, tx_restore, tx_apply_restore, tx_load) where design Part 3 mapping table names slot lifecycle methods (save_slot, try_restore_from_cache, load_slot) as routing THROUGH those tx_* methods
+
+Action:
+
+- Do grep production caller files (server-context.cpp, server-cache-hybrid.cpp) for actual `slot_lifecycle_method->tx_*` invocations before signing off on routing. Do confirm production call sites bind to tx_* methods; do not accept stub-returning-false tx_* methods as evidence of routing because lock acquisition in caller still preserves atomicity but breaks the canonical entry-point contract. Do distinguish alias tx_* methods (tx_evict_entry -> evict_entry_by_id, tx_update -> update) that DO acquire lock via aliased callee from stubs that bypass real work. Do flag as BLOCKING when tx_save/tx_load returns false unconditionally or tx_restore/tx_apply_restore has zero callers in production code path. Don't rely on existence of lock_guard at top of slot lifecycle as proof of routing; lock acquisition can live in either the slot lifecycle or the tx_* method, but only one path should be the canonical entry per design.
+
+## Improvement: Stub vs implemented tx_* distinction
+
+Condition:
+
+- Reviewing implementation where design requires new tx_* methods that all should be canonical entry points but implementation leaves some as stubs returning false or empty
+
+Action:
+
+- Do read each tx_* method body and classify as: full implementation, alias to other tx_* or impl method that acquires lock, or stub (returns false / GGML_UNUSED params). Do list stubs separately from full implementations in review findings. Do call out stubs as BLOCKING when binding requirement says production slot lifecycle routes through them. Do not classify stubs as "API surface for future use" without explicit user/Manager approval recorded in design Part 6. Don't accept stub existence with `// real body in server-context.cpp` comment as compliant with routing requirement.
+
+## Improvement: Closure sweep record-vs-test-report coupling
+
+Condition:
+
+- Closure sweep task records verbatim Manager decisions, per-row final classification, and code-change summary in entry-doc and new part file; risk that recorded classification differs from test-report final counts
+
+Action:
+
+- Do read the durable test report for the stage closure row (PASS/FAIL/BLOCKED/SKIP counts) before writing the closure record. Do verify each cited row classification matches the test report's per-row verdict field. Do record classification as BLOCKED-evidence-gap or BLOCKED-structural-not-infra with explicit Manager decision ID when Manager decisions reclassify rows; do not paraphrase Manager reclassification wording. Do include all 5 Manager decisions verbatim in the closure record when Manager passes a multi-decision closure. Do not edit the test report body, fixes files, or developer review files during closure sweep; those are durable evidence that must remain stable for downstream agents. Do verify gate-status wording across entry doc, current-gate section, gate-status table, handoff section, and tracker row stays in lockstep after closure. Don't claim closure complete when test report row count contradicts recorded final counts.
+
+## Improvement: Doc sweep stale-phrase grep with legitimate-use exceptions
+
+Condition:
+
+- Closure sweep task lists specific stale phrases to remove (e.g., "current gate: test execution", "ready for QA", "open"); grep finds matches that are legitimate technical uses (file names like part-06-open-questions.md, "open transactions" in technical sense, "open items" in triage sense)
+
+Action:
+
+- Do distinguish legitimate technical matches from stale-status matches before claiming grep clean. Do report grep result as "clean" only when all matches are legitimate (file names, technical vocabulary, historical quoted findings). Do not blanket-replace "open" without context check; file names and technical vocabulary are real. Do verify closure-purpose phrases (status: closed, D-CLOSURE-NN-NN, current gate: terminal) are present in all touched entry docs and handoff sections. Do list each touched file with closure phrases added in the return message so user can verify the swap.

@@ -4,6 +4,8 @@ Source: [../cache-handling-architecture.md](../cache-handling-architecture.md)
 
 #### Restore and Residency Flow
 
+Stage 25 replaced every background cache-mutating step with a synchronous transaction under a single recursive mutex on the hybrid controller. The diagram below shows the target flow: the slot request that triggers a restore or save runs that operation inline as a `tx_*` transaction, with no background drain and no async I/O worker.
+
 ```mermaid
 sequenceDiagram
     participant C as Client
@@ -11,8 +13,8 @@ sequenceDiagram
     participant P as PreparedPromptBuilder
     participant Q as server_queue
     participant S as server_context
-    participant HC as HybridCacheController
-    participant IO as Cache I/O worker
+    participant HC as HybridCacheController (under cache_state_mutex_)
+    participant IO as Synchronous I/O helper (under lock)
     participant CS as Cold store
 
     C->>H: completion/chat request
@@ -20,12 +22,12 @@ sequenceDiagram
     P-->>H: tokens + PreparedPromptMetadata
     H->>Q: server_task(tokens, metadata)
     Q->>S: launch task on slot
-    S->>HC: select_restore(task, slot, profile)
+    S->>HC: tx_restore(slot, task)
 
     alt hot exact blob hit
         HC-->>S: RestorePlan(exact_blob_hot)
     else cold payload needed
-        HC->>IO: promote paired payloads
+        HC->>IO: tx_promote_payload (inline under lock)
         IO->>CS: read and verify descriptors
         CS-->>IO: payload bytes
         IO-->>HC: promoted payloads
@@ -34,9 +36,13 @@ sequenceDiagram
         HC-->>S: RestorePlan(fallback_recompute)
     end
 
+    S->>S: apply plan to live slot (outside cache_state_mutex_)
+    S->>HC: tx_apply_restore(slot, plan)
+
     S->>S: process prompt and/or generate output
-    S->>HC: create nodes, update usage, emit checkpoints
-    HC->>IO: demote cold candidates asynchronously
+    S->>HC: tx_save(slot, metadata)
+    HC->>IO: tx_demote_payload if needed (inline under lock)
+    IO->>CS: atomic write + rename
 ```
 
 ### C5: Decision and Delivery View
@@ -143,7 +149,7 @@ Rules for metadata-only nodes:
 
 ### Restore Strategy Order
 
-The restore planner should evaluate candidates in this order:
+The restore planner should evaluate candidates in this order. Stages 1-7 run inside `tx_restore` under `cache_state_mutex_`; step 8 (apply) runs outside the cache-state lock on the slot thread; step 9 (finalize) runs inside `tx_apply_restore` (Stage 25):
 
 1. Validate namespace and pairing compatibility.
 2. Check for an exact full-state blob hit at the deepest matching node.
@@ -152,9 +158,11 @@ The restore planner should evaluate candidates in this order:
 3. For checkpoint-dependent profiles, traverse checkpoint nodes first and use exact blobs only as accelerators or roots.
 4. For plain-transformer profiles, prefer exact blobs and fall back to safe checkpoint reuse only when valid.
 5. For metadata-only nodes selected as the restore or branching point, re-materialize from the nearest retained payload-bearing ancestor or from the root. Validate the path segment before replay; materialize a new payload only for the selected node unless additional payloads are independently justified by policy.
-6. Promote any cold paired payloads before modifying live slot state.
-7. Apply restore atomically to target and draft state.
-8. If any stage fails, emit diagnostics and fall back to valid slower processing.
+6. Promote any cold paired payloads inline under the cache-state lock via `tx_promote_payload`. The cold store read and integrity check happen before the lock is released.
+7. Compute the restore plan and refresh owner views under the cache-state lock.
+8. Apply the plan to the live slot state on the slot thread, outside the cache-state lock. The slot thread owns its `llama_context` for the duration of apply.
+9. Re-acquire the cache-state lock via `tx_apply_restore` to finalize owner-view sync and metrics. Failures return the slot to a known-valid state.
+10. If any stage fails, emit diagnostics and fall back to valid slower processing.
 
 ### Prepared-Prompt Boundary Model
 
@@ -244,6 +252,7 @@ Hybrid mode uses resident-byte accounting across both payload classes.
 - If protected roots alone exceed budget, the controller must emit explicit diagnostics and refuse further protected admissions or demotions that would break correctness.
 - Cold demotion is driven by usage and budget pressure, not insertion order.
 - Payload eviction and branch pruning are governed by separate rules. A branch node may have its payload evicted while remaining in the graph as a metadata-only node. Branch pruning removes the node and its metadata entirely, and is subject to descendant-reachability and protection checks.
+- **Transactional binding (Stage 25):** every demote, evict, admit, cold promote, cold write, and cold delete runs inside a `tx_*` transaction under `cache_state_mutex_`. Demotion commits via atomic write + rename before the transaction that initiated it returns. Eviction and admission observe a consistent snapshot because the mutex is exclusive and held for the duration of the work. No background thread or async drain touches cache state.
 
 ### CLI Options
 
