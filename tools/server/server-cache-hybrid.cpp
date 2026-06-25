@@ -973,7 +973,37 @@ void hybrid_cache_controller::update() {
             false,
             candidates);
         if (plan.evictions.empty()) {
-            break;
+            // build_policy_candidates() filters out branch nodes that have
+            // slot_ref_count > 0, no payload bytes, or no target/draft pair.
+            // When every entry is filtered out and the cache is still over
+            // the token budget, the original early break left the cache
+            // pinned over budget. Walk the entries list and force-evict one
+            // unprotected entry per iteration; fall through to protected
+            // entries only when no unprotected entry remains (matches the
+            // LRU policy's protected_budget_pressure path). Break only
+            // when no entry is safe to evict.
+            std::list<hybrid_cache_entry>::iterator victim = entries.end();
+            for (auto it = entries.begin(); it != entries.end(); ++it) {
+                if (!it->protected_root) {
+                    victim = it;
+                    break;
+                }
+            }
+            if (victim == entries.end()) {
+                for (auto it = entries.begin(); it != entries.end(); ++it) {
+                    victim = it;
+                    break;
+                }
+            }
+            if (victim == entries.end()) {
+                break;
+            }
+            const bool was_protected = victim->protected_root;
+            evict_entry_by_id(
+                victim->entry_id,
+                was_protected ? server_cache_eviction_reason::protected_budget_pressure
+                              : server_cache_eviction_reason::over_budget);
+            continue;
         }
         evict_entry_by_id(plan.evictions.front().entry_id, plan.evictions.front().reason);
     }
@@ -3260,16 +3290,27 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
     if (descriptor_it != payload_descriptors.end()) {
         if (cold_store.is_configured() &&
             descriptor_it->second.residency == payload_residency_state::hot) {
-            if (entry.protected_root) {
-                n_protected_root_demotions++;
-                SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
+            // Stage 24 fix: skip the demote attempt when resident bytes are
+            // already over the hot budget. Demotion is async and does not
+            // release hot bytes until the worker drains the result; trying
+            // to demote while over budget only consumes worker capacity and
+            // always falls back to immediate eviction, which delays the
+            // eviction plan and pins the cache above the budget.
+            const bool over_hot_budget =
+                hot_payload_budget_enabled() &&
+                calculate_resident_payload_bytes() > limit_size;
+            if (!over_hot_budget) {
+                if (entry.protected_root) {
+                    n_protected_root_demotions++;
+                    SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
+                }
+                if (demote_payload(payload_id)) {
+                    refresh_entry_payload_accounting(entry);
+                    return true;
+                }
+                SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", falling back to immediate eviction\n",
+                        payload_id);
             }
-            if (demote_payload(payload_id)) {
-                refresh_entry_payload_accounting(entry);
-                return true;
-            }
-            SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", falling back to immediate eviction\n",
-                    payload_id);
         }
 
         record_payload_eviction(descriptor_it->second, "success", "hot_budget");

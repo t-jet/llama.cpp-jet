@@ -1900,3 +1900,401 @@ Similar memory check:
 
 Memory update:
 - Added `Mixed-workload runner evidence with collapsed public profiles`.
+
+## Post-task review 2026-06-23 (Stage 23 L02 comparison explanation)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Explained a read-only L02 comparison report by reading the index, Stage 23
+  design and implementation entries, the focused report, and local comparison
+  metrics. Kept the answer scoped to interpretation and did not edit repo
+  design, test report, product, or runner files.
+
+Improvement outcome candidate:
+- Condition:
+  - When a read-only explanation asks about one Stage 23 focused report
+- Action:
+  - Do read the durable report plus the relevant stage entry and any local
+    machine-readable artifact before answering; don't infer row meaning from
+    metric names alone.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Evidence-source consistency in test plan; Multi-leg row runner port
+    contract; Mixed-workload runner evidence with collapsed public profiles.
+- Decision: No update. Existing evidence-source and runner-artifact rules
+  already cover this behavior.
+
+Memory update:
+- No new improvement; existing evidence-source and runner-artifact rules were
+  reinforced.
+
+## Post-task review 2026-06-23 (Stage 24 design authoring)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Authored the Stage 24 design from the intake stub, kept the work scoped to
+  durable design and index docs, made the S02/S03 runner and evidence decisions
+  explicit, and corrected the design entry from 331 to 270 lines after the
+  split-rule check caught the cap breach.
+
+Improvement outcome candidate:
+- Condition:
+  - When authoring a dense stage design entry that approaches or exceeds the
+    300-line cap
+- Action:
+  - Do run the line-count check before finalizing and either trim duplicate
+    wording or split immediately; don't rely on visual length.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Entry docs near line cap; Scoped traceability for deferred requirements.
+- Decision: No update. Existing line-cap and scoped-traceability rules already
+  cover this behavior.
+
+Memory update:
+- No new improvement; existing line-cap and scoped-traceability rules were
+  reinforced.
+
+## Post-task review 2026-06-23 (Stage 24 design review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the Stage 24 design in a fresh architect session, kept the work to
+  durable review/index updates, wrote a PASS part-file report instead of
+  bloating the near-cap entry, and verified line caps, byte hygiene, and the
+  pre-existing dirty index state before handoff.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a near-cap stage design that already has untracked or
+    partly tracked entry docs
+- Action:
+  - Do add the review as a part file, update only the parent link and index
+    gate text, and verify new untracked docs directly with line, byte, and
+    whitespace checks.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Entry docs near line cap; Untracked or partly-tracked review doc paths;
+    Gate wording with open findings.
+- Decision: No update. Existing rules already cover part-file review records,
+  direct verification of untracked docs, and gate wording checks.
+
+Memory update:
+- No new improvement; existing line-cap, untracked-doc, and gate-wording rules
+  were reinforced.
+
+## Improvement: Durable report names and whitelist
+
+Condition:
+- When reviewing a plan or design that introduces a custom durable report name
+  under `._design_docs/.test_reports/`
+
+Action:
+- Do check the active `.test_reports/.gitignore` whitelist and the test output
+  folder convention before approving report placement. Require either a
+  whitelisted report name or an explicit docs-only whitelist/convention update.
+  When a plan correction intentionally supersedes an older design artifact
+  name, record that supersession in the review or parent implementation doc so
+  Manager can open implementation without relying on an ignored path. When
+  implementation evidence claims a durable report or final report leak scan,
+  verify the exact file exists on disk under the whitelisted path and is visible
+  to `git status -- <path>`. Don't accept "durable" report paths that git will
+  ignore or evidence checks for report files that are absent.
+
+## Post-task review 2026-06-23 (Stage 24 implementation-plan review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the Stage 24 implementation plan against the approved design,
+  Manager D24-DESIGN-01..03, and evidence/report conventions. Caught a
+  report-placement blocker: the custom Stage 24 report name matched the design
+  but was not whitelisted by `.test_reports/.gitignore`, so it would not be
+  durable unless the plan changes the name or updates the whitelist/convention.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a plan or design that introduces a custom durable report name
+    under `._design_docs/.test_reports/`
+- Action:
+  - Do check the active `.test_reports/.gitignore` whitelist and test output
+    convention before approving report placement.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Hidden test_reports directory
+    and path resolution.
+- Decision: Add new improvement because existing rules cover ignored-file
+  verification after creation, not pre-implementation report naming that would
+  make future durable evidence ignored.
+
+Memory update:
+- Added `Durable report names and whitelist`.
+
+## Post-task review 2026-06-23 (Stage 24 implementation-plan re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed the corrected Stage 24 implementation plan, confirmed the
+  whitelisted `test-report-YYYYMMDD-NN.md` durable report pattern, kept the
+  stage-specific identity in `RunId` and `._test_output/`, wrote a PASS
+  re-review record, and updated the implementation entry and index without
+  touching code or runner files.
+
+Improvement outcome candidate:
+- Condition:
+  - When a plan correction supersedes an older design artifact name to satisfy
+    `.test_reports` whitelist rules
+- Action:
+  - Do record the supersession in the review or parent implementation doc so
+    Manager can open implementation against the corrected durable path.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Durable report names and whitelist.
+- Decision: Strengthen existing improvement.
+
+Memory update:
+- Strengthened `Durable report names and whitelist` with explicit supersession
+  handling for corrected report names.
+
+## Post-task review 2026-06-23 (Stage 24 implementation review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the Stage 24 runner implementation against the approved design and
+  implementation plan, wrote a REWORK review artifact, and updated the
+  implementation entry, index, and tracker without touching product code. The
+  review found that part 04 claimed a final durable report check for a
+  `test-report-20260623*.md` file that was not present under the repo or
+  `.test_reports/`.
+
+Improvement outcome candidate:
+- Condition:
+  - When implementation evidence claims a durable report or final report leak
+    scan under `._design_docs/.test_reports/`
+- Action:
+  - Do verify the exact report file exists on disk under the whitelisted path
+    and is visible to `git status -- <path>` before accepting the evidence.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Durable report names and whitelist.
+- Decision: Strengthen existing improvement because it already covered report
+  naming and whitelist checks, but not the case where the claimed report file is
+  absent.
+
+Memory update:
+- Strengthened `Durable report names and whitelist` with exact file-existence
+  and `git status -- <path>` verification for claimed durable report evidence.
+
+## Improvement: Smoke failures during implementation re-review
+
+Condition:
+- When implementation re-review evidence includes smoke-run FAIL or BLOCKED
+  outcomes while the review subject is the runner contract rather than final
+  test execution
+
+Action:
+- Do separate runner correctness from product or test-result behavior. Pass the
+  implementation gate when the runner preserves `PASS`, `FAIL`, and `BLOCKED`
+  states, computes the required evidence from artifacts, and keeps durable docs
+  accurate. Record smoke failures as INFO or follow-up test-result risks unless
+  the failure proves a runner-contract defect.
+
+## Post-task review 2026-06-23 (Stage 24 implementation re-review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Re-reviewed the Stage 24 correction, verified the four prior blockers
+  against script behavior and preserved artifacts, wrote a PASS Part 7
+  re-review record, updated the implementation entry, index, and tracker, and
+  kept product code untouched. The main judgment point was classifying the S02
+  and S03 smoke failures as preserved test-result/product-behavior risks rather
+  than runner implementation blockers.
+
+Improvement outcome candidate:
+- Condition:
+  - When implementation re-review evidence includes smoke-run FAIL or BLOCKED
+    outcomes while the review subject is the runner contract rather than final
+    test execution
+- Action:
+  - Do separate runner correctness from product or test-result behavior and
+    record smoke failures as INFO or follow-up risks when the runner preserves
+    them correctly.
+
+Similar memory check:
+- Similar improvement found: Partial
+- Existing improvement:
+  - Durable report names and whitelist; Gate wording with open findings.
+- Decision: Add new improvement because existing rules cover evidence
+  durability and gate wording, but not smoke-result classification during a
+  runner implementation review.
+
+Memory update:
+- Added `Smoke failures during implementation re-review`.
+
+## Post-task review 2026-06-24 (Stage 24 correction re-review gate)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the CUDA correction plus S02/S03 pre-rerun fixes without running the
+  full comparison or editing product code. Verified CUDA build/runtime gates,
+  request-loop abort semantics, S03 hybrid-only unsafe-prefix policy, invalid
+  CPU report alignment, line caps, byte hygiene, and gate wording. Wrote a PASS
+  Part 11 review and updated the Stage 24 implementation, test plan, and index
+  status.
+
+Improvement outcome candidate:
+- Condition:
+  - When a fresh implementation re-review spans a runner fix, invalid prior
+    report, and status-bearing docs
+- Action:
+  - Do verify script behavior, persistent docs, prior report evidence, and gate
+    wording together before passing; update only the gate/status docs needed to
+    remove stale pending-review text.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Gate wording with open findings; Smoke failures during implementation
+    re-review; Durable report names and whitelist; Untracked or partly-tracked
+    review doc paths.
+- Decision: No update. Existing gate-wording, smoke-classification, durable
+  report, and untracked-doc rules already covered the review.
+
+Memory update:
+- No new improvement; existing gate-wording, runner-evidence, and untracked-doc
+  rules were reinforced.
+
+## Post-task review 2026-06-24 (Stage 24 dry-run hang bug-fix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the Windows PowerShell dry-run serializer fix without running the
+  live comparison or touching product code. Verified the root-cause evidence,
+  safe JSON conversion shape, comma-delimited and array row handling, invalid
+  row rejection, route and CUDA flag plan proof, preserved S02/S03 policies,
+  and no server/HTTP activity during dry-run. Wrote a PASS Part 13 review and
+  updated the Stage 24 implementation entry and index. Line, byte, parser,
+  scoped dry-run, process, and whitespace checks passed, with no-index checks
+  used for untracked files.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a dry-run hang fix for an untracked runner script
+- Action:
+  - Do combine source-order proof that `-DryRun` exits before live execution
+    with scoped dry-run validation, invalid-input rejection, process checks,
+    and no-index whitespace checks for untracked artifacts.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Untracked or partly-tracked review doc paths; Line-ending diff noise on
+    Windows; Gate wording with open findings; Smoke failures during
+    implementation re-review.
+- Decision: No update. Existing rules already require direct verification of
+  untracked files, dry-run/source evidence, gate wording checks, and separate
+  handling of runner-contract evidence.
+
+Memory update:
+- No new improvement; existing untracked-doc, dry-run/source-evidence,
+  line-ending, and gate-wording rules were reinforced.
+
+## Post-task review 2026-06-24 (Stage 24 report 03 runner-contract bugfix review)
+
+Task completed:
+- Yes
+
+Effectiveness assessment:
+- Reviewed the `$Matches` collision fix without rerunning live QA or touching
+  product code. Verified the PowerShell root cause, invoked the fixed CUDA proof
+  helper against the captured QA startup log, checked dry-run route/CUDA flags,
+  confirmed scratch durable report absence, wrote a PASS Part 15 review, and
+  aligned implementation/test-plan/index gate wording. A stale line-count claim
+  in the fixes report was caught but was non-blocking because the verified file
+  remained under 300 lines with clean byte hygiene.
+
+Improvement outcome candidate:
+- Condition:
+  - When a runner-contract fix report includes self-claimed format or evidence
+    counts
+- Action:
+  - Do verify current counts and byte hygiene directly, and treat stale numeric
+    claims as non-blocking only when the verified gate condition still passes.
+
+Similar memory check:
+- Similar improvement found: Yes
+- Existing improvement:
+  - Self-claim format verification in review subjects; Untracked or
+    partly-tracked review doc paths; Gate wording with open findings.
+- Decision: No update. Existing rules already require direct verification of
+  self-claims, ignored/untracked artifacts, and gate wording.
+
+Memory update:
+- No new improvement; existing self-claim, untracked-doc, and gate-wording
+  rules were reinforced.
+
+## Improvement: Closure doc sweep applies verbatim Manager decisions and bypasses test-plan rework
+
+Condition:
+
+- Manager records closure decisions D-EXEC-24-01, D-EXEC-24-02, D-EXEC-24-03, D-CLOSURE-24-01 verbatim in closure instructions and the Architect task is to apply those decisions to durable design and implementation docs, not to rewrite test plans or test reports
+
+Action:
+
+- Do quote each Manager decision verbatim in the closure part file and in any per-row classification. Do not paraphrase decision text. Do record per-row final classification aligned with Manager decisions, including reclassifications. Do create closure record in new part file rather than inline in entry doc. Do replace entry-doc Current gate and Handoff wording with closure-appropriate phrasing ("terminal", "closed per D-CLOSURE-24-01") rather than "ready for QA", "current gate: test execution", "open", "blocked". Do update test plan part file Status line and Handoff section so it points to the closure part file rather than "may reopen QA execution". Do NOT modify the final test reports, fixes files, or developer review files. Do NOT modify test plan to record coverage gaps or benchmark-scope gaps as accepted skips. Do NOT commit code changes; per AGENTS.md AI agents wait for user commit approval and Manager closure preserves the uncommitted state. Do convert new closure part file to LF-only UTF-8 no BOM before running git diff --check. Do scan modified entry docs for stale phase-mismatch wording and replace with closure-appropriate phrasing.
+
+## Post-task review 2026-06-25 (Stage 24 closure doc sweep)
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Applied D-CLOSURE-24-01 across six durable docs without rewriting test reports, fixes files, or developer review files. Authored new closure part file (part-16-manager-closure-20260625.md, 152 LF lines, LF-only no BOM no trailing whitespace no non-ASCII), updated implementation entry doc Status/Current gate/Handoff, updated design entry doc Status, updated tracker Stage 24 row (replaced implementation re-review PASS with closed under D-CLOSURE-24-01 with full decision summary in Notes), updated test plan part-29 Status and Handoff section, and added five new test-report rows + updated two existing index entries in document-index.md. All six touched files under 300 lines (implementation 297, design 275, tracker 66, test plan 296, index 153, part-16 152). git diff --check exit 0 on tracked files; no-index exit 1 for new file because content exists vs empty (not a whitespace failure).
+
+Improvement outcome candidate:
+
+- Condition:
+  - When Manager closure task quotes decisions verbatim and instructs closure doc sweep across implementation log, tracker, design, test plan, and document index without modifying test reports or fixes files
+- Action:
+  - Do quote decisions verbatim in closure part file; do update entry-doc Status and Current gate with closure-appropriate wording ("closed per D-NN", "terminal"); do replace stale phase-mismatch wording ("ready for QA", "current gate: test execution", "may reopen QA execution"); do not modify test reports, fixes files, or developer review files; do not commit code changes per AGENTS.md.
+
+Similar memory check:
+
+- Similar improvement found: Yes
+- Existing improvement:
+  - Closure sweep keeps durable docs aligned; Closure sweep preserves historical failure headings; Closure doc sweep part-file split and CRLF normalization.
+- Decision: Strengthen existing improvement by adding the verbatim-decision requirement and the bypass of test-plan/test-report editing. Existing rules cover file-split and CRLF hygiene; new wording covers the Manager-decision verbatim, entry-doc gate wording replacement, and the explicit bypass list.
+
+Memory update:
+
+- Final improvement outcome stored: see "Improvement: Closure doc sweep applies verbatim Manager decisions and bypasses test-plan rework" above.

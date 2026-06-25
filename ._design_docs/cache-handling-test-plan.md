@@ -1,8 +1,8 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-06-09
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 13
+Last updated: 2026-06-23
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 24
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -179,6 +179,7 @@ Implemented behavior that must be covered:
 - No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
 - Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
 - Stage 13 keeps endpoint cache behavior selected by server flags and internal metadata. Public request and response schemas, `/slots`, and fork-only marker behavior must remain stable. Embedding routes are metadata-excluded unless a future implementation adds a real embedding cache save/restore path.
+- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`.
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -205,6 +206,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
 - [Part 24: test output folder convention](./cache-handling-test-plan/part-24-test-output-folder-convention.md)
 - [Part 25: Stage 15 full test suite validation, bug-fix loop, and benchmark report](./cache-handling-test-plan/part-25-stage15-full-test-suite-validation.md)
+- [Part 29: Stage 24 chat S02/S03 comparison](./cache-handling-test-plan/part-29-stage24-chat-s02-s03-comparison.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -239,6 +241,13 @@ cites the T114 row only and is not affected by the split.
 - [Stage 13 test-plan review: 2026-06-09](./cache-handling-test-plan/stage-13-test-plan-review-20260609.md)
 - [Stage 13 test-plan re-review: 2026-06-09](./cache-handling-test-plan/stage-13-test-plan-re-review-20260609.md)
 - [Stage 13 manager test-plan gate: 2026-06-09](./cache-handling-test-plan/stage-13-manager-test-plan-gate-20260609.md)
+- [Stage 24 test-plan review: 2026-06-23](./cache-handling-test-plan/stage-24-test-plan-review-20260623.md)
+- [Stage 24 manager test-plan gate: 2026-06-23](./cache-handling-test-plan/stage-24-manager-test-plan-gate-20260623.md)
+- [Stage 24 test-plan re-review: 2026-06-24](./cache-handling-test-plan/stage-24-test-plan-re-review-20260624.md)
+- [Stage 24 Manager CUDA rerun gate: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-20260624.md)
+- [Stage 24 Manager CUDA rerun gate 02: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-02-20260624.md)
+- [Stage 24 Manager build-path gate: 2026-06-24](./cache-handling-test-plan/stage-24-manager-build-path-gate-20260624.md)
+- [Stage 24 Manager CUDA rerun gate 03: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-03-20260624.md)
 
 ## Test scripts
 

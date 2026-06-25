@@ -1,5 +1,15 @@
 # Developer improvement memory
 
+## Improvement: NDEBUG silently disables asserts in Release-build unit tests
+
+Condition:
+
+- When writing or modifying a C++ unit test in a file that has `#undef NDEBUG` (e.g., `tests/test-cache-controller.cpp` line 22) but is compiled with CMake's default Release-config flags (`/D NDEBUG` via `add_compile_options` or `target_compile_definitions`)
+
+Action:
+
+- Do not rely on `assert(condition)` to gate a regression test; the command-line `-D NDEBUG` overrides the in-source `#undef NDEBUG`, and `assert()` compiles to a no-op. Use explicit `if (!cond) { fprintf(stderr, "FAIL: ..."); std::abort(); }` (or equivalent) for any condition that must actually fail the test, even when the file declares `#undef NDEBUG`. Verify the test actually catches the regression by temporarily reverting the fix, rebuilding, and confirming the test aborts (exit code like `-1073740791` / `STATUS_STACK_BUFFER_OVERRUN`) before re-applying. Verified 2026-06-25 (D-EXEC-24-02): a new regression test for the token-limit early-break bug had `assert(n_tokens() <= 3)` and "passed" both with the fix reverted and applied; the bug was hidden because the entire `assert(ctrl.debug_evict_first_payload_for_tests())` expression (including the function call side effect) was compiled away. After replacing all `assert(...)` with `if (...) { fprintf(stderr, "FAIL: ..."); std::abort(); }`, the test correctly aborted with the fix reverted and passed with it applied. Don't assume `#undef NDEBUG` in the test file is sufficient; verify by checking the build's `cl.command.*.tlog` for `/D NDEBUG` in the compile flags.
+
 ## Improvement: Reconcile test report prose summary count against per-row sums
 
 Condition:
@@ -378,6 +388,14 @@ Condition:
 Action:
 
 - Do run the full incremental compile to the same target after the first duplicate removal, even if the manager's binding decision specified only the first error; the prior build halt at error N may have masked errors N+1, N+2 that the fix exposes. If the build then halts on a second pre-existing duplicate, STOP per the binding "build fails for any other reason" rule, document the second duplicate with `git blame` evidence, and escalate a new Manager decision rather than expanding the authorized scope unilaterally. Don't claim the first fix is "PASS" in the implementation log until the incremental compile to the binding target succeeds. Don't commit a single-fix tree that does not compile, because the next developer would inherit a non-compiling state. Also, do not stop at "build PASS" - the next layer of defects is often a RUNTIME defect, not another compile error: an assertion failure (STATUS_STACK_BUFFER_OVERRUN, exit code 0xc0000409 on Windows / SIGABRT on Linux) in a test that compiles cleanly but exercises the merged production code path differently than the pre-merge code path did. Verified 2026-06-11 (Stage 14 Step 3 test fix): after fixing the C2668/C2838/C2065 compile errors in test-cache-controller.cpp, the build PASSED and ctest then crashed at test_hybrid_rejects_partial_blob_match line 571 because the merged admission code path in server-cache-hybrid.cpp rejects the test's debug_add_entry_for_tests call (logs "descriptor validation failed (admission validation failed)"). The test function was not touched by the test fix; the failure is a pre-existing test defect surfaced by the merge. STOP at this layer too, document the runtime defect with the exact assertion message and the admission code path evidence, and escalate a new Manager decision. Don't expand the authorized scope to modify production code or to "fix" the test by changing its semantics; the right call is a separate Manager decision to either update the test, update the production code, or defer to a follow-up cycle.
+
+## Improvement: Hybrid hot-budget eviction stall is a sustained-load defect, not a host-capacity issue
+
+Condition:
+- When a hybrid cache Stage-24-style chat-completion test reproduces `W srv demote_paylo: hybrid cache: demote_payload: outstanding demotions exceed payload budget` followed by `W srv mark_payload: hybrid cache: demotion failed for payload_id N, falling back to immediate eviction` and `W srv evict_until_: hybrid cache: eviction could not satisfy payload budget (resident bytes: <X>, budget bytes: 536870912)`, with the hybrid cache state pinned above the 512 MiB hot budget for hundreds of slot cycles, and the native/default leg on the same fixture completes thousands of requests at 99.8% nonzero cache_n
+
+Action:
+- Do classify it as a product bug in `tools/server/server-cache-hybrid.cpp` / `tools/server/server-cache-controller.cpp` demote/evict interaction, not R24-TP-01 host-capacity. The native leg passing under identical `--parallel` and `--cache-ram`-free flags proves the host can run the workload; the hybrid controller is the only thing that stalls. Verified 2026-06-25 (Stage 24 chat S02/S03 comparison, test-report-20260624-04): S02 hybrid log line 534 ends with `mark_payload` warning + cache state `10 entries, 664.422 MiB payload` vs `limits: 512.000 MiB payload`; S03 hybrid had 152 `mark_payload` warnings + 57 `evict_until_` warnings across 6003 log lines with max resident 594264536 bytes; native legs on both rows completed 2564/1539 reqs at 99.8% nonzero cache_n. The S03 unsafe-prefix fix from part-10 still held (hybrid near-prefix 0/64 nonzero cache_n), so the new failure is a separate code path, not a regression of the part-10 fix. Don't recommend fresh QA execution before the fix; the runner evidence is durable and a rerun would produce the same crash. Don't recommend runner-contract fix; the runner correctly labeled `FAIL-http-request` and preserved every required artifact with line citations.
 
 ## Internal Post-Task Record (2026-06-18, Stage 20 implementation plan)
 
@@ -1148,7 +1166,35 @@ Condition:
 - When adding a short gate pointer, status line, or cross-reference to an existing durable design or implementation document near the 300-line cap
 
 Action:
-- Do check the line count immediately after the edit and bring the file back under 300 lines by tight reflow or required splitting before other hygiene checks. Don't assume a small pointer edit is exempt from the document size rule; parent stage logs can already be close enough that one or two lines violate the cap.
+- Do check the physical line count immediately after the edit and bring the file back under 300 lines by tight reflow or required splitting before other hygiene checks. On Windows, verify the count with byte-level LF counting or explicit line enumeration, not only `Get-Content | Measure-Object -Line`, because text-pipeline counts can underreport a near-limit untracked Markdown file. Don't assume a small pointer edit is exempt from the document size rule; parent stage logs can already be close enough that one or two lines violate the cap.
+
+## Internal Post-Task Record (2026-06-23, Stage 24 implementation planning)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The plan stayed in documentation scope and did not implement runner, test script, product, public API, metric, fixture, or execution code. Hygiene caught a line-cap issue before handoff: the first draft was 307 physical LF lines although the text-pipeline line count underreported it. The final implementation log is 263 LF-only lines, ASCII-only, and has no trailing whitespace.
+
+Improvement outcome candidate:
+- Condition:
+  - When checking the 300-line cap on a near-limit durable Markdown file, especially an untracked file on Windows
+- Action:
+  - Do verify physical line count with byte-level LF counting or explicit enumeration before accepting the cap check.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Check doc cap immediately after pointer edits.
+- Decision:
+  - Strengthen existing.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When adding a short gate pointer, status line, or cross-reference to an existing durable design or implementation document near the 300-line cap
+  - Action:
+    - Do check physical line count with byte-level LF counting or explicit line enumeration and bring the file under 300 lines before other hygiene checks.
 
 ## Internal Post-Task Record (2026-06-20, Stage 21 resume review using Stage 22 rerun 08)
 
@@ -1170,6 +1216,40 @@ Similar memory check:
   - Non-gating metric anomalies need explicit follow-up classification.
 - Decision:
   - No update. The existing improvement already covers the actionable behavior used here.
+
+Memory update:
+- Final improvement outcome stored:
+  - No new or strengthened entry.
+
+## Internal Post-Task Record (2026-06-23, Stage 24 implementation-plan correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The correction stayed in documentation scope and changed no runner, product,
+  public API, metric, fixture, or test execution code. The implementation plan
+  now uses the whitelisted durable `test-report-YYYYMMDD-NN.md` path while
+  keeping `stage24-chat-s02-s03-YYYYMMDD-NN` as the RunId and non-durable output
+  identity. Hygiene and index checks were rerun after the final wording edit.
+
+Improvement outcome candidate:
+- Condition:
+  - When correcting a durable report naming blocker in an implementation plan
+- Action:
+  - Do update every related plan mention: planned files, command interface,
+    report title/content, validation hygiene, docs/index needs, and handoff
+    state; then rerun line-count and whitespace checks.
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Verify untracked documentation edits; Check doc cap immediately after
+    pointer edits.
+- Decision:
+  - No update. Existing rules already require direct verification for untracked
+    docs, line-count checks after edits, whitespace checks, and final status
+    reporting.
 
 Memory update:
 - Final improvement outcome stored:
@@ -1364,6 +1444,86 @@ Condition:
 Action:
 - Do record harness prompt-class counts and prompt-evidence path diversity, such as token-span checksums or outcome/checksum pairs, in the row artifact. Don't rely only on public `profile` labels to prove workload mix.
 
+## Internal Post-Task Record (2026-06-23, Stage 24 runner implementation)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Runner and docs scope was preserved. Parser, dry-run, route scan, smoke runs,
+  and hygiene checks caught and corrected a root-path bug, S02 over-concurrency,
+  stale comparison shape matching, and FAIL/BLOCKED comparison classification.
+
+Improvement outcome candidate:
+- Condition:
+  - When adding a root-level script directly under
+    `._design_docs/cache-handling-test-scripts/` after copying patterns from
+    subdirectory scripts
+- Action:
+  - Do derive the repository root from the script's actual depth and prove it
+    with dry-run output paths before live smoke; don't reuse `..\..\..` from
+    `stress/`, `bench/`, or `longrun/` scripts without checking the new file's
+    location.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored below.
+
+## Improvement: Root-level test scripts need depth-specific source root
+
+Condition:
+- When adding a PowerShell runner directly under
+  `._design_docs/cache-handling-test-scripts/` and reusing patterns from
+  scripts in `stress/`, `bench/`, or `longrun/`
+
+Action:
+- Do derive the repository root from the new script's actual directory depth and
+  prove `RunRoot`, `ReportPath`, `ModelPath`, and binary paths in dry-run output
+  before live smoke. Don't copy a subdirectory script's `..\..\..` source-root
+  calculation into a root-level script; root-level scripts need `..\..`.
+
+## Improvement: Keep validation artifacts inside allowed scope
+
+Condition:
+- When a task gives an allowed-file list but validation commands can create
+  durable reports, logs, or other tracked artifacts outside that list
+
+Action:
+- Do route validation outputs to ignored scratch paths when the runner contract
+  permits it, or remove only self-created out-of-scope artifacts before handoff.
+  Preserve enough evidence in allowed implementation notes and ignored run
+  output. Don't leave generated reports outside the allowed paths merely because
+  the validation command produced them.
+
+## Improvement: Preserve correction-smoke failures
+
+Condition:
+- When a runner-contract correction smoke or focused verification run produces a
+  new valid FAIL/BLOCKED row while proving the corrected harness behavior
+
+Action:
+- Do preserve the new row verdict in the durable evidence and explain whether it
+  is product behavior, runner behavior, or acceptance-blocking scope. Don't tune
+  smoke parameters or rewrite the report to force a PASS when the failure is the
+  corrected classifier doing its job.
+
+## Improvement: Encode explicit GPU requirements in runner contracts
+
+Condition:
+- When a stage requires Nvidia CUDA/GPU execution and the runner or test plan
+  owns server launch commands
+
+Action:
+- Do encode the required GPU launch flags in the runner, expose them in dry-run
+  output, require `GGML_CUDA:BOOL=ON` configure proof, and require startup-log
+  CUDA/NVIDIA runtime proof before row classification. Don't rely on plan prose
+  or prior-stage convention to make a CPU run invalid after the fact.
+
 ## Internal Post-Task Record (2026-06-23, Stage 23 final test-results review)
 
 Task completed:
@@ -1388,3 +1548,233 @@ Similar memory check:
 Memory update:
 - Final improvement outcome stored:
   - No new or strengthened entry.
+
+## Internal Post-Task Record (2026-06-23, Stage 24 implementation correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The correction stayed in runner and implementation-doc scope, preserved the
+  S02 hybrid smoke failure, and added a final report-included leak-scan pass.
+  A short smoke created durable `.test_reports` files outside the allowed-file
+  list; they were self-created validation artifacts and were removed before
+  handoff while keeping evidence in the implementation part and ignored
+  `._test_output`.
+
+Improvement outcome candidate:
+- Condition:
+  - When a task gives an allowed-file list but validation commands can create
+    durable reports, logs, or tracked artifacts outside that list
+- Action:
+  - Do route validation outputs to ignored scratch paths when possible, or
+    remove only self-created out-of-scope artifacts before handoff.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Keep validation
+  artifacts inside allowed scope".
+
+## Internal Post-Task Record (2026-06-23, Stage 24 implementation-review correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The correction stayed in runner, Stage 24 docs, and durable report scope. The
+  focused smoke proved report-path validation, cleanup proof, and final leak
+  scan PASS, and the corrected S03 near-prefix classifier exposed a real
+  `FAIL-unsafe-prefix-restore` instead of hard-coding a safe result.
+
+Improvement outcome candidate:
+- Condition:
+  - When a runner-contract correction smoke produces a new valid FAIL/BLOCKED
+    row while proving the corrected harness behavior
+- Action:
+  - Do preserve that verdict in durable evidence and explain its scope; don't
+    tune the smoke or report to force PASS.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Test-results review gate classification.
+- Decision:
+  - Add new. Existing guidance covers reviewing failures after QA reports; this
+    task needed an implementation-correction rule for live smoke evidence.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Preserve
+  correction-smoke failures".
+
+## Internal Post-Task Record (2026-06-24, Stage 24 CUDA requirement correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The correction stayed inside runner and durable documentation scope. It added
+  CUDA launch flags, dry-run proof, CMake cache proof, runtime log proof, and
+  documentation that invalidates the CPU-only Stage 24 report before row
+  classification.
+
+Improvement outcome candidate:
+- Condition:
+  - When a stage requires Nvidia CUDA/GPU execution and the runner or test plan
+    owns server launch commands
+- Action:
+  - Do encode required GPU flags in the runner and require configure/runtime
+    proof before row classification.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - CUDA launch triage guidance exists, but it covers crash setup triage rather
+    than runner contract enforcement for required GPU stages.
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Encode explicit
+  GPU requirements in runner contracts".
+
+## Improvement: Keep baseline diagnostics out of hybrid safety verdicts
+
+Condition:
+- When a comparison runner evaluates a hybrid-only safety policy alongside a
+  native/default baseline that can emit superficially similar counters
+
+Action:
+- Do scope the failure predicate to the variant that owns the policy, and keep
+  baseline counters as diagnostic fields. Don't fail a hybrid safety row from
+  native/default cache counters unless the design explicitly says the baseline
+  participates in that safety contract.
+
+## Internal Post-Task Record (2026-06-24, Stage 24 pre-rerun S02/S03 fixes)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The session stayed in runner and durable documentation scope. S02 evidence was
+  classified as an invalid CPU-only artifact with runner retry amplification,
+  so the fix stops request loops after transport loss and free-port proof. S03
+  low hybrid hits were documented as expected under the exact-repeat plus
+  checkpoint-dependent policy, and unsafe-prefix failure now only uses hybrid
+  near-prefix nonzero `cache_n`.
+
+Improvement outcome candidate:
+- Condition:
+  - When a comparison runner evaluates a hybrid-only safety policy beside a
+    native/default baseline with similar counters
+- Action:
+  - Do scope failure predicates to the policy-owning variant and keep baseline
+    counters diagnostic only.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Keep baseline
+  diagnostics out of hybrid safety verdicts".
+
+## Improvement: Verify runner JSON dry-runs under Windows PowerShell
+
+Condition:
+- When a PowerShell runner dry-run writes machine-readable JSON artifacts that
+  QA may execute through `powershell.exe -File` or a child `Start-Process`
+  wrapper
+
+Action:
+- Do verify the dry-run under Windows PowerShell 5 as a child process, not only
+  under `pwsh` or the current shell. If `ConvertTo-Json` stalls, serialize a
+  bounded plain object graph first and print only a short status line after the
+  JSON file is written. Also test comma-delimited scalar row arguments at the
+  script boundary, because `string[]` parameters can arrive flattened.
+
+## Internal Post-Task Record (2026-06-24, Stage 24 dry-run hang fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix stayed in runner and documentation scope. The investigation isolated
+  the hang to Windows PowerShell 5 `ConvertTo-Json` during dry-run plan
+  serialization, added safe plain-object serialization, normalized flattened
+  row input, and verified S02-only, full S02/S03, and child-process dry-runs
+  without starting `llama-server`.
+
+Improvement outcome candidate:
+- Condition:
+  - When a PowerShell runner dry-run writes machine-readable JSON artifacts that
+    QA may execute through Windows PowerShell child processes
+- Action:
+  - Do verify the dry-run under `powershell.exe -File` as a child process and
+    serialize a bounded plain object graph before `ConvertTo-Json` if PS5
+    stalls.
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Pass server-flag arrays to child PowerShell rows with encoded args; Decode
+    encoded PowerShell flag arrays into explicit lists.
+- Decision:
+  - Add new. Existing entries cover argument transport and decoded arrays, not
+    PS5 JSON serialization stalls before `dry-run-plan.json`.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Verify runner JSON
+  dry-runs under Windows PowerShell".
+
+## Improvement: Avoid PowerShell automatic match variable names
+
+Condition:
+- When a PowerShell helper uses `-match` inside a loop and also stores state in a
+  collection or scalar named `$matches`, `$Matches`, or another case variant
+
+Action:
+- Do rename the local state before patching and add a direct helper check that
+  exercises at least one matching line. PowerShell variable names are
+  case-insensitive, and `-match` repopulates the automatic `$Matches` hashtable,
+  so a local `$matches` collection can be replaced mid-loop and fail later method
+  calls such as `.Add(...)`.
+
+## Internal Post-Task Record (2026-06-24, Stage 24 report 03 runner-contract fix)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- The fix stayed in runner and documentation scope. Captured QA startup logs
+  showed CUDA proof was present, and the direct helper check exposed the real
+  PowerShell collision: local `$matches` was overwritten by automatic `$Matches`
+  after `-match`. Focused parser, captured-log, isolated Add, CUDA cache, route,
+  and dry-run checks proved the runner-contract bug is gone without live S02/S03.
+
+Improvement outcome candidate:
+- Condition:
+  - When a PowerShell helper uses `-match` in the same scope as a `$matches`
+    local variable
+- Action:
+  - Do rename the local variable and verify the helper with a matching input,
+    because `$Matches` is automatic and case-insensitive.
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+  - Existing PowerShell entries cover argument arrays, JSON dry-runs, command
+    quoting, path normalization, and foreach output, not automatic `$Matches`
+    collisions.
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored above under "Improvement: Avoid PowerShell
+  automatic match variable names".

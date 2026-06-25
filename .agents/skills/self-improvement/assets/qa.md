@@ -62,7 +62,7 @@ Condition:
 - PowerShell QA runner generates markdown with fenced command or evidence blocks
 
 Action:
-- Inspect generated report before accepting run. Use markdown fences PowerShell will not escape inside expandable strings, such as tildes or doubled backticks.
+- Inspect generated report before accepting run. Use markdown fences PowerShell will not escape inside expandable strings, such as tildes or doubled backticks. If the runner writes a minimal or preliminary durable report and QA later replaces it with the final Markdown, rerun leak and hygiene checks against the final file, not only the runner-written version.
 
 ## Improvement: keep report suffixes chronological
 
@@ -134,7 +134,7 @@ Condition:
 - Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
 
 Action:
-- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
+- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
 
 ## Improvement: separate own QA edits from dirty sources
 
@@ -565,6 +565,14 @@ Condition:
 Action:
 - Don't trust exit 0 from plain git diff --check as proof an untracked or ignored markdown file is whitespace-clean. Plain git diff --check does not inspect those paths, so a CRLF-only untracked file can still return exit 0. Run git diff --check --no-index /dev/null <path> for each untracked/ignored markdown artifact or durable doc; zero warning output with exit 1 (files differ) is the clean state. Combine this with byte-level CR and non-ASCII checks via [System.IO.File]::ReadAllBytes, and run normal git diff --check for tracked touched files.
 
+## Improvement: avoid touching oversized auxiliary docs during scoped planning
+
+Condition:
+- A QA planning task says to update a script README or document index if needed, and the script README is already over the repository line cap before the task starts
+
+Action:
+- Do not make a small append to the oversized README unless the task explicitly requires README edits. Prefer updating the split test-plan part and document index, then state that the README was left unchanged because touching it would require a separate split/cleanup. If README content is essential for the gate, split it under the document-size rule instead of adding another over-cap edit.
+
 
 ## Improvement: PowerShell automatic variables block PID/args/Host reassignment
 
@@ -718,7 +726,7 @@ Condition:
 - A QA execution wrapper is launched with `Start-Process` or another background process so the session can poll side logs, sample GPU state, or collect live evidence while the row runs
 
 Action:
-- Do keep the returned process object or process id, call `WaitForExit()` before classifying the row, and write the wrapper `ExitCode` to a preflight artifact. Do not rely only on `row_gate`, `batch_end`, or wrapper `ok=True` side-log lines when the active gate explicitly asks for wrapper exit 0; those lines can support the finding, but the OS exit code should be preserved as first-class evidence.
+- Do keep the returned process object or process id in the same PowerShell invocation that will wait for completion, call `WaitForExit()` before classifying the row, and write the wrapper `ExitCode` to a preflight artifact. If the wrapper is launched from a short `shell_command` and later polling happens in separate tool calls, create a watcher in that same launch command that waits and writes the exit artifact after the process exits. Do not rely only on `row_gate`, `batch_end`, wrapper `ok=True` side-log lines, or a later `Get-Process` absence when the active gate explicitly asks for wrapper exit 0; those lines can support the finding, but the OS exit code should be preserved as first-class evidence.
 
 ## Improvement: apply longrun resource thresholds after warmup
 
@@ -731,10 +739,10 @@ Action:
 ## Improvement: avoid colon-adjacent PowerShell interpolation in QA helpers
 
 Condition:
-- Writing one-off PowerShell analysis helpers that format strings containing a variable followed immediately by a colon, such as evidence scan labels or file counters
+- Writing one-off PowerShell analysis helpers that format strings containing a variable followed immediately by a colon, such as evidence scan labels, file counters, link-check diagnostics, or `path:line` output
 
 Action:
-- Do use the `-f` format operator or `${name}` braces instead of `"$name:..."`. PowerShell parses `$name:` as a scoped variable prefix and can fail before evidence analysis runs.
+- Do use the `-f` format operator or `${name}` braces instead of `"$name:..."`. PowerShell parses `$name:` as a scoped variable prefix and can fail before evidence or link analysis runs.
 
 ## Improvement: write QA step exit evidence immediately
 
@@ -743,3 +751,47 @@ Condition:
 
 Action:
 - Do write each step's exit code, elapsed time, and log path to disk immediately after the step finishes, or use an explicit script-scoped collection. Do not rely on appending to an outer variable from inside a function unless the scope is explicit, because PowerShell can leave the final summary empty even when the commands ran correctly.
+
+## Improvement: make durable QA review records discoverable
+
+Condition:
+- Creating a durable QA review record under `._design_docs/cache-handling-test-plan/` while the reviewed plan or index already has unrelated dirty changes
+
+Action:
+- Do add the minimal parent-plan and document-index links needed to make the new review record discoverable, but report those link edits separately from pre-existing dirty plan or index changes. Validate links from the edited files after adding the review record.
+
+## Improvement: block on dry-run hangs before live execution
+
+Condition:
+- QA execution requires a dry-run gate before live rows, and the runner hangs or times out before writing its machine-readable plan artifact
+
+Action:
+- Do stop only the hung runner process, preserve the empty or partial dry-run logs, and classify the session as `BLOCKED-runner-contract` in a fresh durable report. Do not start live rows or duplicate live comparisons until Developer fixes the dry-run gate and the rerun proves route, flags, paths, and CUDA plan evidence.
+
+## Improvement: classify hybrid crash by exact server.err.log end-state
+
+Condition:
+- QA rerun of a hybrid cache leg where the runner reports borted-server-unreachable-after-health after a single transport error, and the Server.err.log ends cleanly mid-request with no FATAL/panic/SEGV/OOM/exception line and cache state below budget
+
+Action:
+
+- Do classify this as a separate product bug from any warning-family cascade the prior fix targeted. Count exact warning families with `Select-String -Pattern` and compare counts row-by-row against the prior report to confirm whether the prior fix worked. Note the error-count hash and the exact failing `request_id` because deterministic fixtures produce identical hashes between runs and that is the strongest reproducibility signal. Cite the last cache-state line as evidence the cache did not pin above budget; pair the FAIL with a new product bug-handoff ID (e.g. `D-EXEC-24-02`) instead of closing the loop on the prior fix ID.
+
+## Improvement: verify hybrid fix against multiple legs, not just the failing one
+
+Condition:
+- Developer patch targets a hybrid-cache warning cascade (e.g. demote_paylo / mark_payload demotion failed) on a row that previously aborted mid-leg
+
+Action:
+
+- Do verify the fix on the previously-failing leg AND the parallel leg that uses the same hybrid flags. If the cascade count drops to zero on both legs but the parallel leg still fails for a different reason (e.g. separate crash), record the fix as partial-PASS and open a new bug handoff for the remaining failure. Do not close the stage when the original failing row is still FAIL even if the warning cascade itself is gone.
+
+## Improvement: distinguish last-OK from first-error when a server crash is silent
+
+Condition:
+
+- Stage rerun shows a hybrid leg server died mid-leg with no FATAL/OOM/SEGV/exception in server.err.log, and the prior run also died silently with a different first-failure request_id
+
+Action:
+
+- Do report BOTH `last_ok_request_id` and `first_error_request_id` in the durable report's bug section, not just the first error. A matching `last_ok_request_id` across runs (e.g. `s03-new-5` recurring in both -05 and -06 despite different first-failure points) is a stronger reproducibility signal than the first-error index, because the deterministic workload sends the same request sequence each leg and identical last-OK confirms the crash window is bounded. Cite cache state at death and the last log-line timestamp to bound the crash window. Pair the FAIL with a NEW bug handoff ID, not the prior ID, because the crash root cause is distinct from any warning cascade the prior fix targeted.
