@@ -122,7 +122,7 @@ static void server_write_stage10_cache_rows(
         const json & cache_stats) {
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_exact_blob_restores_total",
+        "llamacpp:cache_exact_blob_restores_total",
         "Exact blob restore attempts by bounded result shape.",
         cache_stats.contains("cache_exact_blob_restores_by_shape") ?
             cache_stats["cache_exact_blob_restores_by_shape"] : json::array(),
@@ -136,7 +136,7 @@ static void server_write_stage10_cache_rows(
         });
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_payload_transitions_total",
+        "llamacpp:cache_payload_transitions_total",
         "Payload promotion and demotion decisions by bounded result shape.",
         cache_stats.contains("cache_payload_transitions_by_shape") ?
             cache_stats["cache_payload_transitions_by_shape"] : json::array(),
@@ -149,7 +149,7 @@ static void server_write_stage10_cache_rows(
         });
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_payload_evictions_by_shape_total",
+        "llamacpp:cache_payload_evictions_by_shape_total",
         "Payload eviction decisions by bounded result shape.",
         cache_stats.contains("cache_payload_evictions_by_shape") ?
             cache_stats["cache_payload_evictions_by_shape"] : json::array(),
@@ -161,7 +161,7 @@ static void server_write_stage10_cache_rows(
         });
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_protected_root_decisions_by_shape_total",
+        "llamacpp:cache_protected_root_decisions_by_shape_total",
         "Protected root admission decisions by bounded result shape.",
         cache_stats.contains("cache_protected_root_decisions_by_shape") ?
             cache_stats["cache_protected_root_decisions_by_shape"] : json::array(),
@@ -173,7 +173,7 @@ static void server_write_stage10_cache_rows(
         });
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_fallback_restores_by_shape_total",
+        "llamacpp:cache_fallback_restores_by_shape_total",
         "Fallback restore attempts by bounded result shape.",
         cache_stats.contains("cache_fallback_restores_by_shape") ?
             cache_stats["cache_fallback_restores_by_shape"] : json::array(),
@@ -185,7 +185,7 @@ static void server_write_stage10_cache_rows(
         });
     server_write_stage10_rows(
         prometheus, mode,
-        "cache_structured_diagnostics_total",
+        "llamacpp:cache_structured_diagnostics_total",
         "Structured cache diagnostic events by bounded result shape.",
         cache_stats.contains("cache_structured_diagnostics_by_shape") ?
             cache_stats["cache_structured_diagnostics_by_shape"] : json::array(),
@@ -4396,19 +4396,19 @@ void server_routes::init_routes() {
                             << prometheus_label_value(label_d_value) << "\"} " << value << "\n";
             };
 
-            write_cache_metric("gauge",   "llamacpp_cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
-            write_cache_metric("gauge",   "llamacpp_cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
-            write_cache_metric("gauge",   "llamacpp_cache_tokens",  "Current cached token count by mode.", json_value(cache_stats, "n_tokens", 0));
-            write_cache_metric("counter", "llamacpp_cache_hits_total", "Successful cache restores by mode.", json_value(cache_stats, "n_hits", 0));
-            write_cache_metric("counter", "llamacpp_cache_misses_total", "Cache lookup misses by mode.", json_value(cache_stats, "n_misses", 0));
-            write_cache_metric("counter", "llamacpp_cache_evictions_total", "Cache evictions by mode.", json_value(cache_stats, "n_evictions", 0));
-            write_cache_metric("counter", "llamacpp_cache_payload_evictions_total", "Hot payload evictions by mode.", json_value(cache_stats, "n_payload_evictions", 0));
-            write_cache_metric("counter", "llamacpp_cache_protected_root_decisions_total", "Protected-root cache policy decisions by mode.", json_value(cache_stats, "n_protected_root_decisions", 0));
-            write_cache_metric("counter", "llamacpp_cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
-            write_cache_metric("counter", "llamacpp_cache_descriptor_validation_failures_total", "Payload descriptor validation failures by mode.", json_value(cache_stats, "n_descriptor_validation_failures", 0));
-            write_cache_metric("counter", "llamacpp_cache_pairing_violations_total", "Payload target and draft pairing violations by mode.", json_value(cache_stats, "n_pairing_violations", 0));
-            write_cache_metric("counter", "llamacpp_cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
-            write_cache_metric("counter", "cache_branch_nodes_created_total", "Branch nodes created by mode.", json_value(cache_stats, "n_branch_nodes_created", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_bytes",   "Current cache resident bytes by mode.", json_value(cache_stats, "size_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_tokens",  "Current cached token count by mode.", json_value(cache_stats, "n_tokens", 0));
+            write_cache_metric("counter", "llamacpp:cache_hits_total", "Successful cache restores by mode.", json_value(cache_stats, "n_hits", 0));
+            write_cache_metric("counter", "llamacpp:cache_misses_total", "Cache lookup misses by mode.", json_value(cache_stats, "n_misses", 0));
+            write_cache_metric("counter", "llamacpp:cache_evictions_total", "Cache evictions by mode.", json_value(cache_stats, "n_evictions", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_evictions_total", "Hot payload evictions by mode.", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric("counter", "llamacpp:cache_protected_root_decisions_total", "Protected-root cache policy decisions by mode.", json_value(cache_stats, "n_protected_root_decisions", 0));
+            write_cache_metric("counter", "llamacpp:cache_restore_failures_total", "Cache restore failures by mode.", json_value(cache_stats, "n_restore_failures", 0));
+            write_cache_metric("counter", "llamacpp:cache_descriptor_validation_failures_total", "Payload descriptor validation failures by mode.", json_value(cache_stats, "n_descriptor_validation_failures", 0));
+            write_cache_metric("counter", "llamacpp:cache_pairing_violations_total", "Payload target and draft pairing violations by mode.", json_value(cache_stats, "n_pairing_violations", 0));
+            write_cache_metric("counter", "llamacpp:cache_fallback_restores_total", "Cache restore attempts that fell back after descriptor or transaction failure by mode.", json_value(cache_stats, "n_fallback_restores", 0));
+            write_cache_metric("counter", "llamacpp:cache_branch_nodes_created_total", "Branch nodes created by mode.", json_value(cache_stats, "n_branch_nodes_created", 0));
             const json branch_lookup_namespaces = cache_stats.contains("branch_lookup_namespaces") ? cache_stats["branch_lookup_namespaces"] : json::object();
             const auto write_lookup_method = [&](
                     const char * method,
@@ -4419,12 +4419,12 @@ void server_routes::init_routes() {
                 if (method_stats.empty()) {
                     if (namespace_stats.empty()) {
                         write_cache_metric_with_two_labels(
-                            "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                            "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
                             "namespace", "none", "method", method, json_value(cache_stats, legacy_total_key, 0));
                     } else {
                         for (const auto & ns : namespace_stats.items()) {
                             write_cache_metric_with_two_labels(
-                                "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                                "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
                                 "namespace", ns.key(), "method", method, 0);
                         }
                     }
@@ -4432,73 +4432,73 @@ void server_routes::init_routes() {
                 }
                 for (const auto & ns : method_stats.items()) {
                     write_cache_metric_with_two_labels(
-                        "counter", "cache_branch_lookups_total", "Branch lookups by namespace and method.",
+                        "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
                         "namespace", ns.key(), "method", method, ns.value());
                 }
             };
-            write_cache_metric("counter", "cache_branch_lookup_hits_total", "Branch lookup hits by mode.", json_value(cache_stats, "n_branch_lookup_hits", 0));
+            write_cache_metric("counter", "llamacpp:cache_branch_lookup_hits_total", "Branch lookup hits by mode.", json_value(cache_stats, "n_branch_lookup_hits", 0));
             const json branch_forest = cache_stats.contains("branch_forest") ? cache_stats["branch_forest"] : json::object();
             const json namespace_stats = branch_forest.contains("namespaces") ? branch_forest["namespaces"] : json::object();
             write_lookup_method("token_span", "n_branch_token_lookups", namespace_stats);
             write_lookup_method("checksum_span", "n_branch_checksum_lookups", namespace_stats);
             const json branch_traversals = cache_stats.contains("branch_traversals") ? cache_stats["branch_traversals"] : json::object();
-            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "path_to_root", json_value(branch_traversals, "path_to_root", 0));
-            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "descendants", json_value(branch_traversals, "descendants", 0));
-            write_cache_metric_with_label("counter", "cache_branch_traversals_total", "Branch traversals by operation.", "operation", "children", json_value(branch_traversals, "children", 0));
-            write_cache_metric("gauge",   "cache_namespace_count", "Current branch namespace count by mode.", namespace_stats.size());
+            write_cache_metric_with_label("counter", "llamacpp:cache_branch_traversals_total", "Branch traversals by operation.", "operation", "path_to_root", json_value(branch_traversals, "path_to_root", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_branch_traversals_total", "Branch traversals by operation.", "operation", "descendants", json_value(branch_traversals, "descendants", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_branch_traversals_total", "Branch traversals by operation.", "operation", "children", json_value(branch_traversals, "children", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_namespace_count", "Current branch namespace count by mode.", namespace_stats.size());
             if (namespace_stats.empty()) {
-                write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", "none", 0);
-                write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", "none", 0);
-                write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_nodes", "Branch nodes by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_roots", "Branch roots by namespace.", "namespace", "none", 0);
+                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", "none", 0);
             } else {
                 for (const auto & ns : namespace_stats.items()) {
                     const std::string namespace_id = ns.key();
-                    write_cache_metric_with_label("gauge", "cache_namespace_nodes", "Branch nodes by namespace.", "namespace", namespace_id, json_value(ns.value(), "nodes", 0));
-                    write_cache_metric_with_label("gauge", "cache_namespace_roots", "Branch roots by namespace.", "namespace", namespace_id, json_value(ns.value(), "roots", 0));
-                    write_cache_metric_with_label("gauge", "cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", namespace_id, json_value(ns.value(), "metadata_bytes", 0));
+                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_nodes", "Branch nodes by namespace.", "namespace", namespace_id, json_value(ns.value(), "nodes", 0));
+                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_roots", "Branch roots by namespace.", "namespace", namespace_id, json_value(ns.value(), "roots", 0));
+                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", namespace_id, json_value(ns.value(), "metadata_bytes", 0));
                 }
             }
-            write_cache_metric("gauge",   "cache_budget_branch_metadata_bytes", "Current branch metadata RAM bytes by mode.", json_value(cache_stats, "branch_metadata_bytes", 0));
-            write_cache_metric("gauge",   "cache_budget_branch_metadata_soft_max_bytes", "Branch metadata RAM soft limit by mode.", json_value(cache_stats, "branch_metadata_soft_max_bytes", 0));
-            write_cache_metric("gauge",   "cache_budget_branch_metadata_ratio", "Branch metadata RAM ratio by mode.", json_value(branch_forest, "metadata_ratio", 0.0));
-            write_cache_metric("gauge",   "cache_budget_branch_metadata_over_limit", "Whether branch metadata exceeds its soft limit by mode.", json_value(cache_stats, "branch_metadata_over_limit", false) ? 1 : 0);
-            write_cache_metric_with_label("counter", "cache_eviction_payloads_total", "Payload eviction or demotion decisions by action.", "action", "evict", json_value(cache_stats, "n_payload_evictions", 0));
-            write_cache_metric_with_label("counter", "cache_eviction_payload_bytes_total", "Payload bytes evicted or demoted by action.", "action", "evict", json_value(cache_stats, "n_payload_eviction_bytes", 0));
-            write_cache_metric("counter", "cache_eviction_payload_blocked_refs_total", "Payload eviction candidates blocked by active slot refs by mode.", json_value(cache_stats, "n_eviction_payload_blocked_refs", 0));
-            write_cache_metric_with_label("counter", "cache_protected_root_payload_decisions_total", "Protected-root payload decisions by decision.", "decision", "all", json_value(cache_stats, "n_protected_root_decisions", 0));
-            write_cache_metric_with_label("gauge", "cache_protected_root_payload_bytes", "Protected-root payload bytes by residency.", "residency", "hot", json_value(cache_stats, "protected_payload_bytes", 0));
-            write_cache_metric("counter", "cache_slot_ref_acquires_total", "Branch slot reference acquires by mode.", json_value(cache_stats, "n_slot_ref_acquires", 0));
-            write_cache_metric("counter", "cache_slot_ref_releases_total", "Branch slot reference releases by mode.", json_value(cache_stats, "n_slot_ref_releases", 0));
-            write_cache_metric("counter", "cache_forest_lock_acquires_total", "Branch forest lock acquires by mode.", json_value(cache_stats, "n_forest_lock_acquires", 0));
-            write_cache_metric("counter", "cache_forest_lock_retries_total", "Branch forest lock retries by mode.", json_value(cache_stats, "n_forest_lock_retries", 0));
-            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "pass", json_value(cache_stats, "n_namespace_validation_passes", 0));
-            write_cache_metric_with_label("counter", "cache_namespace_validations_total", "Namespace validation checks by result.", "result", "fail", json_value(cache_stats, "n_namespace_validation_failures", 0));
-            write_cache_metric("counter", "cache_namespace_validation_failures_total", "Namespace validation failures by mode.", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_bytes", "Current branch metadata RAM bytes by mode.", json_value(cache_stats, "branch_metadata_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_soft_max_bytes", "Branch metadata RAM soft limit by mode.", json_value(cache_stats, "branch_metadata_soft_max_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_ratio", "Branch metadata RAM ratio by mode.", json_value(branch_forest, "metadata_ratio", 0.0));
+            write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_over_limit", "Whether branch metadata exceeds its soft limit by mode.", json_value(cache_stats, "branch_metadata_over_limit", false) ? 1 : 0);
+            write_cache_metric_with_label("counter", "llamacpp:cache_eviction_payloads_total", "Payload eviction or demotion decisions by action.", "action", "evict", json_value(cache_stats, "n_payload_evictions", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_eviction_payload_bytes_total", "Payload bytes evicted or demoted by action.", "action", "evict", json_value(cache_stats, "n_payload_eviction_bytes", 0));
+            write_cache_metric("counter", "llamacpp:cache_eviction_payload_blocked_refs_total", "Payload eviction candidates blocked by active slot refs by mode.", json_value(cache_stats, "n_eviction_payload_blocked_refs", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_protected_root_payload_decisions_total", "Protected-root payload decisions by decision.", "decision", "all", json_value(cache_stats, "n_protected_root_decisions", 0));
+            write_cache_metric_with_label("gauge", "llamacpp:cache_protected_root_payload_bytes", "Protected-root payload bytes by residency.", "residency", "hot", json_value(cache_stats, "protected_payload_bytes", 0));
+            write_cache_metric("counter", "llamacpp:cache_slot_ref_acquires_total", "Branch slot reference acquires by mode.", json_value(cache_stats, "n_slot_ref_acquires", 0));
+            write_cache_metric("counter", "llamacpp:cache_slot_ref_releases_total", "Branch slot reference releases by mode.", json_value(cache_stats, "n_slot_ref_releases", 0));
+            write_cache_metric("counter", "llamacpp:cache_forest_lock_acquires_total", "Branch forest lock acquires by mode.", json_value(cache_stats, "n_forest_lock_acquires", 0));
+            write_cache_metric("counter", "llamacpp:cache_forest_lock_retries_total", "Branch forest lock retries by mode.", json_value(cache_stats, "n_forest_lock_retries", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_namespace_validations_total", "Namespace validation checks by result.", "result", "pass", json_value(cache_stats, "n_namespace_validation_passes", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_namespace_validations_total", "Namespace validation checks by result.", "result", "fail", json_value(cache_stats, "n_namespace_validation_failures", 0));
+            write_cache_metric("counter", "llamacpp:cache_namespace_validation_failures_total", "Namespace validation failures by mode.", json_value(cache_stats, "n_namespace_validation_failures", 0));
             const int branch_peak_refs = cache_stats.contains("branch_forest") ? json_value(cache_stats["branch_forest"], "peak_concurrent_refs", 0) : 0;
-            write_cache_metric("gauge", "cache_slot_ref_concurrent_peak", "Peak branch slot references by mode.", branch_peak_refs);
-            write_cache_metric("gauge",   "llamacpp_cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
-            write_cache_metric("gauge",   "llamacpp_cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
+            write_cache_metric("gauge", "llamacpp:cache_slot_ref_concurrent_peak", "Peak branch slot references by mode.", branch_peak_refs);
+            write_cache_metric("gauge",   "llamacpp:cache_hot_payload_descriptors", "Current hot payload descriptor count by mode.", json_value(cache_stats, "n_hot_payload_descriptors", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_evicted_payload_descriptors", "Current evicted payload descriptor count by mode.", json_value(cache_stats, "n_evicted_payload_descriptors", 0));
             // Phase 6 Step 10: Cold layer Prometheus metrics
-            write_cache_metric("counter", "llamacpp_cache_payload_demotions_total", "Demotion operations completed by mode.", json_value(cache_stats, "n_demotion_successes", 0));
-            write_cache_metric("counter", "llamacpp_cache_payload_demotion_failures_total", "Demotion operations failed by mode.", json_value(cache_stats, "n_demotion_failures", 0));
-            write_cache_metric("counter", "llamacpp_cache_payload_promotions_total", "Promotion operations completed by mode.", json_value(cache_stats, "n_promotion_successes", 0));
-            write_cache_metric("counter", "llamacpp_cache_payload_promotion_failures_total", "Promotion operations failed by mode.", json_value(cache_stats, "n_promotion_failures", 0));
-            write_cache_metric("counter", "llamacpp_cache_payload_cold_evictions_total", "Cold payload evictions by mode.", json_value(cache_stats, "n_cold_evictions", 0));
-            write_cache_metric("counter", "llamacpp_cache_demotion_queue_full_total", "Demotion queue-full events by mode.", json_value(cache_stats, "n_demotion_queue_full", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_queue_full_total", "Promotion queue-full events by mode.", json_value(cache_stats, "n_promotion_queue_full", 0));
-            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
-            write_cache_metric("gauge",   "llamacpp_cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
-            write_cache_metric("gauge",   "cache_cold_bytes", "Current descriptor-owned cold payload bytes.", json_value(cache_stats, "cache_cold_bytes", 0));
-            write_cache_metric("gauge",   "cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", -1));
-            write_cache_metric("counter", "cache_cold_demotions_skipped_total", "Cold demotions skipped before write.", json_value(cache_stats, "cache_cold_demotions_skipped_total", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_demotions_total", "Demotion operations completed by mode.", json_value(cache_stats, "n_demotion_successes", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_demotion_failures_total", "Demotion operations failed by mode.", json_value(cache_stats, "n_demotion_failures", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_promotions_total", "Promotion operations completed by mode.", json_value(cache_stats, "n_promotion_successes", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_promotion_failures_total", "Promotion operations failed by mode.", json_value(cache_stats, "n_promotion_failures", 0));
+            write_cache_metric("counter", "llamacpp:cache_payload_cold_evictions_total", "Cold payload evictions by mode.", json_value(cache_stats, "n_cold_evictions", 0));
+            write_cache_metric("counter", "llamacpp:cache_demotion_queue_full_total", "Demotion queue-full events by mode.", json_value(cache_stats, "n_demotion_queue_full", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_queue_full_total", "Promotion queue-full events by mode.", json_value(cache_stats, "n_promotion_queue_full", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_cold_bytes", "Current descriptor-owned cold payload bytes.", json_value(cache_stats, "cache_cold_bytes", 0));
+            write_cache_metric("gauge",   "llamacpp:cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", -1));
+            write_cache_metric("counter", "llamacpp:cache_cold_demotions_skipped_total", "Cold demotions skipped before write.", json_value(cache_stats, "cache_cold_demotions_skipped_total", 0));
             const json cold_eviction_rows = cache_stats.contains("cache_cold_evictions_by_shape") ?
                 cache_stats["cache_cold_evictions_by_shape"] : json::array();
             if (cold_eviction_rows.empty()) {
-                write_cache_metric_with_two_labels("counter", "cache_cold_evictions_total", "Cold payload evictions by reason and kind.", "reason", "none", "payload_kind", "none", 0);
+                write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_evictions_total", "Cold payload evictions by reason and kind.", "reason", "none", "payload_kind", "none", 0);
             } else {
                 for (const auto & row : cold_eviction_rows) {
                     write_cache_metric_with_two_labels(
-                        "counter", "cache_cold_evictions_total", "Cold payload evictions by reason and kind.",
+                        "counter", "llamacpp:cache_cold_evictions_total", "Cold payload evictions by reason and kind.",
                         "reason", json_value(row, "reason", std::string("unknown")),
                         "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
                         json_value(row, "value", 0));
@@ -4507,11 +4507,11 @@ void server_routes::init_routes() {
             const json cold_skip_rows = cache_stats.contains("cache_cold_demotions_skipped_by_shape") ?
                 cache_stats["cache_cold_demotions_skipped_by_shape"] : json::array();
             if (cold_skip_rows.empty()) {
-                write_cache_metric_with_two_labels("counter", "cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.", "reason", "none", "payload_kind", "none", 0);
+                write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.", "reason", "none", "payload_kind", "none", 0);
             } else {
                 for (const auto & row : cold_skip_rows) {
                     write_cache_metric_with_two_labels(
-                        "counter", "cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.",
+                        "counter", "llamacpp:cache_cold_demotions_skipped_by_shape_total", "Cold demotions skipped by reason and kind.",
                         "reason", json_value(row, "reason", std::string("unknown")),
                         "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
                         json_value(row, "value", 0));
@@ -4520,11 +4520,11 @@ void server_routes::init_routes() {
             const json restore_miss_rows = cache_stats.contains("cache_restore_misses_by_shape") ?
                 cache_stats["cache_restore_misses_by_shape"] : json::array();
             if (restore_miss_rows.empty()) {
-                write_cache_metric_with_three_labels("counter", "cache_restore_misses_total", "Restore lookup misses by bounded reason.", "reason", "none", "profile", "none", "pair_state", "none", 0);
+                write_cache_metric_with_three_labels("counter", "llamacpp:cache_restore_misses_total", "Restore lookup misses by bounded reason.", "reason", "none", "profile", "none", "pair_state", "none", 0);
             } else {
                 for (const auto & row : restore_miss_rows) {
                     write_cache_metric_with_three_labels(
-                        "counter", "cache_restore_misses_total", "Restore lookup misses by bounded reason.",
+                        "counter", "llamacpp:cache_restore_misses_total", "Restore lookup misses by bounded reason.",
                         "reason", json_value(row, "reason", std::string("unknown")),
                         "profile", json_value(row, "profile", std::string("unknown")),
                         "pair_state", json_value(row, "pair_state", std::string("unknown")),
@@ -4534,12 +4534,12 @@ void server_routes::init_routes() {
             const json evidence_rows = cache_stats.contains("cache_prompt_evidence_records_by_shape") ?
                 cache_stats["cache_prompt_evidence_records_by_shape"] : json::array();
             if (evidence_rows.empty()) {
-                write_cache_metric_with_two_labels("counter", "cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.", "mode", "off", "result", "none", 0);
+                write_cache_metric_with_two_labels("counter", "llamacpp:cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.", "scope", "off", "result", "none", 0);
             } else {
                 for (const auto & row : evidence_rows) {
                     write_cache_metric_with_two_labels(
-                        "counter", "cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.",
-                        "mode", json_value(row, "mode", std::string("unknown")),
+                        "counter", "llamacpp:cache_prompt_evidence_records_total", "Prompt evidence records by mode and result.",
+                        "scope", json_value(row, "mode", std::string("unknown")),
                         "result", json_value(row, "result", std::string("unknown")),
                         json_value(row, "value", 0));
                 }
@@ -4547,45 +4547,45 @@ void server_routes::init_routes() {
             const json prefix_rows = cache_stats.contains("cache_prefix_candidates_by_shape") ?
                 cache_stats["cache_prefix_candidates_by_shape"] : json::array();
             if (prefix_rows.empty()) {
-                write_cache_metric_with_two_labels("counter", "cache_prefix_candidates_total", "Prefix candidates by result and reason.", "result", "none", "reason", "none", 0);
+                write_cache_metric_with_two_labels("counter", "llamacpp:cache_prefix_candidates_total", "Prefix candidates by result and reason.", "result", "none", "reason", "none", 0);
             } else {
                 for (const auto & row : prefix_rows) {
                     write_cache_metric_with_two_labels(
-                        "counter", "cache_prefix_candidates_total", "Prefix candidates by result and reason.",
+                        "counter", "llamacpp:cache_prefix_candidates_total", "Prefix candidates by result and reason.",
                         "result", json_value(row, "result", std::string("unknown")),
                         "reason", json_value(row, "reason", std::string("unknown")),
                         json_value(row, "value", 0));
                 }
             }
-            write_cache_metric("counter", "llamacpp_cache_protected_root_demotions_total", "Protected root demotions by mode.", json_value(cache_stats, "n_protected_root_demotions", 0));
+            write_cache_metric("counter", "llamacpp:cache_protected_root_demotions_total", "Protected root demotions by mode.", json_value(cache_stats, "n_protected_root_demotions", 0));
             // Step 10: Promotion latency histogram
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_0_1ms", "Promotion latency bucket 0-1ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_0_1ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_1_5ms", "Promotion latency bucket 1-5ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_1_5ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_5_10ms", "Promotion latency bucket 5-10ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_5_10ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_10_50ms", "Promotion latency bucket 10-50ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_10_50ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_50_100ms", "Promotion latency bucket 50-100ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_50_100ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_100_500ms", "Promotion latency bucket 100-500ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_100_500ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_500_1000ms", "Promotion latency bucket 500ms-1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_500_1000ms", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_latency_bucket_over_1000ms", "Promotion latency bucket over 1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_over_1000ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_0_1ms", "Promotion latency bucket 0-1ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_0_1ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_1_5ms", "Promotion latency bucket 1-5ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_1_5ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_5_10ms", "Promotion latency bucket 5-10ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_5_10ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_10_50ms", "Promotion latency bucket 10-50ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_10_50ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_50_100ms", "Promotion latency bucket 50-100ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_50_100ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_100_500ms", "Promotion latency bucket 100-500ms by mode.", json_value(cache_stats, "n_promotion_latency_bucket_100_500ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_500_1000ms", "Promotion latency bucket 500ms-1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_500_1000ms", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_latency_bucket_over_1000ms", "Promotion latency bucket over 1s by mode.", json_value(cache_stats, "n_promotion_latency_bucket_over_1000ms", 0));
             // Step 10: Promotion failure reason counters
-            write_cache_metric("counter", "llamacpp_cache_promotion_failure_checksum_mismatch_total", "Promotion failures due to checksum mismatch by mode.", json_value(cache_stats, "n_promotion_failure_checksum_mismatch", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_failure_not_found_total", "Promotion failures due to file not found by mode.", json_value(cache_stats, "n_promotion_failure_not_found", 0));
-            write_cache_metric("counter", "llamacpp_cache_promotion_failure_other_total", "Promotion failures due to other reasons by mode.", json_value(cache_stats, "n_promotion_failure_other", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_failure_checksum_mismatch_total", "Promotion failures due to checksum mismatch by mode.", json_value(cache_stats, "n_promotion_failure_checksum_mismatch", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_failure_not_found_total", "Promotion failures due to file not found by mode.", json_value(cache_stats, "n_promotion_failure_not_found", 0));
+            write_cache_metric("counter", "llamacpp:cache_promotion_failure_other_total", "Promotion failures due to other reasons by mode.", json_value(cache_stats, "n_promotion_failure_other", 0));
             // Step 10: Demotion failure reason counters
-            write_cache_metric("counter", "llamacpp_cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
-            write_cache_metric("counter", "llamacpp_cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
+            write_cache_metric("counter", "llamacpp:cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
+            write_cache_metric("counter", "llamacpp:cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
             server_write_stage10_cache_rows(prometheus, mode, cache_stats);
             const json protected_rows = cache_stats.contains("cache_protected_root_decisions_by_shape") ?
                 cache_stats["cache_protected_root_decisions_by_shape"] : json::array();
             if (protected_rows.empty()) {
                 write_cache_metric_with_four_labels(
-                    "counter", "cache_protected_root_decisions_by_shape_total",
+                    "counter", "llamacpp:cache_protected_root_decisions_by_shape_total",
                     "Protected-root decisions by bounded pressure shape.",
                     "decision", "none", "pressure_source", "none", "result", "none", "reason", "none", 0);
             } else {
                 for (const auto & row : protected_rows) {
                     write_cache_metric_with_four_labels(
-                        "counter", "cache_protected_root_decisions_by_shape_total",
+                        "counter", "llamacpp:cache_protected_root_decisions_by_shape_total",
                         "Protected-root decisions by bounded pressure shape.",
                         "decision", json_value(row, "decision", std::string("unknown")),
                         "pressure_source", json_value(row, "pressure_source", std::string("unknown")),
@@ -4598,13 +4598,13 @@ void server_routes::init_routes() {
                 cache_stats["cache_fallback_restores_by_shape"] : json::array();
             if (fallback_rows.empty()) {
                 write_cache_metric_with_four_labels(
-                    "counter", "cache_fallback_restores_by_shape_total",
+                    "counter", "llamacpp:cache_fallback_restores_by_shape_total",
                     "Fallback restore decisions by bounded strategy shape.",
                     "strategy", "none", "payload_kind", "none", "result", "none", "reason", "none", 0);
             } else {
                 for (const auto & row : fallback_rows) {
                     write_cache_metric_with_four_labels(
-                        "counter", "cache_fallback_restores_by_shape_total",
+                        "counter", "llamacpp:cache_fallback_restores_by_shape_total",
                         "Fallback restore decisions by bounded strategy shape.",
                         "strategy", json_value(row, "strategy", std::string("unknown")),
                         "payload_kind", json_value(row, "payload_kind", std::string("unknown")),
@@ -4617,13 +4617,13 @@ void server_routes::init_routes() {
                 cache_stats["cache_structured_diagnostics_by_shape"] : json::array();
             if (diagnostic_rows.empty()) {
                 write_cache_metric_with_four_labels(
-                    "counter", "cache_structured_diagnostics_total",
+                    "counter", "llamacpp:cache_structured_diagnostics_total",
                     "Structured hybrid-cache diagnostics by bounded event shape.",
                     "event", "none", "result", "none", "reason", "none", "payload_kind", "none", 0);
             } else {
                 for (const auto & row : diagnostic_rows) {
                     write_cache_metric_with_four_labels(
-                        "counter", "cache_structured_diagnostics_total",
+                        "counter", "llamacpp:cache_structured_diagnostics_total",
                         "Structured hybrid-cache diagnostics by bounded event shape.",
                         "event", json_value(row, "event", std::string("unknown")),
                         "result", json_value(row, "result", std::string("unknown")),
@@ -4632,29 +4632,29 @@ void server_routes::init_routes() {
                         json_value(row, "value", 0));
                 }
             }
-            write_cache_metric_with_two_labels("counter", "cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
-            write_cache_metric_with_label("counter", "cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_validation_mismatches_total", "Token or checksum validation mismatches.", "namespace", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "namespace", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
-            write_cache_metric_with_three_labels("counter", "cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
-            write_cache_metric_with_label("counter", "cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
-            write_cache_metric_with_two_labels("counter", "cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_validation_mismatches_total", "Token or checksum validation mismatches.", "namespace", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "namespace", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+            write_cache_metric_with_three_labels("counter", "llamacpp:cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
             const auto write_checkpoint_hits = [&]() {
                 const json rows = cache_stats.contains("cache_checkpoint_hits_by_shape") ?
                     cache_stats["cache_checkpoint_hits_by_shape"] : json::array();
                 if (rows.empty()) {
                     write_cache_metric_with_three_labels(
-                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "counter", "llamacpp:cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
                         "profile", "none", "payload_residency", "none", "pair_state", "none",
                         json_value(cache_stats, "cache_checkpoint_hits_total", 0));
                     return;
                 }
                 for (const auto & row : rows) {
                     write_cache_metric_with_three_labels(
-                        "counter", "cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
+                        "counter", "llamacpp:cache_checkpoint_hits_total", "Accepted checkpoint cache hits.",
                         "profile", json_value(row, "profile", std::string("unknown")),
                         "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
                         "pair_state", json_value(row, "pair_state", std::string("unknown")),
@@ -4666,14 +4666,14 @@ void server_routes::init_routes() {
                     cache_stats["cache_checkpoint_restores_by_shape"] : json::array();
                 if (rows.empty()) {
                     write_cache_metric_with_four_labels(
-                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "counter", "llamacpp:cache_checkpoint_restores_total", "Checkpoint restore attempts.",
                         "profile", "none", "payload_residency", "none", "pair_state", "none", "result", "none",
                         json_value(cache_stats, "cache_checkpoint_restores_total", 0));
                     return;
                 }
                 for (const auto & row : rows) {
                     write_cache_metric_with_four_labels(
-                        "counter", "cache_checkpoint_restores_total", "Checkpoint restore attempts.",
+                        "counter", "llamacpp:cache_checkpoint_restores_total", "Checkpoint restore attempts.",
                         "profile", json_value(row, "profile", std::string("unknown")),
                         "payload_residency", json_value(row, "payload_residency", std::string("unknown")),
                         "pair_state", json_value(row, "pair_state", std::string("unknown")),
@@ -4683,19 +4683,19 @@ void server_routes::init_routes() {
             };
             write_checkpoint_restores();
             write_checkpoint_hits();
-            write_cache_metric("counter", "cache_checkpoint_admissions_total", "Checkpoint payload admissions by mode.", json_value(cache_stats, "cache_checkpoint_admissions_total", 0));
-            write_cache_metric("counter", "cache_checkpoint_admission_failures_total", "Checkpoint payload admission failures by mode.", json_value(cache_stats, "cache_checkpoint_admission_failures_total", 0));
+            write_cache_metric("counter", "llamacpp:cache_checkpoint_admissions_total", "Checkpoint payload admissions by mode.", json_value(cache_stats, "cache_checkpoint_admissions_total", 0));
+            write_cache_metric("counter", "llamacpp:cache_checkpoint_admission_failures_total", "Checkpoint payload admission failures by mode.", json_value(cache_stats, "cache_checkpoint_admission_failures_total", 0));
             const json checkpoint_admission_rows = cache_stats.contains("cache_checkpoint_admissions_by_shape") ?
                 cache_stats["cache_checkpoint_admissions_by_shape"] : json::array();
             if (checkpoint_admission_rows.empty()) {
                 write_cache_metric_with_three_labels(
-                    "counter", "cache_checkpoint_admissions_by_shape_total",
+                    "counter", "llamacpp:cache_checkpoint_admissions_by_shape_total",
                     "Checkpoint admissions under Stage 17 policy.",
                     "policy", "none", "result", "none", "reason", "none", 0);
             } else {
                 for (const auto & row : checkpoint_admission_rows) {
                     write_cache_metric_with_three_labels(
-                        "counter", "cache_checkpoint_admissions_by_shape_total",
+                        "counter", "llamacpp:cache_checkpoint_admissions_by_shape_total",
                         "Checkpoint admissions under Stage 17 policy.",
                         "policy", json_value(row, "policy", std::string("unknown")),
                         "result", json_value(row, "result", std::string("unknown")),

@@ -3605,6 +3605,103 @@ void test_stage23_successful_checkpoint_admission_keeps_metadata_only_list() {
     printf("  PASSED\n");
 }
 
+// TP-26-UT6: regression for D-EXEC-24-03 heap corruption. The save path
+// used to copy the entire checkpoints list (each carrying ~50 MiB of
+// data_tgt for the MTP fixture) into entry.checkpoints and then clear the
+// copy, wasting a 50 MiB allocation + free per save and stressing the heap
+// allocator enough to trip a latent heap-corruption detector (exit code
+// 0xC0000374) during subsequent saves at high cache pressure (req 258 in
+// Stage 24 S03 hybrid reruns). Drive admit_latest_checkpoint_and_store_metadata
+// with a checkpoint that carries a payload-sized data_tgt vector and
+// confirm that the entry stores metadata-only checkpoints with empty
+// data_tgt/data_dft, the bytes are owned by hot_payloads, and the original
+// checkpoint's data_tgt is not silently consumed (so the slot keeps its
+// own copy for any subsequent re-read path).
+void test_stage26_admit_checkpoint_does_not_allocate_payload_sized_copy() {
+    printf("test-cache-controller: Stage 26 admit checkpoint avoids payload-sized copy...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_add_entry_for_tests(create_tokens({9001, 9002, 9003, 9004}), false, "stage26-ut6", 128, 0);
+
+    // Build a checkpoint list whose data_tgt is large enough to trigger
+    // the heap-pressure pattern that produced the corruption in -04.
+    common_prompt_checkpoint cp{};
+    cp.update_pos(4, 0, 4);
+    const size_t big_target_bytes = 4 * 1024 * 1024; // 4 MiB
+    cp.data_tgt.assign(big_target_bytes, 0xAB);
+    cp.data_dft.assign(2048, 0xCD);
+    std::list<common_prompt_checkpoint> checkpoints;
+    checkpoints.push_back(cp);
+
+    std::string failure;
+    hybrid_cache_entry & entry = stage22_entries(ctrl).front();
+    const uint64_t exact_id_before = entry.payload_id;
+    const size_t exact_target_before = stage22_hot_payloads(ctrl).at(exact_id_before).target.size();
+    const size_t entries_before = stage22_entries(ctrl).size();
+
+    // Drive the admission. bypass_workload_profile=true because the
+    // controller has no llama_context, which is the same test-only setup
+    // used by the Stage 23 success test.
+    assert(stage23_admit_checkpoint_store(ctrl, entry, checkpoints, false, &failure, true));
+
+    // entry.checkpoints must hold metadata only: data_tgt and data_dft
+    // must be empty so the per-entry size does not retain the 4 MiB copy.
+    assert(entry.checkpoints.size() == 1);
+    for (const auto & ckpt : entry.checkpoints) {
+        if (!ckpt.data_tgt.empty()) {
+            fprintf(stderr, "FAIL: entry.checkpoints.data_tgt not empty (size=%zu)\n",
+                    ckpt.data_tgt.size());
+            std::abort();
+        }
+        if (!ckpt.data_dft.empty()) {
+            fprintf(stderr, "FAIL: entry.checkpoints.data_dft not empty (size=%zu)\n",
+                    ckpt.data_dft.size());
+            std::abort();
+        }
+    }
+
+    // The actual payload bytes must live in hot_payloads for the checkpoint
+    // descriptor, and the descriptor size must equal the source data.
+    const uint64_t checkpoint_id = entry.checkpoint_payload_id;
+    if (checkpoint_id == 0) {
+        fprintf(stderr, "FAIL: checkpoint_payload_id == 0 after admit\n");
+        std::abort();
+    }
+    if (stage22_hot_payloads(ctrl).at(checkpoint_id).target.size() != big_target_bytes) {
+        fprintf(stderr, "FAIL: hot payload target size=%zu expected=%zu\n",
+                stage22_hot_payloads(ctrl).at(checkpoint_id).target.size(), big_target_bytes);
+        std::abort();
+    }
+
+    // The original entry's exact-blob payload must be untouched.
+    if (entry.payload_id != exact_id_before) {
+        fprintf(stderr, "FAIL: exact payload id changed %" PRIu64 " -> %" PRIu64 "\n",
+                exact_id_before, entry.payload_id);
+        std::abort();
+    }
+    if (stage22_hot_payloads(ctrl).at(exact_id_before).target.size() != exact_target_before) {
+        fprintf(stderr, "FAIL: exact target bytes changed %zu -> %zu\n",
+                exact_target_before,
+                stage22_hot_payloads(ctrl).at(exact_id_before).target.size());
+        std::abort();
+    }
+
+    // entry.size() must not include the payload-sized buffers (would
+    // mean a copy leaked into the entry).
+    const size_t expected_entry_size = entry.tokens.size() * sizeof(llama_token) +
+        entry.resident_payload_bytes_cached + entry.namespace_id.size();
+    if (entry.size() != expected_entry_size) {
+        fprintf(stderr, "FAIL: entry.size=%zu expected=%zu\n", entry.size(), expected_entry_size);
+        std::abort();
+    }
+    if (stage22_entries(ctrl).size() != entries_before) {
+        fprintf(stderr, "FAIL: entries count changed %zu -> %zu\n",
+                entries_before, stage22_entries(ctrl).size());
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
 // TP-22-UT1: demotion success transitions once and syncs owner views.
 void test_stage22_demotion_success_transitions_once() {
     printf("test-cache-controller: Stage 22 demotion success transitions once...\n");
@@ -4614,6 +4711,174 @@ void test_stage25_concurrent_slot_requests_n4_contention() {
     printf("  PASSED\n");
 }
 
+// TP-26-UT1: cold-store metric tracks per-id bytes. Two synthetic demotions
+// credit the metric with the exact descriptor byte sizes (per-id map).
+void test_stage26_cold_metric_tracks_per_id_bytes() {
+    printf("test-cache-controller: Stage 26 cold metric tracks per-id bytes...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 256, 32);
+    stage22_add_exact_payload(ctrl, 512, 64);
+
+    // Drive first demotion completion
+    uint64_t id_a = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[id_a].residency = payload_residency_state::demoting;
+    io_completion_result res_a = stage22_success_result(id_a);
+    stage22_handle_demotion_completion(ctrl, res_a);
+
+    json stats_a = ctrl.get_stats();
+    const size_t bytes_a = stats_a["n_cold_payload_bytes"].get<size_t>();
+    if (bytes_a != 256 + 32) {
+        fprintf(stderr, "FAIL: bytes_a=%zu expected=%zu\n", bytes_a, 256u + 32u);
+        std::abort();
+    }
+
+    // Drive second demotion completion
+    uint64_t id_b = stage22_entries(ctrl).back().payload_id;
+    stage22_descriptors(ctrl)[id_b].residency = payload_residency_state::demoting;
+    io_completion_result res_b = stage22_success_result(id_b);
+    stage22_handle_demotion_completion(ctrl, res_b);
+
+    json stats_b = ctrl.get_stats();
+    const size_t bytes_b = stats_b["n_cold_payload_bytes"].get<size_t>();
+    if (bytes_b != 256 + 32 + 512 + 64) {
+        fprintf(stderr, "FAIL: bytes_b=%zu expected=%zu\n", bytes_b, 256u + 32u + 512u + 64u);
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
+// TP-26-UT2: cold-store metric decrements on eviction. Drive demotion
+// completion, then mark the descriptor as evicted via remove_payload
+// (which is the cold-eviction path used by mark_payload_evicted).
+void test_stage26_cold_metric_decrements_on_evict() {
+    printf("test-cache-controller: Stage 26 cold metric decrements on evict...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 192, 0);
+
+    uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    io_completion_result res = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, res);
+
+    json stats_after_demote = ctrl.get_stats();
+    if (stats_after_demote["n_cold_payload_bytes"].get<size_t>() != 192) {
+        fprintf(stderr, "FAIL: post-demote bytes=%zu expected=192\n",
+                stats_after_demote["n_cold_payload_bytes"].get<size_t>());
+        std::abort();
+    }
+
+    // Drive remove_payload which is the cold-eviction decrement site
+    stage22_remove_payload(ctrl, payload_id);
+
+    json stats_after_evict = ctrl.get_stats();
+    if (stats_after_evict["n_cold_payload_bytes"].get<size_t>() != 0) {
+        fprintf(stderr, "FAIL: post-evict bytes=%zu expected=0\n",
+                stats_after_evict["n_cold_payload_bytes"].get<size_t>());
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
+// TP-26-UT3: cold-store metric decrements on cleanup. Drive demotion
+// completion, remove the entry, then verify the metric tracks the
+// per-id map erase path.
+void test_stage26_cold_metric_decrements_on_cleanup() {
+    printf("test-cache-controller: Stage 26 cold metric decrements on cleanup...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 320, 0);
+
+    uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    io_completion_result res = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, res);
+
+    json stats_demoted = ctrl.get_stats();
+    if (stats_demoted["n_cold_payload_bytes"].get<size_t>() != 320) {
+        fprintf(stderr, "FAIL: demoted bytes=%zu expected=320\n",
+                stats_demoted["n_cold_payload_bytes"].get<size_t>());
+        std::abort();
+    }
+
+    // remove_payload drives the same decrement site used by cold cleanup
+    stage22_remove_payload(ctrl, payload_id);
+
+    json stats_after = ctrl.get_stats();
+    if (stats_after["n_cold_payload_bytes"].get<size_t>() != 0) {
+        fprintf(stderr, "FAIL: post-cleanup bytes=%zu expected=0\n",
+                stats_after["n_cold_payload_bytes"].get<size_t>());
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
+// TP-26-UT4: no double-count on re-demote. Demote, evict, re-demote the
+// same id and confirm the metric reflects the latest write size.
+void test_stage26_cold_metric_no_double_count_on_redemote() {
+    printf("test-cache-controller: Stage 26 cold metric no double-count on redemote...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 256, 64);
+
+    uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+
+    // First demotion completion
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    io_completion_result res1 = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, res1);
+
+    // Evict (drives the per-id map erase path)
+    stage22_remove_payload(ctrl, payload_id);
+
+    json stats_mid = ctrl.get_stats();
+    if (stats_mid["n_cold_payload_bytes"].get<size_t>() != 0) {
+        fprintf(stderr, "FAIL: post-evict bytes=%zu expected=0\n",
+                stats_mid["n_cold_payload_bytes"].get<size_t>());
+        std::abort();
+    }
+
+    // Re-demote the same id (need to re-attach because remove_payload
+    // erased the descriptor)
+    stage22_add_exact_payload(ctrl, 256, 64);
+    uint64_t new_payload_id = stage22_entries(ctrl).back().payload_id;
+
+    stage22_descriptors(ctrl)[new_payload_id].residency = payload_residency_state::demoting;
+    io_completion_result res2 = stage22_success_result(new_payload_id);
+    stage22_handle_demotion_completion(ctrl, res2);
+
+    json stats_final = ctrl.get_stats();
+    if (stats_final["n_cold_payload_bytes"].get<size_t>() != 256 + 64) {
+        fprintf(stderr, "FAIL: post-redemote bytes=%zu expected=%zu\n",
+                stats_final["n_cold_payload_bytes"].get<size_t>(), 256u + 64u);
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
+// TP-26-UT5: cold payload count tracks file count. Drive demotion
+// completion and assert n_cold_payload_count equals 1.
+void test_stage26_cold_payload_files_count_matches_disk() {
+    printf("test-cache-controller: Stage 26 cold payload files count matches disk...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    stage22_add_exact_payload(ctrl, 256, 0);
+
+    uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    stage22_descriptors(ctrl)[payload_id].residency = payload_residency_state::demoting;
+    io_completion_result res = stage22_success_result(payload_id);
+    stage22_handle_demotion_completion(ctrl, res);
+
+    json stats = ctrl.get_stats();
+    if (stats["n_cold_payload_count"].get<size_t>() != 1) {
+        fprintf(stderr, "FAIL: count=%zu expected=1\n",
+                stats["n_cold_payload_count"].get<size_t>());
+        std::abort();
+    }
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -4767,10 +5032,16 @@ int main() {
     test_stage25_worker_thread_idle_after_migration();
     test_stage25_transaction_wait_exceeded_diagnostic();
     test_stage25_concurrent_slot_requests_n4_contention();
+    test_stage26_cold_metric_tracks_per_id_bytes();
+    test_stage26_cold_metric_decrements_on_evict();
+    test_stage26_cold_metric_decrements_on_cleanup();
+    test_stage26_cold_metric_no_double_count_on_redemote();
+    test_stage26_cold_payload_files_count_matches_disk();
+    test_stage26_admit_checkpoint_does_not_allocate_payload_sized_copy();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 132 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional)\n");
+    printf("Total: 137 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting)\n");
     printf("==================================================\n");
 
     return 0;

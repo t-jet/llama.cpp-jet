@@ -200,6 +200,26 @@ Action:
 
 - Do read both protocol steps and failure-handling table together. Do identify cases where protocol mutates state before fallible step and failure table implies that mutation reverted. Do record as non-blocking observation with concrete implementation contract requirement. Don't flag as blocking when correct outcome unambiguous across both parts.
 
+## Improvement: Drift direction vs accounting-fix hypothesis
+
+Condition:
+
+- Reviewing cold-store / cache accounting fix plans where hypothesis says metric drifts UP (cleanup doesn't decrement) but observed evidence shows metric is LOWER than disk (e.g., 351 MiB metric vs 5.6 GiB disk, ~16x ratio per descriptor)
+
+Action:
+
+- Do verify drift direction by dividing observed filesystem bytes by observed metric bytes and comparing per-file/per-descriptor ratio. Do not accept hypothesis #N from design without checking observed direction matches. Do flag if per-id map uses descriptor-reported bytes (target_size + draft_size) when observed drift shows descriptor under-reports disk size; in that case per-id map alone will not close gap, exact bytes_written from io_completion_result is the actual fix. Do record as non-blocking observation when plan documents the limitation and provides residual-drift fallback. Do not block sign-off when plan provides explicit drift_ratio target and "explicit accounting-fix note" fallback in test report.
+
+## Improvement: Unstated decrement paths in accounting-fix plans
+
+Condition:
+
+- Reviewing cache / counter accounting fix that lists specific decrement sites (cold_budget_make_room, mark_payload_evicted, cleanup loop) but code contains additional decrement sites not enumerated (e.g., promotion-success path that decrements cold bytes when a payload moves back to hot)
+
+Action:
+
+- Do grep for the counter name across the controller to enumerate all decrement sites before reviewing completeness. Do flag unstated decrement sites as non-blocking observation; plan should at minimum acknowledge them or explicitly say "all other sites use existing logic". Do not block sign-off when the unstated path uses the same formula being replaced (descriptor bytes), so behavior is unchanged.
+
 ## Improvement: Dependency graph completeness in plan reviews
 
 Condition:
@@ -2489,3 +2509,84 @@ Condition:
 Action:
 
 - Do distinguish legitimate technical matches from stale-status matches before claiming grep clean. Do report grep result as "clean" only when all matches are legitimate (file names, technical vocabulary, historical quoted findings). Do not blanket-replace "open" without context check; file names and technical vocabulary are real. Do verify closure-purpose phrases (status: closed, D-CLOSURE-NN-NN, current gate: terminal) are present in all touched entry docs and handoff sections. Do list each touched file with closure phrases added in the return message so user can verify the swap.
+
+## Improvement: Programming symbols with trailing asterisk in markdown prose
+
+Condition:
+
+- Authoring durable markdown design / review docs on Windows that reference programming symbols whose names contain a trailing or internal asterisk (e.g., `tx_*`, `n_*`, `foo_*`, `obj*`); the markdown linter flags MD037 (Spaces inside emphasis markers) when the symbol appears in prose with surrounding spaces or punctuation
+
+Action:
+
+- Do wrap the symbol in backticks every time it appears in prose or table cells (`` `tx_*` ``). Do not rely on the symbol appearing inside an existing code-fence to escape the linter; linters still parse emphasis markers outside code-fences. Do run a final grep before declaring done for any of: `* `, ` *`, `_*`, or any text-fragment-with-asterisk pattern and confirm each match is inside backticks or a code-fence. Do verify own deliverables byte-level after authoring on Windows (CR=0, no BOM, no unicode, no trailing whitespace). Don't ship design docs with MD037 errors when the fix is backtick-wrapping.
+
+## Post-task review 2026-06-25 (Stage 26 design authoring)
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Authored Phase 26 design (entry doc + 7 part files in `._design_docs/cache-handling-phase26-design/`) covering 3 goals: Stage 24 + 25 carry-over resolution, Prometheus metrics alignment to upstream `llamacpp:` convention, and Stage 24 S02/S03 rerun. Entry doc 100 LF, part-01 45, part-02 136, part-03 129, part-04 113, part-05 111, part-06 109, part-07 88. All under 300-line cap. CR=0, no BOM, no unicode, trailing LF on every file. `git diff --check` clean on every file. No linter errors after the trailing-newline + backtick fix pass.
+- Initial create_file pass on Windows inserted CRLF (CR=99..136) and linter flagged MD047 (no trailing newline) on every file plus MD037 on `tx_*` references in entry doc, part-01, part-05. Fixed via the existing CRLF rule: WriteAllBytes after stripping 0x0D and appending trailing LF. Replaced bare `tx_*` with backticked `` `tx_*` `` via multi_replace_string_in_file. Then re-verified CR=0 LF=line count last=0x0A first3=ASCII on all 8 files in one normalization pass.
+- Survey of metric inventory: 37 `llamacpp_X` metrics to rename to `llamacpp:X`, 30 `cache_X` metrics to prefix with `llamacpp:`, 1 duplicate `mode` label on `cache_prompt_evidence_records_total` line 4537 (helper at line 4359-4368 already adds `mode` but caller at 4537 passes `"mode"` as label_a_name, producing `{mode=...,mode=...}`). Total 67 metrics renamed; `mode` duplicate resolved by renaming caller-side `"mode"` to `"scope"`.
+- Carry-over inventory (part-01) lists 5 issues: D-EXEC-24-03-a SEH handler, D-EXEC-24-03-b widen silent-crash to S02 hybrid earlier-crash, D-EXEC-24-03-c cold-store metric drift (5.78 GiB on disk vs 352 MiB metric), PF-03 cross-stage latency evidence gap, Stage 25 S02 hybrid confirmation. Implementation order (part-06) sequences SEH handler before cold-store accounting before metrics rename before fixture update before Stage 24 rerun so each step has a buildable binary and produces incremental evidence.
+
+Improvement outcome candidate:
+
+- Condition: When authoring durable markdown design docs that reference programming symbols whose names contain trailing or internal asterisk characters (e.g., `tx_*`)
+- Action: Do wrap the symbol in backticks every time it appears in prose or table cells; do not rely on surrounding code-fences; do run byte-level format verification on Windows after authoring.
+
+Similar memory check:
+
+- Similar improvement found: No
+- Existing CRLF rule covers the byte-level fix; existing pipe-escape rule covers table-cell special chars; neither addresses MD037 from asterisks in programming symbols. The CRLF rule and the asterisk rule both surface on Windows-authored markdown; combining them in one byte-level pass per file is the cleanest enforcement pattern.
+- Decision: Add new improvement.
+
+Memory update:
+
+- New improvement `Programming symbols with trailing asterisk in markdown prose` stored above; post-task review appended.
+
+
+## Improvement: Stage design part-02 metric count claims vs source ground truth
+
+Condition:
+- Reviewing stage design whose part-02 (rename map) cites a specific count of metric renames (37 + 30 = 67) and runner/fixture-script reference count (e.g., 6 metric-name references in stage24-chat-s02-s03-comparison.ps1 lines 30..36) that the author did not verify against source
+
+Action:
+- Do run grep_search for each named metric prefix in the actual source file (e.g., 	ools/server/server-context.cpp for the llamacpp_X callsites) and in each named script before accepting the count. Do count unique callsites and unique script occurrences with raw matching, not summary line ranges. Do record count mismatches as non-blocking finding with corrected count, not as blocking gate failure, when underlying rename contract holds. Do verify runner MetricNames = @(...) array length when part-02 names runner line range.
+
+## Improvement: Hard rename impact radius includes durable design + test reports, not just fixture scripts
+
+Condition:
+- Stage design proposing HARD RENAME of public Prometheus metric names (public API breaking change) and explicitly enumerating fixture script updates but omitting the fact that prior-stage test reports and prior-stage design part files already quote the OLD metric names by example (llamacpp_cache_X)
+
+Action:
+- Do run grep_search for the OLD prefix across all ._design_docs/** to enumerate durable-doc references. Do record count and locations as non-blocking observation: durable docs may be left as historical record of OLD names because they describe prior-stage evidence, but entry-doc Contents and any current operational doc should be updated to NEW names. Do not flag as blocking when durable docs are historical record and quote is in a one-time test report. Do recommend explicit entry in part-02 or architecture-invariant section listing which durable-doc categories are updated and which are left as historical.
+
+## Improvement: Stage 26 part-04 cold-store accounting fix lists eviction sites incompletely
+
+Condition:
+- Stage design (part-04 cold-store drift fix) identifies a hypothesis (counter not decremented on disk-removal path) and lists 3-4 specific eviction sites in fix-step 4 to apply per-id byte map decrement; actual source has additional eviction/cleanup sites the design does not enumerate
+
+Action:
+- Do run grep_search for the relevant counter increment and decrement callsites in 	ools/server/server-cache-hybrid.cpp and verify each named site in design's fix-step list. Do record sites not in design list as non-blocking observation. Do verify the BYTE DECREMENT path (cold_store.delete_ids + descriptor erase) is explicitly listed. Do not flag as blocking when fix's intent (decrement on every disk-removal path) covers the additional sites implicitly via call-graph reachability, but do recommend adding explicit callout for any cleanup path that deletes files WITHOUT going through named eviction functions.
+
+## Improvement: Tight-scope rework respects file boundary even for non-blocking items
+
+Condition:
+- Task brief says tight scope (e.g., 'fix the counts only') AND lists non-blocking items that target OTHER files, while hard constraint says 'DO NOT modify other files beyond what these fixes require'
+
+Action:
+- Do limit edits strictly to the file(s) named by the BLOCKING fix descriptions. Do report non-blocking address ratio as X/N honestly with one-line deferral reason. Do run grep_search verifications for non-blocking items and include findings in the response as INFO without committing them to docs. Don't expand scope to non-blocking items even when addressing them is cheap and within reach. Don't silently skip the non-blocking items; surface them in the response so the next owner can decide.
+
+## Improvement: Re-review count fixes require file-line match verification
+
+Condition:
+
+- Re-reviewing design after rework that claimed to fix a BLOCKING count mismatch (e.g. part-02 said "6 references" when actual file had 10)
+
+Action:
+
+- Do extract the claimed count text from design doc and the cited line numbers. Do read the actual fixture file at each cited line with Select-String -Pattern <regex> to confirm every cited line matches. Do pipe the same pattern through Measure-Object to confirm count == cited count. Do record the verified count, line list, and pattern used. Don't accept the design's self-claim alone; rework-session descriptions can lie about line numbers as easily as they did about counts. Do report VERIFIED only when both count and per-line content match exactly. Do record this as a separate finding from any other verification done.

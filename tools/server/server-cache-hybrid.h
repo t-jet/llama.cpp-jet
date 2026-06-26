@@ -760,6 +760,7 @@ private:
     size_t n_demotion_queue_full = 0;
     size_t n_promotion_queue_full = 0;
     size_t n_cold_payload_bytes = 0;              // Total bytes in cold store (incremented on demotion success)
+    std::unordered_map<uint64_t, size_t> cold_payload_bytes_by_id_; // per-id actual write size; lets eviction subtract exact bytes
     size_t n_protected_root_demotions = 0;         // Protected roots that were demoted
     int64_t cold_budget_bytes = -1;                // -1 = unlimited, 0 = cold writes disabled
     size_t n_cold_demotions_skipped = 0;

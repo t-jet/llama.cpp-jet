@@ -62,6 +62,16 @@ Action:
 
 - Do rerun focused tests with `LLAMA_SERVER_BIN_PATH` set to the absolute built server executable; use `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` when the module preload fixture is unrelated to the behavior under test.
 
+## Improvement: std::thread+detach inside llama_server() before model load races with CUDA init
+
+Condition:
+
+- When adding a std::thread that is detached inside `llama_server()` in `tools/server/server.cpp` (or any function that runs before `llama_backend_init()` or `llama_numa_init(params.numa)`), and the thread body performs Windows API calls (CreateFileA, GetProcessWorkingSetSizeEx, GetLocalTime, etc.)
+
+Action:
+
+- Do NOT spawn the thread inside `llama_server()` even when moved after `common_params_parse()`; the race with subsequent CUDA init produces a NULL pointer write in KERNELBASE+0xF9A40 (STATUS_ACCESS_VIOLATION, param[0]=1, param[1]=0) caught by the existing SEH filter. The crash is identical regardless of where in the function the thread is spawned (before or after common_params_parse). Verified 2026-06-26 (Stage 24 -04 D-EXEC-26-03): even with `start_snapshot_thread` placed after `common_params_parse`, every leg crashed at startup. Disabling the thread entirely (`server_diag::start_snapshot_thread(crash_dump_dir);` commented out) made all 4 legs run normally. The terminate handler install (`std::set_terminate`) is safe; only the detached thread body is unsafe. Use a different mechanism for sampling (e.g., write snapshots from the main thread on each request, or use pthreads without detach, or sample from inside the request loop). Don't trust std::thread+detach as a fire-and-forget mechanism inside `llama_server()` initialization.
+
 ## Improvement: Mandatory startup memory order
 
 Condition:
@@ -1828,3 +1838,66 @@ Condition:
 Action:
 
 - Do read summary.json.error_counts keys for every hybrid leg in the new report and compare each key byte-for-byte against the prior-stage crash signature hash before classifying the failure. Same hash = prior-stage carry-over (classify as BLOCKED-structural-not-infra with reference to the original D-EXEC-XX number, not as a new product bug). Different or absent hash = new stage-specific defect, route to bug-fix loop. Verify hash equality by extracting error_counts keys via (Get-Content summary.json | ConvertFrom-Json).error_counts.PSObject.Properties.Name, not by substring match on the leg summary prose, because the prose may mention prior hashes as context. Verified 2026-06-25 (Stage 25 test-results review): both S02 hybrid and S03 hybrid legs in test-report-20260625-01.md had error_counts = { 3d9b93fa2cc8247c: 1 }, identical to Stage 24 -06 D-EXEC-24-03. Without the hash check, the S02 hybrid crash at req 48 (where Stage 24 -06 was PASS) would have looked like a regression; the hash match confirmed D-EXEC-24-03 carry-over, not a new Stage 25 defect. Don't classify integration FAIL as new product bug based on request-index comparison alone; the request index at which a silent crash manifests can vary with cache pressure and parallelism, but the crash hash is a stable fingerprint.
+
+## Internal Post-Task Record (2026-06-26, Stage 26 implementation plan)
+
+Task completed: Yes (planning-only).
+
+Effectiveness assessment: Plan honors the design D1-D5 (carry-over inventory, metrics alignment, SEH handler, cold-store drift, Stage 24 rerun, implementation order, test plan) and the user brief's 12-step scope. Plan splits into entry doc + 5 part files (entry 73 lines; parts 42..290 lines, max 290, under the 300 cap with 10-line buffer). Manager review slot (part-05) is recorded with explicit "NOT authored by this session" wording and a structural reference pattern, not pre-filled with placeholder Manager content. All 4 OQ decisions from the design are recorded as binding. 5 IQ items surface for Architect review (cold-store init walk scope, label-rename code comment, SEH GetLastError capture, Stage 24 rerun --cache-ram value, comment alignment at server-context.cpp:4336..4338). Byte-level hygiene verified: LF only (CR=0 across all 6 files), no BOM, no non-ASCII, no trailing whitespace, line counts match LF count exactly. `git diff --check` clean. Two non-blocking findings surfaced during drafting and resolved inline: part-01 step-11 PowerShell code block needed blank-line-before-fence and language tag (MD031 + MD040); fixed via replace_string_in_file and re-verified. The plan deliberately does NOT modify tracker, document-index, existing test plan, or any closed-stage implementation log per hard constraints.
+
+Improvement outcome candidate:
+- Condition: When creating implementation plan part files for a multi-stage cache project and the design allocates a sibling-agent slot (e.g., Manager review)
+- Action: Do author the part-05 slot with explicit "NOT authored by this session" wording, a structural reference to the closest existing pattern (e.g., closure record), and a Reserved-for-handoff footer; do not pre-fill placeholder Manager content
+
+Similar memory check: Existing improvement "Plan author must not author a sibling agent's review slot" (recorded 2026-06-12 in dev memory tail) covers this exact pattern; the Stage 26 plan followed it. No new entry needed.
+
+Decision: No update. The existing improvement already enforces the pattern; the Stage 26 plan follows it correctly.
+
+Memory update: No new entry. The existing improvement stands.
+## Improvement: Stage 26 cold-store per-id tests must drive handle_demotion_completion directly
+
+Condition:
+
+- When adding unit tests for cold-store accounting fix paths (Stage 26 carry-over D-EXEC-24-03-c) that depend on `n_cold_payload_bytes` being credited, and the test is built into `tests/test-cache-controller.cpp` alongside the existing 132 tests
+
+Action:
+
+- Do use the Stage 22 test pattern (`stage22_handle_demotion_completion(ctrl, result)`) which manually drives the completion handler with a synthetic `io_completion_result` after setting `descriptor.residency = payload_residency_state::demoting`; don't rely on `ctrl.tx_demote_payload(payload_id)` because the Stage 25 transactional wrapper may return false silently when `limit_size` is small (NDEBUG strips the assert), and even when it succeeds the test setup must use the exact same path the production cold-store accounting fix operates on. Verified 2026-06-26 (Stage 26 D26-IMPL): the first test attempt used `tx_demote_payload` with `limit_size=100` and 288-byte payload; the demote returned false, the assert() was a no-op under Release NDEBUG, and the FAIL line ran with `bytes_a=0`. Rewriting all 5 Stage 26 tests to use `stage22_handle_demotion_completion` with synthetic results fixed the issue; the per-id map accounting fix was correctly tested (256+32 bytes after one demote, 256+32+512+64 after two, 0 after eviction, 0 after cleanup). Don't fall back to NDEBUG-defeating `#undef NDEBUG` tricks; use the existing Stage 22 helper pattern.
+
+
+## Internal Post-Task Record (2026-06-26, Stage 26 test-results review)
+
+Task completed: Yes (test-results review, no code changes, no commits).
+
+Effectiveness assessment: Stage 26 ran 11/12 rows PASS (5/5 Stage 26 cold-store unit tests, 4/4 fixture assertions, S02 integration PASS, S03 integration FAIL reproducing D-EXEC-24-03, PF-03 delta-recorded). The verdict was REWORK (closure-eligible) because the two non-pass rows are documented carry-over (D-EXEC-24-03) and observation (R26-OBS-01 demote queue saturation), not Stage 26 regressions. New Stage 26 product bugs: 0. The SEH infrastructure was verified separately via smoke trigger (223KB dump captured) but the runner script stage24-chat-s02-s03-comparison.ps1 lines 933-934 do NOT pass --crash-dump-dir to llama-server.exe, so the actual D-EXEC-24-03 reproduction did not capture a stack dump and the crash signature (req 257 vs req 280 in -06, 637 tok / 502 MiB at death vs 4073 tok / 505 MiB) had to be classified without stack evidence. The review correctly identified this as a runner-script gap (one-line fix for next rerun) and not a SEH-infra bug. R26-OBS-01 (demote queue saturation warnings) was correctly classified as observation rather than new bug because per-id accounting correctly reports 0 when no demotion succeeds, matching the existing Stage 25 follow-up (c) cold-store metric vs filesystem drift. Manager decisions D-CLOSURE-26-01 (close with documented blocker) and D-EXEC-26-01/02/03 (SEH runner fix, R26-OBS-01 promotion, PF-03 evidence gap) proposed; 5 carry-forward follow-ups listed. Review file scope was 500-word max concise verdict format per user brief. No source, design, implementation, test report, or build artifacts were modified. No commit or push performed.
+
+Improvement outcome candidate:
+- Condition: When a staged test report records a crash without a SEH/crash-dump because the runner script does not pass the dump-enabled flag to the server binary, and the prior stage already classified the crash as structural-not-infra (Windows process termination, layer below hybrid cache)
+- Action: Do not classify the missing-dump as a SEH infrastructure bug; the SEH infra is verified separately via smoke trigger (TA-26-FA-01 style); classify the gap as a one-line runner-script fix for the next rerun so the next D-EXEC-XX rerun captures a stack and root-cause investigation can proceed. Verify by checking the runner's $args = .server_flags + @('--model', ...) line for absence of --crash-dump-dir and confirming the SEH infrastructure is verified in the same report via a separate smoke trigger. Don't conflate the runner gap with the SEH infra gap; they are different layers and need different fixes. Verified 2026-06-26 (Stage 26 review): TA-26-FA-01 captured a 223KB dump via separate smoke trigger, but the actual D-EXEC-24-03 reproduction in TP-26-IT-02 did not capture a dump because the runner script lines 933-934 omit --crash-dump-dir. Reporting both as the same bug would have inflated the bug count and misrouted the fix to SEH infra rather than the runner script.
+
+Similar memory check: Similar improvement found: No. The existing improvements cover silent-crash hash classification and SEH activation verification, but not the runner-vs-infra separation when a SEH dump is missing during an actual reproduction. The 'Classify silent-crash integration failures by matching summary.json error_counts hash' improvement covers classification of the crash itself; the new improvement covers the dump-capture gap pattern specifically.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under 'Improvement: SEH runner-script gap vs SEH infrastructure gap separation'.
+
+## Improvement: MSVC /GF string pool splits long literals with length prefixes
+
+Condition:
+
+- When a Windows MSVC Release binary uses `/GF` (string pooling, the default), and a byte-level scan for a contiguous ASCII literal (e.g. `--crash-dump-dir`) returns 0 occurrences
+
+Action:
+
+- Do not conclude the literal is absent; MSVC /GF stores pooled strings with a 4-byte length prefix between them, so a single logical string like `--crash-dump-dir` may be physically stored as `--crash-` + 4-byte length + `dump-dir` + 4-byte length. Verify by searching for shorter substrings (`--crash`, `dump-dir`) and confirming the gap is exactly 4 bytes; if so, the full literal IS compiled in. Verified 2026-06-26 (D-EXEC-26-01): my first scan returned 0 for `--crash-dump-dir`, prompting a wasted ~15-minute MSBuild /t:Rebuild cycle, when the literal was actually present in the binary all along (offset 437901 stored as `--crash-` + 4-byte len + `dump-dir`). Pair the byte search with `dumpbin /dependents` and a substring search before declaring the flag plumbing is missing in the binary. Don't restart a heavy MSBuild cycle on the strength of a single negative byte scan; verify the literal is actually absent via partial substring search first.
+
+## Improvement: argv splice in inner block creates use-after-free of argv
+
+Condition:
+
+- When source code splices a custom CLI flag out of `argv` by building a `std::vector<char*>` inside an inner block, capturing `argv = filtered.data()` (and `argc = filtered.size()`) inside the block, and then exits the block before calling `common_params_parse` or any other function that reads `argv`
+
+Action:
+
+- Do flag this as a use-after-free bug to be fixed by lifting `filtered` out of the block (or by replacing it with a `std::vector<std::string>` + `std::vector<char*>` pair held in the same scope as `argc`/`argv` use), even when the symptom is not yet visible because the smoke test happened to use a crash-trigger path that doesn't walk a long argv. Verified 2026-06-26 (D-EXEC-26-01): `tools/server/server.cpp:79-104` declared `std::vector<char*> filtered` inside an inner block and captured `argv = filtered.data()` before the block exited; this caused every server launch with `--crash-dump-dir <path>` to AV in `common_params_parse` while walking the freed vector's backing storage. The smoke trigger in test-report-20260626-01 happened to use `--model nonexistent.gguf` which crashes in model load before `common_params_parse` walks the freed argv, masking the bug. Symptom signature on Windows: `ExceptionCode=0x00000000`, `ExceptionFlags=0x00000020` (EXCEPTION_TARGET_UNWIND), `NumberParameters=0`, `Rip` in ntdll's exception dispatch region -- that combination means the SEH filter was invoked during unwind of a prior AV, not for a fresh fault. If a runner edit exposes a startup crash with this signature, suspect use-after-free in argv handling before suspecting the runner script itself.
+

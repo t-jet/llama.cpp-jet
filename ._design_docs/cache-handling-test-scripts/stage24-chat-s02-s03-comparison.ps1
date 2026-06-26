@@ -11,6 +11,7 @@ param(
     [int]      $LegDurationMin = 10,
     [int]      $ColdBudgetMiB = 512,
     [int]      $SmokeSeconds = 0,
+    [string]   $CrashDumpDir = 'D:\tmp\crash-dumps',
     [string]   $LlamaServerPath = '',
     [int]      $ContextSize = 4096,
     [int]      $MaxTokens = 8,
@@ -27,16 +28,16 @@ $SourceRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Route = '/v1/chat/completions'
 $MetricNames = @(
-    'cache_restore_misses_total',
-    'cache_prefix_candidates_total',
-    'cache_prompt_evidence_records_total',
-    'cache_cold_bytes',
-    'cache_cold_budget_bytes',
-    'cache_cold_demotions_skipped_total',
-    'cache_cold_evictions_total',
-    'cache_checkpoint_admissions_by_shape_total',
-    'cache_checkpoint_admissions_total',
-    'cache_checkpoint_admission_failures_total'
+    'llamacpp:cache_restore_misses_total',
+    'llamacpp:cache_prefix_candidates_total',
+    'llamacpp:cache_prompt_evidence_records_total',
+    'llamacpp:cache_cold_bytes',
+    'llamacpp:cache_cold_budget_bytes',
+    'llamacpp:cache_cold_demotions_skipped_total',
+    'llamacpp:cache_cold_evictions_total',
+    'llamacpp:cache_checkpoint_admissions_by_shape_total',
+    'llamacpp:cache_checkpoint_admissions_total',
+    'llamacpp:cache_checkpoint_admission_failures_total'
 )
 
 function Get-NextRunSuffix {
@@ -247,12 +248,23 @@ function Complete-LegCleanup {
     param([object] $Process, [int] $Port)
     $ownedProcessStopped = $true
     $processId = $null
+    $exitCode = $null
+    $exitCodeHex = 'alive_or_unknown'
+    $exitWasForced = $false
     if ($Process) {
         $processId = $Process.Id
         try {
-            if (-not $Process.HasExited) {
+            if ($Process.HasExited) {
+                $exitCode = $Process.ExitCode
+                $exitCodeHex = '0x{0:X8}' -f [uint32]$exitCode
+            } else {
                 Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
                 Wait-Process -Id $Process.Id -Timeout 30 -ErrorAction SilentlyContinue
+                if ($Process.HasExited) {
+                    $exitCode = $Process.ExitCode
+                    $exitCodeHex = '0x{0:X8} (forced)' -f [uint32]$exitCode
+                    $exitWasForced = $true
+                }
             }
             $ownedProcessStopped = $Process.HasExited
         } catch {
@@ -266,6 +278,9 @@ function Complete-LegCleanup {
         owned_process_id = $processId
         owned_process_stopped = $ownedProcessStopped
         port_free = $portFree
+        server_exit_code = $exitCode
+        server_exit_code_hex = $exitCodeHex
+        server_exit_was_forced = $exitWasForced
     }
 }
 
@@ -908,6 +923,7 @@ function Invoke-Leg {
     $requestRun = $null
     if (Test-Path $legDir) { Remove-Item -LiteralPath $legDir -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $legDir | Out-Null
+    if ($CrashDumpDir) { New-Item -ItemType Directory -Force -Path $CrashDumpDir | Out-Null }
     if ($LegPlan.cold_path -and (Test-Path $LegPlan.cold_path)) { Remove-Item -LiteralPath $LegPlan.cold_path -Recurse -Force }
     if ($LegPlan.cold_path) { New-Item -ItemType Directory -Force -Path $LegPlan.cold_path | Out-Null }
     if ($LegPlan.prompt_evidence_dir) { New-Item -ItemType Directory -Force -Path $LegPlan.prompt_evidence_dir | Out-Null }
@@ -936,7 +952,7 @@ function Invoke-Leg {
     }
 
     try {
-        $args = $LegPlan.server_flags + @('--model', $ModelPath, '--host', '127.0.0.1', '--port', [string]$LegPlan.port)
+        $args = $LegPlan.server_flags + @('--model', $ModelPath, '--host', '127.0.0.1', '--port', [string]$LegPlan.port) + $(if ($CrashDumpDir) { @('--crash-dump-dir', $CrashDumpDir) } else { @() })
         $proc = Start-Process -FilePath $LlamaServerPath -ArgumentList $args -RedirectStandardOutput (Join-Path $legDir 'server.out.log') -RedirectStandardError (Join-Path $legDir 'server.err.log') -NoNewWindow -PassThru
         if (-not (Wait-ServerHealthy -Port $LegPlan.port -TimeoutSeconds $ServerStartupTimeoutS)) {
             $summary = Get-LegSummary -LegPlan $LegPlan -RowSpec $RowSpec -Verdict 'BLOCKED' -Failure 'BLOCKED-server-not-healthy' -Notes "health endpoint did not return ready"
@@ -982,6 +998,11 @@ function Invoke-Leg {
         $summary = Get-LegSummary -LegPlan $LegPlan -RowSpec $RowSpec -Verdict 'FAIL' -Failure 'FAIL-runner-exception' -Notes $_.Exception.Message
     } finally {
         $cleanup = Complete-LegCleanup -Process $proc -Port $LegPlan.port
+        # D-EXEC-26-03: persist server exit code for mid-leg death diagnosis
+        $exitLogPath = Join-Path $legDir 'server-exit-code.txt'
+        $exitLogBody = "pid=$($cleanup.owned_process_id)`nexit_code_hex=$($cleanup.server_exit_code_hex)`nexit_was_forced=$($cleanup.server_exit_was_forced)`n"
+        Write-TextFile -Path $exitLogPath -Text $exitLogBody
+        Write-Output ("runner-leg-exit: row={0} variant={1} pid={2} {3}" -f $RowSpec.row_id, $LegPlan.variant, $cleanup.owned_process_id, $cleanup.server_exit_code_hex)
         if ($summary) {
             $summary['cleanup'] = $cleanup
             if ($cleanup.state -eq 'BLOCKED-runner-cleanup' -and $summary.verdict -ne 'FAIL') {
@@ -1030,9 +1051,9 @@ function New-Comparison {
         timing_delta = $timingDelta
         cache_n_delta = [ordered]@{ sum = $HybridSummary.cache_n.sum - $NativeSummary.cache_n.sum; nonzero_rate = $HybridSummary.cache_n.nonzero_rate - $NativeSummary.cache_n.nonzero_rate }
         metric_delta_comparison = [ordered]@{
-            restore_misses = $HybridSummary.metric_deltas.cache_restore_misses_total.delta
-            prompt_evidence_records = $HybridSummary.metric_deltas.cache_prompt_evidence_records_total.delta
-            checkpoint_admissions = $HybridSummary.metric_deltas.cache_checkpoint_admissions_total.delta
+            restore_misses = $HybridSummary.metric_deltas.'llamacpp:cache_restore_misses_total'.delta
+            prompt_evidence_records = $HybridSummary.metric_deltas.'llamacpp:cache_prompt_evidence_records_total'.delta
+            checkpoint_admissions = $HybridSummary.metric_deltas.'llamacpp:cache_checkpoint_admissions_total'.delta
         }
         chat_metadata_evidence = [ordered]@{
             server_log_source_openai_chat = (Test-LogPattern -Paths @($HybridSummary.evidence_paths.server_out, $HybridSummary.evidence_paths.server_err) -Pattern 'source=openai-chat')

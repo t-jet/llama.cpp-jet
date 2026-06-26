@@ -643,6 +643,7 @@ bool hybrid_cache_controller::cold_budget_make_room(size_t bytes, const payload_
         } else {
             n_cold_payload_bytes = 0;
         }
+        cold_payload_bytes_by_id_.erase(candidate_id);
         if (n_cold_payload_count > 0) {
             n_cold_payload_count--;
         }
@@ -704,8 +705,10 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
     auto complete_demoted_payload = [&]() {
         descriptor.store_ref.id = result.ref;
         descriptor.residency = payload_residency_state::cold;
-        n_cold_payload_bytes += descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        const size_t written_bytes = descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        n_cold_payload_bytes += written_bytes;
         n_cold_payload_count++;
+        cold_payload_bytes_by_id_[descriptor.payload_id] = written_bytes;
         release_hot_payload_after_success();
         n_demotion_successes++;
         record_payload_transition("demotion", descriptor, "success", "none");
@@ -894,13 +897,23 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         n_promotion_successes++;
         record_payload_transition("promotion", descriptor, "success", "none");
 
-        // Step 10: Update cold payload count (promotion removes from cold)
+        // Stage 26: promotion removes bytes from cold. Use the per-id
+        // map to subtract the exact bytes previously credited, so the
+        // cold-store metric tracks disk state and survives descriptor
+        // size drift.
+        auto cold_it = cold_payload_bytes_by_id_.find(result.payload_id);
+        const size_t removed_bytes = cold_it != cold_payload_bytes_by_id_.end()
+            ? cold_it->second
+            : (descriptor.target_size_bytes + descriptor.draft_size_bytes);
         if (n_cold_payload_count > 0) {
             n_cold_payload_count--;
         }
-        if (n_cold_payload_bytes >= descriptor.target_size_bytes + descriptor.draft_size_bytes) {
-            n_cold_payload_bytes -= descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        if (n_cold_payload_bytes >= removed_bytes) {
+            n_cold_payload_bytes -= removed_bytes;
+        } else {
+            n_cold_payload_bytes = 0;
         }
+        cold_payload_bytes_by_id_.erase(result.payload_id);
 
         SRV_INF(" - hybrid cache: promotion completed for payload_id %" PRIu64 "\n%s",
                 result.payload_id, "");
@@ -967,6 +980,20 @@ void hybrid_cache_controller::update() {
             if (n_deleted > 0) {
                 n_cache_cold_cleanup_total += n_deleted;
                 SRV_DBG(" - hybrid cache: cold cleanup deleted %zu orphaned cold payloads\n", n_deleted);
+                // Stage 26: subtract bytes credited for each deleted id
+                // and erase the per-id entry so the metric tracks disk.
+                for (uint64_t id : cold_to_delete) {
+                    auto bytes_it = cold_payload_bytes_by_id_.find(id);
+                    const size_t removed_bytes = bytes_it != cold_payload_bytes_by_id_.end()
+                        ? bytes_it->second
+                        : 0;
+                    if (removed_bytes > 0 && n_cold_payload_bytes >= removed_bytes) {
+                        n_cold_payload_bytes -= removed_bytes;
+                    } else if (removed_bytes > 0) {
+                        n_cold_payload_bytes = 0;
+                    }
+                    cold_payload_bytes_by_id_.erase(id);
+                }
             }
             if (n_deleted == cold_to_delete.size()) {
                 for (uint64_t id : cold_to_delete) {
@@ -3303,6 +3330,7 @@ void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
         } else {
             n_cold_payload_bytes = 0;
         }
+        cold_payload_bytes_by_id_.erase(payload_id);
         if (n_cold_payload_count > 0) {
             n_cold_payload_count--;
         }
@@ -3842,10 +3870,24 @@ bool hybrid_cache_controller::admit_latest_checkpoint_and_store_metadata(
             entry, checkpoints.back(), runtime_has_draft, failure_reason, bypass_workload_profile)) {
         return false;
     }
-    entry.checkpoints = checkpoints;
-    for (auto & checkpoint : entry.checkpoints) {
-        checkpoint.data_tgt.clear();
-        checkpoint.data_dft.clear();
+    // D-EXEC-24-03 fix: avoid copying the entire checkpoints list (each
+    // checkpoint carries data_tgt/data_dft of ~50 MiB for the MTP fixture).
+    // The previous `entry.checkpoints = checkpoints;` followed by `clear()`
+    // wasted a full 50 MiB allocation + immediate free per save, which
+    // stressed the heap allocator and could trip a latent heap-corruption
+    // detector during the next save (heap corruption at req 258 with exit
+    // code 0xC0000374 in Stage 26 -01/-03 reruns). Build metadata-only
+    // checkpoints directly from the source so we never allocate the
+    // payload-sized buffers just to free them again.
+    entry.checkpoints.clear();
+    for (const auto & src : checkpoints) {
+        common_prompt_checkpoint meta_only;
+        meta_only.n_tokens = src.n_tokens;
+        meta_only.pos_min = src.pos_min;
+        meta_only.pos_max = src.pos_max;
+        // data_tgt and data_dft remain empty; the actual payload bytes
+        // are owned by hot_payloads[checkpoint_payload_id].target/draft.
+        entry.checkpoints.push_back(std::move(meta_only));
     }
     return true;
 }

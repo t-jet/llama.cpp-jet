@@ -36,6 +36,14 @@ if (BUILD_SHARED_LIBS)
     set_target_properties(${TARGET} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
+if (WIN32)
+    target_sources(${TARGET} PRIVATE
+        server-crash-handler.cpp
+        server-crash-handler.h
+    )
+    target_link_libraries(${TARGET} PUBLIC dbghelp)
+endif()
+
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(${TARGET} PRIVATE LLAMA_SERVER_CACHE_TESTS)

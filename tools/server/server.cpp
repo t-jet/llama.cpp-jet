@@ -3,6 +3,7 @@
 #include "server-models.h"
 #include "server-cors-proxy.h"
 #include "server-tools.h"
+#include "server-crash-handler.h"
 
 #include "arg.h"
 #include "build-info.h"
@@ -15,6 +16,7 @@
 #include <clocale>
 #include <exception>
 #include <signal.h>
+#include <string>
 #include <thread> // for std::thread::hardware_concurrency
 
 #if defined(_WIN32)
@@ -74,8 +76,198 @@ static server_http_context::handler_t ex_wrapper(server_http_context::handler_t 
 // satisfies -Wmissing-declarations
 int llama_server(int argc, char ** argv);
 
+#if defined(_WIN32)
+// D-EXEC-26-03: capture process state when the SEH filter does not fire
+// (mid-leg silent death, std::terminate, fast-fail, Windows kernel kill).
+// Adds a std::terminate handler that writes a stack trace to
+// <dump_dir>/terminate-trace-<pid>-<HHMMSS>.txt and a background thread
+// that snapshots working set + handle count every 5 seconds to
+// <dump_dir>/snapshots/<pid>-<tick>.json. Snapshots older than 30 min
+// are deleted on each tick. Active only when --crash-dump-dir is passed.
+extern "C" {
+USHORT NTAPI RtlCaptureStackBackTrace(
+    ULONG FramesToSkip,
+    ULONG FramesToCapture,
+    PVOID * BackTrace,
+    PULONG BackTraceHash);
+}
+namespace server_diag {
+namespace {
+char g_terminate_dump_dir[MAX_PATH] = { 0 };
+}
+
+static void write_terminate_trace(const char * reason) {
+    if (g_terminate_dump_dir[0] == '\0') {
+        return;
+    }
+    char path[MAX_PATH];
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    snprintf(path, sizeof(path),
+             "%s\\terminate-trace-%lu-%04u%02u%02u-%02u%02u%02u.txt",
+             g_terminate_dump_dir, GetCurrentProcessId(),
+             st.wYear, st.wMonth, st.wDay,
+             st.wHour, st.wMinute, st.wSecond);
+    HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "diag: terminate-trace create failed (gle=%lu)\n",
+                GetLastError());
+        return;
+    }
+    char hdr[256];
+    int n = snprintf(hdr, sizeof(hdr),
+        "reason=%s\npid=%lu\ntime=%04u-%02u-%02u %02u:%02u:%02u\n\nstack:\n",
+        reason ? reason : "unknown", GetCurrentProcessId(),
+        st.wYear, st.wMonth, st.wDay,
+        st.wHour, st.wMinute, st.wSecond);
+    DWORD w;
+    WriteFile(file, hdr, (DWORD) n, &w, nullptr);
+
+    void * frames[64] = { nullptr };
+    USHORT n_frames = RtlCaptureStackBackTrace(0, 64, frames, nullptr);
+    for (USHORT i = 0; i < n_frames; ++i) {
+        n = snprintf(hdr, sizeof(hdr), "  #%02u: %p\n", i, frames[i]);
+        WriteFile(file, hdr, (DWORD) n, &w, nullptr);
+    }
+    CloseHandle(file);
+    fprintf(stderr, "diag: terminate-trace wrote %s\n", path);
+}
+
+static void __cdecl terminate_handler() {
+    write_terminate_trace("std::terminate");
+    fflush(stderr);
+    fflush(stdout);
+    std::abort();
+}
+
+static void install_terminate_trace_handler(const std::string & dump_dir) {
+    if (dump_dir.empty()) {
+        return;
+    }
+    strncpy(g_terminate_dump_dir, dump_dir.c_str(), MAX_PATH - 1);
+    g_terminate_dump_dir[MAX_PATH - 1] = '\0';
+    std::set_terminate(terminate_handler);
+}
+
+static void start_snapshot_thread(const std::string & dump_dir) {
+    if (dump_dir.empty()) {
+        return;
+    }
+    std::thread([dump_dir]() {
+        char snaps_dir[MAX_PATH];
+        snprintf(snaps_dir, sizeof(snaps_dir), "%s\\snapshots",
+                 dump_dir.c_str());
+        CreateDirectoryA(snaps_dir, nullptr);
+
+        int tick = 0;
+        while (true) {
+            ++tick;
+            char path[MAX_PATH];
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            snprintf(path, sizeof(path),
+                     "%s\\snapshots\\%lu-%07d-%04u%02u%02u-%02u%02u%02u.json",
+                     snaps_dir, GetCurrentProcessId(), tick,
+                     st.wYear, st.wMonth, st.wDay,
+                     st.wHour, st.wMinute, st.wSecond);
+
+            SIZE_T ws_min = 0;
+            SIZE_T ws_max = 0;
+            GetProcessWorkingSetSizeEx(GetCurrentProcess(), &ws_min, &ws_max,
+                                       nullptr);
+            DWORD handle_count = 0;
+            GetProcessHandleCount(GetCurrentProcess(), &handle_count);
+
+            HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, nullptr,
+                                      CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
+                                      nullptr);
+            if (file != INVALID_HANDLE_VALUE) {
+                char buf[1024];
+                int n = snprintf(buf, sizeof(buf),
+                    "{\"tick\":%d,\"pid\":%lu,\"timestamp\":\"%04u-%02u-%02uT%02u:%02u:%02u\","
+                    "\"working_set_min_bytes\":%zu,\"working_set_max_bytes\":%zu,"
+                    "\"handle_count\":%lu}\n",
+                    tick, GetCurrentProcessId(),
+                    st.wYear, st.wMonth, st.wDay,
+                    st.wHour, st.wMinute, st.wSecond,
+                    ws_min, ws_max, (unsigned long) handle_count);
+                DWORD w;
+                WriteFile(file, buf, (DWORD) n, &w, nullptr);
+                CloseHandle(file);
+            }
+
+            Sleep(5000);
+
+            WIN32_FIND_DATAA fd;
+            char pattern[MAX_PATH];
+            snprintf(pattern, sizeof(pattern), "%s\\*.json", snaps_dir);
+            HANDLE h = FindFirstFileA(pattern, &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                FILETIME now_ft;
+                GetSystemTimeAsFileTime(&now_ft);
+                ULARGE_INTEGER now100ns;
+                now100ns.LowPart = now_ft.dwLowDateTime;
+                now100ns.HighPart = now_ft.dwHighDateTime;
+                do {
+                    if (fd.cFileName[0] == '.' &&
+                        (fd.cFileName[1] == '\0' ||
+                         (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0'))) {
+                        continue;
+                    }
+                    ULARGE_INTEGER ft;
+                    ft.LowPart = fd.ftLastWriteTime.dwLowDateTime;
+                    ft.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+                    ULONGLONG age_100ns = now100ns.QuadPart - ft.QuadPart;
+                    // 30 min = 30 * 60 * 10^7 = 1.8e10
+                    if (age_100ns > 18000000000ULL) {
+                        char full[MAX_PATH];
+                        snprintf(full, sizeof(full), "%s\\%s",
+                                 snaps_dir, fd.cFileName);
+                        DeleteFileA(full);
+                    }
+                } while (FindNextFileA(h, &fd));
+                FindClose(h);
+            }
+        }
+    }).detach();
+}
+} // namespace server_diag
+#endif // _WIN32
+
 int llama_server(int argc, char ** argv) {
     std::setlocale(LC_NUMERIC, "C");
+
+    // Pre-scan argv for --crash-dump-dir so we can install the SEH filter
+    // before any other initialization. We splice the flag out of argv
+    // so common_params_parse does not see it. The filtered vector must
+    // outlive common_params_parse, so it lives at function scope.
+    std::string crash_dump_dir;
+    std::vector<char *> filtered;
+    filtered.reserve(argc);
+    for (int i = 0; i < argc; ++i) {
+        if (i + 1 < argc &&
+            std::string(argv[i]) == "--crash-dump-dir" &&
+            crash_dump_dir.empty()) {
+            crash_dump_dir = argv[i + 1];
+            ++i;
+            continue;
+        }
+        filtered.push_back(argv[i]);
+    }
+    if (!crash_dump_dir.empty()) {
+        argc = static_cast<int>(filtered.size());
+        argv = filtered.data();
+    }
+    server_crash::install_crash_dump_handler(crash_dump_dir);
+#if defined(_WIN32)
+    // D-EXEC-26-03: hook std::terminate so we can diagnose mid-leg silent
+    // death that bypasses the SEH filter. The snapshot thread is spawned
+    // LATER (after common_init + common_params_parse) because spawning
+    // it here races with CRT/CUDA initialization and causes a NULL write
+    // inside KERNELBASE during process startup (verified Stage 24 -04).
+    server_diag::install_terminate_trace_handler(crash_dump_dir);
+#endif
 
     // own arguments required by this example
     common_params params;
@@ -85,6 +277,14 @@ int llama_server(int argc, char ** argv) {
     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_SERVER)) {
         return 1;
     }
+
+    // D-EXEC-26-03: snapshot thread disabled in this iteration.
+    // Even when spawned AFTER common_params_parse, std::thread+detach
+    // races with subsequent CUDA init and causes a NULL write inside
+    // KERNELBASE during process startup. The snapshot capability will
+    // be reintroduced via a different mechanism (sampling in the request
+    // loop or pthreads without detach) in a follow-up iteration.
+    // server_diag::start_snapshot_thread(crash_dump_dir);
 
     llama_backend_init();
     llama_numa_init(params.numa);

@@ -185,7 +185,7 @@ $Result = Invoke-Test -TestId "C01" -Description "Default cache mode" `
         $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
         $MetricsText = $Metrics.Content
         
-        if ($MetricsText -notmatch 'llamacpp_cache_.*\{.*mode="legacy"') {
+        if ($MetricsText -notmatch 'llamacpp:cache_.*\{.*mode="legacy"') {
             return @{ Passed = $false; Message = "Metrics do not show legacy cache mode" }
         }
         
@@ -215,7 +215,7 @@ $Result = Invoke-Test -TestId "C02" -Description "Explicit legacy mode" `
         $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
         $MetricsText = $Metrics.Content
         
-        if ($MetricsText -notmatch 'llamacpp_cache_.*\{.*mode="legacy"') {
+        if ($MetricsText -notmatch 'llamacpp:cache_.*\{.*mode="legacy"') {
             return @{ Passed = $false; Message = "Metrics do not show legacy cache mode" }
         }
         
@@ -245,7 +245,7 @@ $Result = Invoke-Test -TestId "C03" -Description "Explicit hybrid mode" `
         $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
         $MetricsText = $Metrics.Content
         
-        if ($MetricsText -notmatch 'llamacpp_cache_.*\{.*mode="hybrid"') {
+        if ($MetricsText -notmatch 'llamacpp:cache_.*\{.*mode="hybrid"') {
             return @{ Passed = $false; Message = "Metrics do not show hybrid cache mode" }
         }
         
@@ -1183,7 +1183,7 @@ $Result = Invoke-Test -TestId "H01" -Description "Non-destructive cache hit (sin
             
             # Check metrics for hit
             $MetricsAfter = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
-            if ($MetricsAfter.Content -match 'llamacpp_cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($MetricsAfter.Content -match 'llamacpp:cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Hits = [int]$Matches[1]
                 if ($Hits -gt 0) {
                     return @{ Passed = $true; Message = "Non-destructive hit successful, hits=$Hits" }
@@ -1235,7 +1235,7 @@ $Result = Invoke-Test -TestId "H03" -Description "Sequential reuse (3x)" `
             
             # Check metrics - should show 2 hits (second and third requests)
             $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
-            if ($Metrics.Content -match 'llamacpp_cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($Metrics.Content -match 'llamacpp:cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Hits = [int]$Matches[1]
                 if ($Hits -ge 2) {
                     return @{ Passed = $true; Message = "Sequential reuse successful, hits=$Hits" }
@@ -1290,7 +1290,7 @@ $Result = Invoke-Test -TestId "H05" -Description "Cache miss tracking for differ
             
             # Check metrics for misses
             $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
-            if ($Metrics.Content -match 'llamacpp_cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($Metrics.Content -match 'llamacpp:cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Misses = [int]$Matches[1]
                 if ($Misses -ge 3) {
                     return @{ Passed = $true; Message = "Cache miss tracking successful, misses=$Misses" }
@@ -1354,7 +1354,7 @@ $Result = Invoke-Test -TestId "H06" -Description "Exact match requirement (rejec
             
             # Check metrics - second request should be a miss (partial match rejected)
             $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
-            if ($Metrics.Content -match 'llamacpp_cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($Metrics.Content -match 'llamacpp:cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Misses = [int]$Matches[1]
                 if ($Misses -ge 2) {
                     return @{ Passed = $true; Message = "Partial match correctly rejected, misses=$Misses" }
@@ -1467,7 +1467,7 @@ $Result = Invoke-Test -TestId "H10" -Description "LRU eviction basic" `
             
             # Check metrics for evictions
             $Metrics = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/metrics" -Method Get
-            if ($Metrics.Content -match 'llamacpp_cache_evictions_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($Metrics.Content -match 'llamacpp:cache_evictions_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Evictions = [int]$Matches[1]
                 if ($Evictions -gt 0) {
                     return @{ Passed = $true; Message = "LRU eviction triggered, evictions=$Evictions" }
@@ -1526,11 +1526,11 @@ $Result = Invoke-Test -TestId "H14" -Description "Metrics counter accuracy" `
             $Hits = 0
             $Misses = 0
             
-            if ($MetricsText -match 'llamacpp_cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($MetricsText -match 'llamacpp:cache_hits_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Hits = [int]$Matches[1]
             }
             
-            if ($MetricsText -match 'llamacpp_cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
+            if ($MetricsText -match 'llamacpp:cache_misses_total\{.*mode="hybrid".*\}\s+(\d+)') {
                 $Misses = [int]$Matches[1]
             }
             

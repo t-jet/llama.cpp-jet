@@ -795,3 +795,45 @@ Condition:
 Action:
 
 - Do report BOTH `last_ok_request_id` and `first_error_request_id` in the durable report's bug section, not just the first error. A matching `last_ok_request_id` across runs (e.g. `s03-new-5` recurring in both -05 and -06 despite different first-failure points) is a stronger reproducibility signal than the first-error index, because the deterministic workload sends the same request sequence each leg and identical last-OK confirms the crash window is bounded. Cite cache state at death and the last log-line timestamp to bound the crash window. Pair the FAIL with a NEW bug handoff ID, not the prior ID, because the crash root cause is distinct from any warning cascade the prior fix targeted.
+
+
+## Improvement: redirect runner output via *> instead of Tee-Object for long-running scripts
+
+Condition:
+- QA session launches a long-running runner script (10+ min per leg, 4+ legs) via & path\to\script.ps1 ... 2>&1 | Tee-Object -FilePath  and the live log file stays empty until the entire pipeline completes
+
+Action:
+- Do use file redirect *>  2>&1 (or >  2>&1) instead of Tee-Object -FilePath when the runner runs as a background async terminal. Tee-Object buffers output in the pipeline and only writes to the file when the upstream completes, so live-tail polling sees 0 bytes for the entire run. The redirect form flushes incrementally through PowerShell's file handle, making the live log readable from the first command output. Keep Tee-Object for short interactive runs where you also want the output in the terminal; switch to *> for long-running captures where live evidence matters more than synchronous stdout.
+
+## Improvement: capture SEH dumps in runner by passing --crash-dump-dir
+
+Condition:
+- Stage 24+ rerun is expected to reproduce a silent server crash (D-EXEC-24-0X) and the test plan part-07 row TP-NN-IT-02 says "hybrid leg PASS or crash-with-dump"
+
+Action:
+- Do not assume the runner script passes --crash-dump-dir to llama-server.exe. Read stage24-chat-s02-s03-comparison.ps1 line 933-934 (the $args construction in Invoke-Leg); if --crash-dump-dir is not in the $LegPlan.server_flags array, the SEH filter is NOT installed and a real crash produces no minidump. Either (a) record in the report that the crash-without-dump classification is a runner-script gap, not a Stage N product defect, or (b) extend the runner's Get-ServerFlags to accept a -CrashDumpDir parameter and splice it into the flag list for crash-reproduction runs. Do not classify a silent crash as a regression without first checking whether the SEH filter was actually enabled in the launch.
+
+## Improvement: normalize CRLF to LF on every new QA markdown file
+
+Condition:
+- QA session uses create_file to write a new markdown report under ._design_docs/... on Windows
+
+Action:
+- Do not trust git diff --check exit code on the freshly-written file. Windows create_file writes CRLF (CR + LF) by default, which git diff --check flags as trailing whitespace on every line (CR before LF). Rewrite the file with ReadAllText + Replace('
+','
+') + WriteAllText immediately after creation. Verify CR byte count is 0 via [System.IO.File]::ReadAllBytes and re-run git diff --check --no-index /dev/null D:\source\llama.cpp-jet\.agents\skills\self-improvement\assets\qa.md to confirm zero warnings. Do not rely on Get-Content for this verification because PowerShell normalizes line endings on read and hides CR.
+## Improvement: validate mid-leg crash signature against pre-fix baseline before classifying fix as failed
+
+Condition:
+- QA execution rerun after Developer fix targets a mid-leg crash that produced a stable signature in prior runs (e.g. S03 hybrid dies at exactly request 258 with cache state 502.5 MiB / 637 tokens) and current run shows the same signature, but a different code path was the fix target
+
+Action:
+- Do compare the current crash signature (last OK request, first failed request, cache state at death, log tail, dump presence) against the pre-fix baseline before declaring the fix FAILED. If signatures match exactly across runs, the original bug is unaddressed; if signatures differ, the original bug is eliminated and a new bug is exposed. Cite both runs request indices and cache state in the report so Manager can distinguish "fix did not work" from "fix worked but exposed a separate bug". Don't accept STILL_REPRODUCED as the full verdict; name whether the fix removed the targeted crash path or left it intact.
+
+## Improvement: verify runner-written minimal report before overwrite
+
+Condition:
+- QA execution run completes and runner auto-writes a minimal durable report at the whitelisted path (e.g. test-report-YYYYMMDD-NN.md with about 10 lines and just a summary table), but QA needs to write the full evidence report with per-leg details
+
+Action:
+- Do Remove-Item the minimal file before create_file, otherwise create_file fails with File already exists. Verify with Get-Content path | Measure-Object -Line first to confirm file size. After full report written, run get_errors on the markdown path to confirm zero lint errors (MD032 blank-lines-around-lists, MD040 fenced-code-language, MD037 no-space-in-emphasis from underscores in C symbols like exit and endthreadex, MD047 single-trailing-newline). Append a single trailing LF if ReadAllBytes shows last byte is not 0x0A.
