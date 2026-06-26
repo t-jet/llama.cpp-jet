@@ -1901,3 +1901,60 @@ Action:
 
 - Do flag this as a use-after-free bug to be fixed by lifting `filtered` out of the block (or by replacing it with a `std::vector<std::string>` + `std::vector<char*>` pair held in the same scope as `argc`/`argv` use), even when the symptom is not yet visible because the smoke test happened to use a crash-trigger path that doesn't walk a long argv. Verified 2026-06-26 (D-EXEC-26-01): `tools/server/server.cpp:79-104` declared `std::vector<char*> filtered` inside an inner block and captured `argv = filtered.data()` before the block exited; this caused every server launch with `--crash-dump-dir <path>` to AV in `common_params_parse` while walking the freed vector's backing storage. The smoke trigger in test-report-20260626-01 happened to use `--model nonexistent.gguf` which crashes in model load before `common_params_parse` walks the freed argv, masking the bug. Symptom signature on Windows: `ExceptionCode=0x00000000`, `ExceptionFlags=0x00000020` (EXCEPTION_TARGET_UNWIND), `NumberParameters=0`, `Rip` in ntdll's exception dispatch region -- that combination means the SEH filter was invoked during unwind of a prior AV, not for a fresh fault. If a runner edit exposes a startup crash with this signature, suspect use-after-free in argv handling before suspecting the runner script itself.
 
+
+## Improvement: Stage 26 fix verification: Candidate A (wasteful alloc+free) does not close D-EXEC-24-03
+
+Condition:
+
+- When a "fix" commit on the staged-cache work adds a regression test (TP-26-UT6 in this case) and a code change (metadata-only copy loop in dmit_latest_checkpoint_and_store_metadata) together, and the regression test was authored against the working hypothesis "fix X closes bug Y" without an end-to-end rerun
+
+Action:
+
+- Do verify the fix works at BOTH layers: (1) the regression test itself, and (2) an end-to-end Stage 24 rerun against the post-fix binary, BEFORE declaring the bug closed. Verified 2026-06-26 (Stage 27 D-EXEC-24-03 verification): commit 4556965c7 added TP-26-UT6 alongside the metadata-only copy fix in dmit_latest_checkpoint_and_store_metadata. On the post-fix binary, TP-26-UT6 FAILS deterministically with exit -1073740791 (STATUS_STACK_BUFFER_OVERRUN, 0xC0000409) — the heap corruption still reproduces. The Stage 24 -05 rerun also FAILS with the same signature as the -01/-03 baseline (exit 0xC0000374 at request 258 of S03 hybrid, last OK at req 257 cache_n=15, cache state 10 entries 502 MiB at death). The Candidate A fix (avoiding the wasteful ntry.checkpoints = checkpoints; entry.checkpoints.clear() pattern) is INSUFFICIENT — the corruption-producing write is at a different code path. When a regression test added in the same commit as the fix fails on the fix, the fix is incomplete; do not assume the test is wrong without an independent reproducer (the Stage 24 rerun also reproducing is the independent evidence). Step 2 (try/catch around the hot_payloads insert) does NOT help because Windows detects heap corruption via __fastfail BEFORE any C++ exception path is reached — no exception is thrown. Step 3 (SRV_DBG telemetry) is observability only and cannot prevent corruption. Pair the unit-test verification with the end-to-end rerun; a passing unit test alone is not sufficient evidence that the runtime bug is closed when the unit test was authored under the same unverified hypothesis as the fix.
+
+## Improvement: MSVC ASan via side-channel CMAKE_CXX_FLAGS_RELEASE (no CMakeLists.txt change)
+
+Condition:
+
+- When asked to enable AddressSanitizer on a Windows MSVC build of llama.cpp without modifying durable CMakeLists.txt, and the upstream `LLAMA_SANITIZE_ADDRESS` option is gated by `if (NOT MSVC)` in `ggml/src/CMakeLists.txt:11-19`, and CUDA must be enabled for the Stage 24 server heap-corruption repro
+
+Action:
+
+- Do create a side-channel build directory `build-cuda-asan` configured with `-DCMAKE_CXX_FLAGS_RELEASE="/fsanitize=address /Zi /fsanitize-recover=address /O1 /MD /D NDEBUG"` (and matching `-DCMAKE_C_FLAGS_RELEASE=`), AND for CUDA-enabled builds, `-DCMAKE_CUDA_FLAGS="-Xcompiler=/fsanitize=address -Xcompiler=/fsanitize-recover=address -Xcompiler=/Zi -Xcompiler=/O1"` so nvcc passes ASan to its host compile. Without the nvcc `-Xcompiler` flags, ggml-cuda.obj files have SAL annotation mismatch (`annotate_string`, `annotate_vector`) with ASan-instrumented server-context.lib and the link fails with 274 LNK2038 errors. Don't modify `ggml/src/CMakeLists.txt` or `tools/server/CMakeLists.txt` to wire ASan — that's a project-wide durable change outside the stage scope. Verify the build by `dumpbin /dependents <binary>.exe | findstr asan` showing `clang_rt.asan_dynamic-x86_64.dll` listed, AND by `LNK4300: ignoring '/INCREMENTAL' because input module contains ASAN metadata` linker warning at link time. The LNK4044 `/fsanitize=address: unrecognized option ignored` from link.exe is harmless (ASan instrumentation is in the obj; link.exe just doesn't recognize the flag as a linker option). Verify 2026-06-26 (Stage 27 iter 3): build-cuda-asan with above flags produced test-cache-controller.exe with verified ASan runtime linkage and 0 AddressSanitizer heap-error reports on TP-26-UT6 (confirming the TP-26-UT6 exit -1073740791 is from `__fastfail` after `std::abort()`, not from heap corruption).
+
+## Improvement: ASan runtime DLL PATH requirement for MSVC builds
+
+Condition:
+
+- When running a binary compiled with MSVC `/fsanitize=address` and `clang_rt.asan_dynamic-x86_64.dll` is not in the binary's PATH at startup (the DLL ships with `C:\Program Files (x86)\Microsoft Visual Studio\<vsver>\<sku>\VC\Tools\MSVC\<ver>\bin\Hostx64\x64\`)
+
+Action:
+
+- Do prefix `$env:PATH = '<MSVC bin path>;' + $env:PATH` before invoking the ASan-instrumented binary; without it, the binary fails to start with a side-by-side configuration error or loads without ASan and silently misses heap errors. The MSVC bin path for VS 2022 BuildTools is `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\`; for VS 18 Community it is `C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\`. Don't copy the DLL next to the binary — that masks the dependency and makes the binary non-portable. Verify by running the binary and confirming ASan prints its header (e.g., `==12345==AddressSanitizer: heap-buffer-overflow`) on a deliberate overflow, OR by running `test-cache-controller.exe` and checking that no heap errors are reported (as in the Stage 27 TP-26-UT6 validation where 0 heap-error reports confirmed the test-path is heap-clean).
+
+## Improvement: status 0xC0000409 STATUS_STACK_BUFFER_OVERRUN from std::abort() is not ASan evidence
+
+Condition:
+
+- When a unit test or server exits with status -1073740791 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN) under MSVC and the symptom is attributed to heap corruption, but ASan is also enabled and reports zero heap errors in the run
+
+Action:
+
+- Do classify the failure as `__fastfail(FAST_FAIL_FATAL_APP_EXIT)` from the test's own `std::abort()` call, NOT as heap corruption. MSVC's CRT default SIGABRT handler routes through `__fastfail`, which produces `STATUS_STACK_BUFFER_OVERRUN` regardless of whether any stack or heap corruption actually occurred. ASan (when properly loaded via `clang_rt.asan_dynamic-x86_64.dll` in PATH) reports heap issues via `==PID==ERROR: AddressSanitizer: ...` BEFORE the abort; if no ASan report is present in stderr, the failure was not heap-corruption-driven. Distinguish from genuine heap corruption status `0xC0000374 STATUS_HEAP_CORRUPTION` (which is the Windows heap manager's detection signal, not `__fastfail`) and from genuine stack cookie overrun (which fires during function epilogue before abort). Verified 2026-06-26 (Stage 27 iter 3 TP-26-UT6): test exits -1073740791 with zero ASan heap errors and one `fprintf(stderr, "FAIL: ...")` followed by `std::abort()` line — confirms the failure was the test's own assertion abort, not heap corruption. The Candidate A fix in commit 4556965c7 (metadata-only copy loop in `admit_latest_checkpoint_and_store_metadata`) is unrelated to this test-path artifact; the artifact stems from `assert(stage23_admit_checkpoint_store(...))` at `tests/test-cache-controller.cpp:3645` silently no-oping under `/D NDEBUG`.
+
+## Internal Post-Task Record (2026-06-26, Stage 27 iter 3 ASan evidence)
+
+Task completed: Partial (ASan build configured and verified; CPU-only ASan test ran with 0 heap errors; full CUDA+ASan build killed mid-compile at 80/183 ggml-cuda obj after ~25 min wall-time budget).
+
+Effectiveness assessment: ASan evidence is sufficient to reclassify the TP-26-UT6 unit-test failure as a TEST ARTIFACT (NDEBUG-disables-assert), not a heap corruption. The Stage 24 server-side heap corruption (exit 0xC0000374 at request 258 of S03 hybrid) requires full ASan+CUDA build which exceeds this session's wall-time budget. The user-provided evidence (cl /Bv MSVC 19.51.36248 + cl /nologo /fsanitize=address test compile) was confirmed by direct execution. The CMakeLists.txt was not modified; instead a side-channel build-cuda-asan dir was used. The fix-report documents three Manager decisions (D-EXEC-27-05 PARTIAL, D-EXEC-27-06 test artifact confirmed, D-EXEC-27-07 Stage 24 -06 BLOCKED). The Stage 27 tracker row 27 was updated to record the iter 3 evidence.
+
+Improvement outcome candidate:
+
+- Condition: When a test exits with 0xC0000409 under MSVC with ASan loaded but no AddressSanitizer report in stderr
+- Action: Do classify as test's own std::abort() (which routes through __fastfail) rather than heap corruption; verify by grep for `fprintf(stderr, "FAIL:` immediately preceding the abort, and check that the file's `#undef NDEBUG` is overridden by `/D NDEBUG` from the build flags (causing `assert(...)` upstream of the abort to no-op silently)
+
+Similar memory check: Similar improvement found: No (the existing "NDEBUG silently disables asserts" improvement covers the upstream cause but not the 0xC0000409-vs-heap-corruption distinction).
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: status 0xC0000409 STATUS_STACK_BUFFER_OVERRUN from std::abort() is not ASan evidence".

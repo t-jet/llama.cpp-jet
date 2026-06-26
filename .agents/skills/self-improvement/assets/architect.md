@@ -58,7 +58,17 @@ Condition:
 
 Action:
 
-- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Do distinguish historical quoted findings from current contradictions. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains.
+- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Do distinguish historical quoted findings from current contradictions. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
+
+## Improvement: Contingency-branch stale wording hides after status-line fix
+
+Condition:
+
+- Closure sweep updates top-level Status line, handoff text, and gate sections but leaves IF/ELSE contingency-branch text in the same part file with stale wording (e.g., `D-EXEC-24-03 status: OPEN` inside an `if V4 shows the crash still reproduces` branch even after V4 actually PASSED)
+
+Action:
+
+- Do grep the entire part file for stale phrases after editing the top-level status line; contingency branches and contingency tables (e.g., acceptance criteria with `if PASS / if FAIL` rows) are common hiding spots. Do prefix the entire contingency section with `Historical outcome (<date>): <which branch was taken>` so the contingency wording is clearly labeled as not-applicable. Do not delete the contingency text outright; it documents what the next engineer would do if the bug recurs. Don't trust a top-level status-line edit to clear all stale wording. Don't ship a part file with stale wording in a contingency branch without explicit historical-context labeling.
 
 ## Improvement: Misconfigured-probe diagnosis vs product bug
 
@@ -2590,3 +2600,32 @@ Condition:
 Action:
 
 - Do extract the claimed count text from design doc and the cited line numbers. Do read the actual fixture file at each cited line with Select-String -Pattern <regex> to confirm every cited line matches. Do pipe the same pattern through Measure-Object to confirm count == cited count. Do record the verified count, line list, and pattern used. Don't accept the design's self-claim alone; rework-session descriptions can lie about line numbers as easily as they did about counts. Do report VERIFIED only when both count and per-line content match exactly. Do record this as a separate finding from any other verification done.
+## Improvement: Verify prior commit candidate fix before authoring new fix
+
+Condition:
+
+- User task names a bug as "still reproducing" and asks for a new design stage, but HEAD commit already contains a candidate fix in source comments
+
+Action:
+
+- Do run `git log --oneline -20` and `git show <commit>` on the most recent commit to find any candidate fix. Do read the relevant function in the current source and check whether the fix is in place. Do not assume "still reproducing" means "no fix attempted"; it may mean "fix attempted but unverified". Do design the new stage as verification-first (rebuild + rerun) before adding new code. Do cite the prior commit's candidate fix and source comment in the design's root-cause analysis. Do not propose a different fix without first explaining why the existing candidate is insufficient. Don't waste design effort re-deriving a fix that's already on disk.
+
+## Improvement: Byte-scan normalize script in tmp/ for multi-file LF-only authoring
+
+Condition:
+
+- Authoring entry doc + N part files for a new stage design on Windows; create_file inserts CRLF on every file; MD047 linter surfaces trailing-newline defect after every create_file
+
+Action:
+
+- Do write a small PowerShell normalize script to `tmp/<stage>-normalize.ps1` that reads each new file's bytes, drops 0x0D, collapses any trailing LF run to a single LF, writes back, then verifies CR=0, last=10, no BOM, no trailing whitespace per line. Do run the script via `& tmp/<script>.ps1` after every create_file batch. Do run `git add` + `git diff --check --cached` and report exit 0. Do report each file's CR/LF/last/bom/lines/trailing_ws counts. Don't trust MD047 linter warnings alone; do verify last byte is LF in the byte scan. Don't inline large PowerShell into a terminal call when it tokenizes `$_` badly; do save to tmp and run via `-File`.
+
+## Improvement: test-data reuse in focused regression tests
+
+Condition:
+
+- Authoring a focused regression test in tests/test-cache-controller.cpp that needs to drive N saves with large synthetic payloads
+
+Action:
+
+- Do pre-allocate N payload buffers before the save loop and reuse them across iterations; do measure the destination-side allocation (the bug pattern) without re-allocating the source buffers. Do snapshot baseline counts before the loop and assert post-conditions after the loop. Do use the public debug helper for the production path so the test exercises the same code path as the live server. Do add minimal debug helpers (3-5 one-liners) for tests that need internal map access. Do not reload or duplicate large buffers in the test loop; the test should measure destination behavior, not source memory churn.

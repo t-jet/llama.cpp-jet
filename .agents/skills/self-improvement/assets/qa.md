@@ -1,5 +1,13 @@
 # QA improvement memory
 
+## Improvement: distinguish BLOCKED-runner-cleanup from real product failure when leg completes
+
+Condition:
+- A Stage N runner script (e.g., `stage24-chat-s02-s03-comparison.ps1`) classifies a leg's verdict as `BLOCKED-runner-cleanup` while the leg's `summary.json` shows `state: completed-until-cap`, `status_counts: {200: N}`, `error_counts: {}`, `port_free: true`, and `server_exit_was_forced: false` (server_exit_code = -1 / `alive_or_unknown`)
+
+Action:
+- Do read the per-leg `summary.json` files directly, not the runner's row-level verdict. When `request_run.state == "completed-until-cap"` and `status_counts` is all 200 and `error_counts` is empty and `cleanup.port_free == true`, the leg PASSED end-to-end regardless of the runner's `BLOCKED-runner-cleanup` label. The runner bug is that it cannot query the exit code of a server still alive after the wall-clock cap and classifies that as `BLOCKED`. Record the actual per-leg outcome from `summary.json` (observed, status, errors, cache_n nonzero_rate, cap state) in the durable evidence file; cite the runner bug separately so the next session can fix the runner to either force-kill the server after the cap or treat `alive_or_unknown + port_free + all 200` as `PASS-completed-until-cap`.
+
 ## Improvement: distinguish D17-IP-* from Manager design-gate decisions in test-plan review
 
 Condition:

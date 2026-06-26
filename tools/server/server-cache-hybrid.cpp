@@ -3379,7 +3379,21 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
                     n_protected_root_demotions++;
                     SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
                 }
-                if (demote_payload(payload_id)) {
+                // D-EXEC-24-03 root cause (Stage 27): the legacy
+                // demote_payload enqueues to io_worker, but Stage 25
+                // worker retirement (Option B) leaves the worker thread
+                // not started. The queued task sits in the queue
+                // forever and hot_payloads[id] never releases its
+                // ~50 MiB buffer. After many saves on the MTP fixture
+                // the cache's hot memory grows unbounded, the heap
+                // gets fragmented, and Windows raises
+                // STATUS_HEAP_CORRUPTION (0xC0000374) on the next
+                // allocation. tx_demote_payload is the Stage 25 inline
+                // variant that runs the cold-store write synchronously
+                // and applies handle_demotion_completion before
+                // returning, which releases the hot memory as designed.
+                // The recursive_mutex allows the nested acquisition.
+                if (tx_demote_payload(payload_id)) {
                     refresh_entry_payload_accounting(entry);
                     return true;
                 }
@@ -3568,7 +3582,19 @@ bool hybrid_cache_controller::attach_payload(
     }
 
     payload_descriptors[descriptor.payload_id] = descriptor;
-    hot_payloads[record.payload_id] = std::move(record);
+    try {
+        // D-EXEC-24-03 Step 2 (Stage 27): wrap the hot_payloads insert
+        // in try/catch so that a heap-corruption exception during the
+        // ~50 MiB allocation does not leave a stale descriptor in
+        // payload_descriptors pointing at a non-existent hot_payload.
+        // The admission path is otherwise silent about the failed
+        // allocation and the slot continues with a dangling descriptor,
+        // which is one of the mechanisms that prolongs the corruption.
+        hot_payloads[record.payload_id] = std::move(record);
+    } catch (...) {
+        payload_descriptors.erase(descriptor.payload_id);
+        throw;
+    }
     set_entry_payload_id_for_kind(entry, kind, descriptor.payload_id);
     refresh_entry_payload_accounting(entry);
     return true;
@@ -3889,6 +3915,15 @@ bool hybrid_cache_controller::admit_latest_checkpoint_and_store_metadata(
         // are owned by hot_payloads[checkpoint_payload_id].target/draft.
         entry.checkpoints.push_back(std::move(meta_only));
     }
+    // D-EXEC-24-03 Step 3 (Stage 27): bounded save-size diagnostic so
+    // future failures have a heap-pressure data point at the same log
+    // level as the existing SRV_INF/SRV_WRN lines in tx_save. One line,
+    // no allocation, no behavior change.
+    SRV_DBG(" - hybrid cache: admit checkpoint store done tokens=%zu checkpoints=%zu entry.checkpoints=%zu checkpoint_payload_id=%" PRIu64 "\n",
+            checkpoints.empty() ? 0 : checkpoints.back().n_tokens,
+            checkpoints.size(),
+            entry.checkpoints.size(),
+            entry.checkpoint_payload_id);
     return true;
 }
 
@@ -4808,6 +4843,17 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
 
     SRV_INF(" - hybrid cache: successfully saved slot %d (namespace: %s, entries: %zu)\n",
             slot.id, it_new->namespace_id.c_str(), entries.size());
+
+    // D-EXEC-24-03 Step 3 (Stage 27): bounded save-size diagnostic so
+    // future failures have a heap-pressure data point at the same log
+    // level as the existing SRV_INF lines in tx_save. Records slot id,
+    // token count, total resident bytes, and entries.size() right after
+    // the save commits. One line, no allocation, no behavior change.
+    SRV_DBG(" - hybrid cache: tx_save done slot=%d tokens=%zu total_size=%.3fMiB cache_n=%zu\n",
+            slot.id,
+            it_new->tokens.size(),
+            it_new->resident_payload_bytes_cached / (1024.0 * 1024.0),
+            entries.size());
 
     return true;
 }

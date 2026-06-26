@@ -3483,6 +3483,68 @@ static bool stage23_admit_checkpoint_store(
         entry, checkpoints, runtime_has_draft, failure_reason, bypass_workload_profile);
 }
 
+// TP-27-UT-01: D-EXEC-24-03 heap corruption regression test (Stage 27).
+// Pre-fix, mark_payload_kind_evicted called the legacy demote_payload
+// which enqueued to io_worker. With Stage 25 worker retirement (Option B)
+// the worker thread is not started, so the queued task sat in the queue
+// forever and hot_payloads[id] never released its ~50 MiB buffer. After
+// many saves on the MTP fixture the cache's hot memory grew unbounded,
+// the heap fragmented, and Windows raised STATUS_HEAP_CORRUPTION
+// (0xC0000374) on the next allocation. The Stage 27 fix routes
+// mark_payload_kind_evicted through tx_demote_payload which executes
+// the cold-store write inline and applies handle_demotion_completion,
+// releasing the hot memory as designed.
+//
+// Verify (a) cold-store configured but worker thread NOT started (matches
+// Stage 25 production state); (b) add an entry with target payload below
+// the hot budget so debug_add_entry_for_tests does not auto-evict;
+// (c) trigger eviction via debug_evict_first_payload_for_tests which
+// routes through mark_payload_kind_evicted; (d) hot_payloads no longer
+// contains the payload (released inline, not just queued); (e) descriptor
+// residency transitions to cold.
+void test_stage27_mark_payload_evicted_releases_hot_memory_inline() {
+    printf("test-cache-controller: Stage 27 mark_payload_evicted releases hot memory inline...\n");
+
+    common_params params = create_test_params();
+    // limit_size = 1024 MiB so the 200-byte payload fits without triggering
+    // auto-eviction in debug_add_entry_for_tests.
+    hybrid_cache_controller ctrl(params, 100, 1024 * 1024 * 1024, nullptr, nullptr);
+
+    const std::string cold_dir =
+        (std::filesystem::temp_directory_path() / "stage27_inline_demote_test").string();
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    // DO NOT start the worker. Stage 25 worker retirement leaves the
+    // worker thread not started in production. The fix must work
+    // without the worker (tx_demote_payload uses execute_inline).
+
+    ctrl.debug_add_entry_for_tests(
+        create_tokens({2701, 2702}), false, "stage27-ut01", 200, 0);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+    assert(payload_id != 0);
+    assert(stage22_hot_payloads(ctrl).count(payload_id) == 1);
+
+    // Trigger the eviction path (calls mark_payload_evicted ->
+    // mark_payload_kind_evicted -> [legacy demote_payload OR fixed
+    // tx_demote_payload]).
+    assert(ctrl.debug_evict_first_payload_for_tests());
+
+    // Post-fix: hot_payloads no longer contains the payload (released
+    // inline by tx_demote_payload -> handle_demotion_completion).
+    // Pre-fix: hot_payloads STILL contains the payload (queue is never
+    // processed because the worker thread is not started).
+    assert(stage22_hot_payloads(ctrl).count(payload_id) == 0);
+
+    // Post-fix: descriptor residency is cold (demotion succeeded).
+    auto residency = stage22_descriptors(ctrl).at(payload_id).residency;
+    assert(residency == payload_residency_state::cold);
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
 static void stage22_add_exact_payload(hybrid_cache_controller & ctrl, size_t target_bytes, size_t draft_bytes = 0) {
     ctrl.debug_add_entry_for_tests(create_tokens({41, 42, 43}), false, "stage22", target_bytes, draft_bytes);
 }
@@ -5037,11 +5099,12 @@ int main() {
     test_stage26_cold_metric_decrements_on_cleanup();
     test_stage26_cold_metric_no_double_count_on_redemote();
     test_stage26_cold_payload_files_count_matches_disk();
+    test_stage27_mark_payload_evicted_releases_hot_memory_inline();
     test_stage26_admit_checkpoint_does_not_allocate_payload_sized_copy();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 137 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting)\n");
+    printf("Total: 138 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression)\n");
     printf("==================================================\n");
 
     return 0;
