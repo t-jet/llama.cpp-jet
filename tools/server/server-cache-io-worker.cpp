@@ -1,152 +1,18 @@
 #include "server-cache-io-worker.h"
 #include "server-common.h"
 
-#include <chrono>
 #include <cinttypes>
 
-server_cache_io_worker::~server_cache_io_worker() {
-    stop();
-}
-
-bool server_cache_io_worker::start() {
-    if (running_.load()) {
-        return true;  // Already running
-    }
-
-    stopping_.store(false);
-    running_.store(true);
-
-    try {
-        worker_thread_ = std::thread(&server_cache_io_worker::worker_thread_func, this);
-    } catch (const std::system_error & e) {
-        SRV_ERR(" - cold store I/O worker: failed to start worker thread: %s\n", e.what());
-        running_.store(false);
-        return false;
-    }
-
-    SRV_INF(" - cold store I/O worker: started\n%s", "");
-    return true;
-}
-
-void server_cache_io_worker::stop() {
-    if (!running_.load()) {
-        return;
-    }
-
-    stopping_.store(true);
-    queue_cv_.notify_all();
-
-    if (worker_thread_.joinable()) {
-        worker_thread_.join();
-    }
-
-    running_.store(false);
-
-    // Drain remaining work items as cancelled
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        while (!work_queue_.empty()) {
-            io_work_item item = std::move(work_queue_.front());
-            work_queue_.pop();
-
-            io_completion_result result{};
-            result.payload_id = item.payload_id;
-            result.is_demotion = (item.type == io_task_type::demotion);
-            result.success = false;
-            result.failure_reason = io_failure_reason::cancelled;
-
-            {
-                std::lock_guard<std::mutex> rlock(result_mutex_);
-                result_queue_.push_back(std::move(result));
-            }
-        }
-    }
-
-    SRV_INF(" - cold store I/O worker: stopped\n%s", "");
-}
-
-bool server_cache_io_worker::enqueue_demotion(uint64_t payload_id,
-                                                const cold_descriptor_snapshot & descriptor_snapshot,
-                                                const std::vector<uint8_t> & target_bytes,
-                                                const std::vector<uint8_t> & draft_bytes) {
-    size_t capacity = queue_capacity_;
-#ifdef LLAMA_SERVER_CACHE_TESTS
-    if (debug_queue_capacity_ > 0) {
-        capacity = debug_queue_capacity_;
-    }
-#endif
-
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (work_queue_.size() >= capacity) {
-        SRV_WRN(" - cold store I/O worker: demotion queue full (%zu/%zu) for payload_id %" PRIu64 "\n",
-                work_queue_.size(), capacity, payload_id);
-        return false;
-    }
-
-    io_work_item item{};
-    item.type = io_task_type::demotion;
-    item.payload_id = payload_id;
-    item.pair_state = descriptor_snapshot.pair_state;
-    item.format_version = descriptor_snapshot.format_version;
-    item.target_size_bytes = descriptor_snapshot.target_size_bytes;
-    item.draft_size_bytes = descriptor_snapshot.draft_size_bytes;
-    item.target_checksum = descriptor_snapshot.target_checksum;
-    item.draft_checksum = descriptor_snapshot.draft_checksum;
-    item.target_bytes = target_bytes;
-    item.draft_bytes = draft_bytes;
-
-    work_queue_.push(std::move(item));
-    queue_cv_.notify_one();
-
-    return true;
-}
-
-bool server_cache_io_worker::enqueue_promotion(uint64_t payload_id,
-                                                 cold_ref ref,
-                                                 const cold_descriptor_snapshot & descriptor_snapshot) {
-    size_t capacity = queue_capacity_;
-#ifdef LLAMA_SERVER_CACHE_TESTS
-    if (debug_queue_capacity_ > 0) {
-        capacity = debug_queue_capacity_;
-    }
-#endif
-
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (work_queue_.size() >= capacity) {
-        SRV_WRN(" - cold store I/O worker: promotion queue full (%zu/%zu) for payload_id %" PRIu64 "\n",
-                work_queue_.size(), capacity, payload_id);
-        return false;
-    }
-
-    io_work_item item{};
-    item.type = io_task_type::promotion;
-    item.payload_id = payload_id;
-    item.ref = ref;
-    item.pair_state = descriptor_snapshot.pair_state;
-    item.format_version = descriptor_snapshot.format_version;
-    item.target_size_bytes = descriptor_snapshot.target_size_bytes;
-    item.draft_size_bytes = descriptor_snapshot.draft_size_bytes;
-    item.target_checksum = descriptor_snapshot.target_checksum;
-    item.draft_checksum = descriptor_snapshot.draft_checksum;
-
-    work_queue_.push(std::move(item));
-    queue_cv_.notify_one();
-
-    return true;
-}
-
-std::vector<io_completion_result> server_cache_io_worker::drain_results() {
-    std::lock_guard<std::mutex> lock(result_mutex_);
-    std::vector<io_completion_result> results;
-    results.swap(result_queue_);
-    return results;
-}
+// Stage 28 R28-BUG-04 Phase C: the async worker thread, work queue,
+// result queue, enqueue/queue-full scheduling, and worker_thread_func
+// have been removed. Demotion and promotion now execute synchronously
+// on the calling thread via execute_inline / execute_demotion_inline /
+// execute_promotion_inline. The caller (hybrid_cache_controller's
+// tx_demote_payload / tx_promote_payload) holds cache_state_mutex_ so
+// the descriptor residency transition is observed as a single atomic
+// step by other threads.
 
 std::optional<io_completion_result> server_cache_io_worker::execute_inline(const io_work_item & item) {
-    // Stage 25: run the work item on the calling thread under the caller's
-    // cache_state_mutex_. The thread primitive is not started so this path
-    // is the only synchronous entry point. Returns std::nullopt when no
-    // cold store is configured.
     if (!cold_store_ || !cold_store_->is_configured()) {
         return std::nullopt;
     }
@@ -194,46 +60,6 @@ std::optional<io_completion_result> server_cache_io_worker::execute_promotion_in
     item.target_checksum = descriptor_snapshot.target_checksum;
     item.draft_checksum = descriptor_snapshot.draft_checksum;
     return execute_inline(item);
-}
-
-void server_cache_io_worker::worker_thread_func() {
-    while (true) {
-        io_work_item item;
-
-        {
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] { return !work_queue_.empty() || stopping_.load(); });
-
-            if (stopping_.load() && work_queue_.empty()) {
-                break;
-            }
-
-            if (work_queue_.empty()) {
-                continue;
-            }
-
-            item = std::move(work_queue_.front());
-            work_queue_.pop();
-        }
-
-#ifdef LLAMA_SERVER_CACHE_TESTS
-        if (debug_completion_delay_ms_ > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(debug_completion_delay_ms_));
-        }
-#endif
-
-        io_completion_result result;
-        if (item.type == io_task_type::demotion) {
-            result = process_demotion(item);
-        } else {
-            result = process_promotion(item);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(result_mutex_);
-            result_queue_.push_back(std::move(result));
-        }
-    }
 }
 
 io_completion_result server_cache_io_worker::process_demotion(io_work_item & item) {

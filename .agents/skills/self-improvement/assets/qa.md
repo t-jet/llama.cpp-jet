@@ -1,5 +1,13 @@
 # QA improvement memory
 
+## Improvement: distinguish Manager claim of N converted call sites from actual diff conversions
+
+Condition:
+- QA verifies a Manager claim that N call sites in a test file were converted from `assert(...)` to explicit `if (...) { fprintf + std::abort() }` pattern, and the verification list includes line numbers that mix function definitions with actual call sites
+
+Action:
+- Do run `git show HEAD:<file> | Select-String -Pattern '<func_name>\(' | Select-Object LineNumber, Line` to enumerate the call sites that existed at HEAD, then run the same `Select-String` against the working tree. Compare the diff (`git diff <file> | Select-String -Pattern '^[+-].*<func_name>\('`) to count actual conversions. A `+` prefix with new abort pattern and matching `-` prefix with old assert pattern is one conversion. Line numbers that point at the function definition (`static bool name(`) are not call sites and should be excluded from the count. If the working-tree `assert(...)` line is unchanged (no `+`/`-` prefix in diff), it was NOT converted despite any "reverted to assert() form" comment that says otherwise. The "reverted" wording is a misleading developer idiom when the line was never actually converted in the current tree. Report the actual conversion count vs the Manager's claimed count and explain the discrepancy in the verification report; do not silently accept the Manager's count.
+
 ## Improvement: distinguish BLOCKED-runner-cleanup from real product failure when leg completes
 
 Condition:

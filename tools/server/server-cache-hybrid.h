@@ -329,12 +329,10 @@ public:
     // The descriptor transitions to promoting state. Completion is handled asynchronously.
     bool promote_payload(uint64_t payload_id);
 
-    // Process pending I/O completion results from the worker.
-    // Must be called from the server_context thread at safe scheduling points.
-    // Stage 25: under the synchronous transaction model there are no queued
-    // completions; this is a no-op kept for source compatibility with the
-    // existing TP-21, TP-22, TP-23 test access path.
-    void process_completions();
+    // Stage 28 R28-BUG-04 Phase C: the async completion drain
+    // (process_completions) has been removed. Demotion and promotion now
+    // execute synchronously under cache_state_mutex_ via tx_demote_payload
+    // and tx_promote_payload, so there is no queued completion to drain.
 
     // Stage 25: atomic transactional cache writes. The tx_* methods below
     // acquire cache_state_mutex_ once at entry and release once at exit.
@@ -496,17 +494,14 @@ public:
     void debug_set_cold_store_for_tests(const std::string & path) {
         cold_store.configure(path, COLD_STORE_FORMAT_VERSION_1);
     }
-    void debug_start_io_worker_for_tests() {
-        io_worker.debug_set_cold_store_for_tests(&cold_store);
-        io_worker.start();
-    }
-    void debug_stop_io_worker_for_tests() {
-        process_completions();
-        io_worker.stop();
-    }
-    void debug_set_io_worker_queue_capacity_for_tests(size_t capacity) {
-        io_worker.debug_set_queue_capacity_for_tests(capacity);
-    }
+    // Stage 28 R28-BUG-04 Phase C: debug_start_io_worker_for_tests,
+    // debug_stop_io_worker_for_tests, and
+    // debug_set_io_worker_queue_capacity_for_tests have been removed
+    // along with the async worker thread. Demotion and promotion now
+    // execute synchronously via tx_demote_payload / tx_promote_payload;
+    // there is no worker to start, no queue to bound, and no completion
+    // to drain. The cold-store pointer is still wired via debug_set_cold_store_for_tests
+    // above or via the controller constructor when cold-path is non-empty.
     void debug_set_cold_store_validation_failure_for_tests(io_failure_reason reason) {
         cold_store.debug_set_validation_failure_for_tests(reason);
     }
@@ -672,7 +667,10 @@ private:
         token_prefix_hash
     > prefix_index;
 
-    // Phase 6: Cold store and async I/O worker
+    // Phase 6: Cold store and inline I/O worker
+    // Stage 28 R28-BUG-04 Phase C: io_worker is now a thin synchronous
+    // container (no thread, no work queue, no result queue). The inline
+    // execution helpers are the only entry points.
     server_cache_store_cold cold_store;
     server_cache_io_worker io_worker;
 
@@ -795,6 +793,7 @@ private:
     size_t n_cache_branch_prunings = 0;
     size_t n_cache_branch_pruned_metadata_bytes = 0;
     size_t n_cache_cold_cleanup_total = 0;
+    size_t n_cold_cleanup_startup_orphan = 0;
     size_t n_cache_branch_metadata_admission_rejections = 0;
     size_t n_checkpoint_admission_successes = 0;
     size_t n_checkpoint_admission_failures = 0;
@@ -838,6 +837,12 @@ private:
     // helper entry points that must NOT run inside a transaction except via
     // the documented inner-call set. Release build is a no-op.
     void tx_assert_not_reentrant() const;
+
+    // Stage 28 R28-BUG-02: scan the cold store root for .cold files whose
+    // payload_id is not present in cold_payload_bytes_by_id_ and delete
+    // them. Called from the constructor after cold_store.configure()
+    // succeeds. Holds cache_state_mutex_ (recursive, so nested calls work).
+    void reconcile_cold_store_with_per_id_map();
 
     bool evict_entry_by_id(uint64_t entry_id, server_cache_eviction_reason reason);
     void evict_until_within_budget();

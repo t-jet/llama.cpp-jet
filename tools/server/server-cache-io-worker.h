@@ -3,32 +3,39 @@
 #include "server-cache-store-cold.h"
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
-#include <mutex>
 #include <optional>
-#include <queue>
-#include <thread>
 #include <vector>
 
-// Async I/O worker for cold store operations.
-// Runs as a single background thread that executes demotion writes and promotion reads.
-// The controller enqueues tasks and receives completion results through a result queue.
-// The server_context thread must never block on cold I/O or on a full work queue.
+// Cold store I/O worker.
+//
+// Stage 28 R28-BUG-04 Phase C: the async worker body (background thread,
+// work queue, result queue, enqueue/queue-full scheduling) has been
+// removed. Demotion and promotion now execute synchronously on the
+// calling thread via execute_inline / execute_demotion_inline /
+// execute_promotion_inline. These inline paths are the production
+// entry points and are called from hybrid_cache_controller::tx_demote_payload
+// and tx_promote_payload under cache_state_mutex_ so the residency
+// transition is observed as a single atomic step by other threads.
+//
+// The class is retained as a thin container for the inline execution
+// helpers and the cold-store pointer so callers can keep their existing
+// per-controller wiring (debug_io_worker_for_tests() accessor, etc.)
+// without churning the controller's storage layout.
 
 enum class io_task_type {
     demotion,
     promotion,
 };
 
-// Work item for the I/O worker queue
+// Work item for synchronous inline execution. Same fields as the prior
+// async queue item; the controller populates a local copy and calls
+// execute_inline().
 struct io_work_item {
     io_task_type type = io_task_type::demotion;
     uint64_t payload_id = 0;
-    cold_ref ref = 0;  // cold_ref for promotion tasks
+    cold_ref ref = 0;
 
-    // For demotion: snapshot of the descriptor fields and payload bytes
-    // We store copies since the controller must not hold locks during I/O
     uint8_t pair_state = 0;
     uint8_t format_version = 1;
     uint64_t target_size_bytes = 0;
@@ -42,54 +49,20 @@ struct io_work_item {
 class server_cache_io_worker {
 public:
     server_cache_io_worker() = default;
-    ~server_cache_io_worker();
+    ~server_cache_io_worker() = default;
 
     // Non-copyable, non-movable
     server_cache_io_worker(const server_cache_io_worker &) = delete;
     server_cache_io_worker & operator=(const server_cache_io_worker &) = delete;
 
-    // Start the worker thread and the work queue.
-    // Returns true on success, false on thread creation failure.
-    // Must be called after the cold store is configured.
-    bool start();
-
-    // Drain pending work, signal the thread to exit, and join.
-    // In-progress tasks are completed before exit.
-    // Queued but not started tasks receive a cancelled failure result.
-    void stop();
-
-    // Enqueue a demotion task.
-    // Returns true on success, false if the queue is full (NB-2: fail-fast, no blocking).
-    // The controller must set residency_state = demoting before calling this.
-    // On queue-full, the controller must immediately revert residency_state = hot.
-    bool enqueue_demotion(uint64_t payload_id,
-                          const cold_descriptor_snapshot & descriptor_snapshot,
-                          const std::vector<uint8_t> & target_bytes,
-                          const std::vector<uint8_t> & draft_bytes);
-
-    // Enqueue a promotion task.
-    // Returns true on success, false if the queue is full (NB-2: fail-fast, no blocking).
-    // The controller must set residency_state = promoting before calling this.
-    // On queue-full, the controller must immediately revert residency_state = cold.
-    bool enqueue_promotion(uint64_t payload_id,
-                           cold_ref ref,
-                           const cold_descriptor_snapshot & descriptor_snapshot);
-
-    // Drain the result queue and return all pending completion results.
-    // Called by the controller at safe scheduling points (before update() or restore).
-    std::vector<io_completion_result> drain_results();
-
-    // Stage 25: synchronous inline worker call. Runs the cold-store read or
-    // write on the calling thread and returns the completion result. Used
-    // by tx_demote_payload and tx_promote_payload under cache_state_mutex_
-    // so the demotion or promotion is observed as a single atomic transition
-    // by other threads. Returns std::nullopt when no cold store is configured.
+    // Synchronous inline execution. Runs the cold-store read or write on
+    // the calling thread and returns the completion result. The caller
+    // (tx_demote_payload / tx_promote_payload) holds cache_state_mutex_,
+    // so the descriptor residency transition is observed as a single
+    // atomic step. Returns std::nullopt when no cold store is wired.
     std::optional<io_completion_result> execute_inline(const io_work_item & item);
 
-    // Stage 25: synchronous helpers built on execute_inline. The legacy
-    // enqueue_demotion / enqueue_promotion paths are retained for source
-    // compatibility with the existing async tests (TP-21, TP-22, TP-23) but
-    // the slot lifecycle now calls tx_demote_payload / tx_promote_payload.
+    // Convenience wrappers used by tx_demote_payload and tx_promote_payload.
     std::optional<io_completion_result> execute_demotion_inline(
         uint64_t payload_id,
         const cold_descriptor_snapshot & descriptor_snapshot,
@@ -100,51 +73,23 @@ public:
         cold_ref ref,
         const cold_descriptor_snapshot & descriptor_snapshot);
 
-    // Check if the worker is running
-    bool is_running() const { return running_.load(); }
-
 #ifdef LLAMA_SERVER_CACHE_TESTS
-    // Test hooks
-    void debug_set_queue_capacity_for_tests(size_t capacity) { debug_queue_capacity_ = capacity; }
-    void debug_set_completion_delay_for_tests(int delay_ms) { debug_completion_delay_ms_ = delay_ms; }
+    // Test hook: wire the cold store pointer directly. Used by cold-store
+    // constructor wiring in tests that construct the controller with a
+    // cold-path string.
     void debug_set_cold_store_for_tests(server_cache_store_cold * store) { cold_store_ = store; }
 #endif
 
 private:
-    // Default queue capacity
-    static constexpr size_t DEFAULT_QUEUE_CAPACITY = 32;
-
-    // Worker thread function
-    void worker_thread_func();
-
-    // Process a single work item
     io_completion_result process_demotion(io_work_item & item);
     io_completion_result process_promotion(io_work_item & item);
 
-    std::thread worker_thread_;
-    std::atomic<bool> running_{false};
-    std::atomic<bool> stopping_{false};
-
-    // Work queue
-    std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
-    std::queue<io_work_item> work_queue_;
-    size_t queue_capacity_ = DEFAULT_QUEUE_CAPACITY;
-
-    // Result queue
-    std::mutex result_mutex_;
-    std::vector<io_completion_result> result_queue_;
-
-    // Cold store reference (set during start)
+    // Cold store reference; set via debug_set_cold_store_for_tests or
+    // by the hybrid_cache_controller friend declaration below.
     server_cache_store_cold * cold_store_ = nullptr;
 
     void set_cold_store(server_cache_store_cold * store) { cold_store_ = store; }
 
-#ifdef LLAMA_SERVER_CACHE_TESTS
-    size_t debug_queue_capacity_ = 0;  // 0 means use default
-    int debug_completion_delay_ms_ = 0;
-#endif
-
-    // Allow hybrid_cache_controller to set the cold store
+    // Allow hybrid_cache_controller to set the cold store.
     friend class hybrid_cache_controller;
 };

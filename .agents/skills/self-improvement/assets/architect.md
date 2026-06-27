@@ -110,6 +110,16 @@ Action:
 
 - Do write a small tmp-byte-scan script (drop 0x0D, ensure trailing LF, write back, verify CR=0, last=LF, no EF BB BF BOM) and run it over EVERY new file in one pass before the final git diff --check. Do not trust create_file's line endings on Windows; do not trust one normalize pass to fix every file (some tool edits may re-insert CRLF or strip trailing newline on a re-save). Do run the byte-scan loop and git diff --check --no-index per file in a loop, treating empty output as clean and exit code 1 as content-diff noise. Do not paste large inline PowerShell into a terminal call when the script tokenizes `$_` badly; do save the script to tmp and run via `-File`. Do not trust linter warning alone for MD047 (missing trailing newline) when --check exit code is also noisy; do verify last byte == LF in the byte-scan output. Do report each file's LF count, CR count, BOM status, and last-byte status in the post-task summary.
 
+## Improvement: CRLF noise in git diff --check on cpp inserts
+
+Condition:
+
+- Re-reviewing fix on Windows where the touched cpp file is pre-existing CRLF (CR count == LF count), and git diff --check reports "trailing whitespace" on every `+` line of the insert
+
+Action:
+
+- Do not flag as defect until byte-level verification. Do read raw bytes, count CR, confirm CR==LF matches whole-file ratio. Do identify the CR character at end of the `+` line as the source of the warning. Do record as Windows CRLF diff noise when whole-file CRLF consistent and user hard constraint says "CRLF for cpp". Do not record as code defect, lint failure, or repeat finding.
+
 ## Improvement: Self-claim format verification in review subjects
 
 Condition:
@@ -2629,3 +2639,128 @@ Condition:
 Action:
 
 - Do pre-allocate N payload buffers before the save loop and reuse them across iterations; do measure the destination-side allocation (the bug pattern) without re-allocating the source buffers. Do snapshot baseline counts before the loop and assert post-conditions after the loop. Do use the public debug helper for the production path so the test exercises the same code path as the live server. Do add minimal debug helpers (3-5 one-liners) for tests that need internal map access. Do not reload or duplicate large buffers in the test loop; the test should measure destination behavior, not source memory churn.
+
+## Post-task review 2026-06-26 (Stage 28 design authoring)
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Authored Stage 28 design (Technical Debt Removal + Open Bug Fixes) per user direction 2026-06-26 "remove all technical debt and fix all known open bugs". Six LF-only UTF-8 no-BOM files: entry doc (131 lines), part-01 tech-debt inventory (198 lines, 21 items: 3 HIGH/7 MEDIUM/11 LOW), part-02 known-bug fix design (217 lines, 3 bugs with diagnosis), part-03 prioritized fix order (143 lines, 3 iterations), part-04 verification plan (130 lines, per-fix V-rows), part-05 risks (147 lines, per-fix + cross-cut + 5 OQ). All under 300-line cap. CR=0, BOM=False, non-ASCII=0, trailing LF on all six. Also updated `._design_docs/document-index.md` to add one Stage 28 row.
+- Caught one substantive design ambiguity during authoring: the Stage 27 closure cited `tests/test-cache-controller.cpp:3645 assert` as NDEBUG-disabled, but the file actually undefines NDEBUG at line 22, so asserts are active in this TU. Real root cause is inconsistent abort pattern (`assert()` vs explicit `std::abort()` -> `__fastfail(FAST_FAIL_FATAL_APP_EXIT)` = 0xC0000409). Recorded the corrected root cause in part-02 R28-BUG-01 root cause confirmation section, with line references verified by read_file. The Stage 27 closure's wording was imprecise but the fix scope was correct.
+- Diagnosed the cold-store drift direction empirically: filesystem 5.37 GiB (102 files of exactly 50.25 MiB each) vs metric 502 MiB (10 entries). Per-id map sum = filesystem bytes would require all 102 entries tracked; metric < disk means orphan files exist. Three candidate root causes (A: cold_budget_make_room early-continue, B: write-without-map path, C: cleanup-loop delete-without-map) listed with directional analysis: Candidate A would INCREASE metric, not decrease, so cannot be the orphan source; diagnosis step is mandatory before fix shape is final.
+- All six files cleaned via the existing byte-level normalize workflow: read bytes, filter 0x0D, WriteAllBytes. Verified CR=0, last=0x0A (LF), first3='# S' (no BOM), line count via Get-Content. git diff --check clean on all 7 modified/added files.
+
+Improvement outcome candidate:
+
+- Condition:
+  - Authoring multi-file durable design for stage with binding scope (technical debt inventory + bug fix catalog)
+- Action:
+  - Do verify each closure-cited root cause against actual source code in the same task; do not trust prior closure part-file wording when it cites line numbers or abort patterns that are slightly off
+  - Do compute drift direction empirically before listing candidate fixes; do flag the candidate whose direction does not match observed evidence and require a diagnosis step
+  - Do pre-allocate a single 300-line cap budget per part file and split into more parts rather than exceeding the cap with combined fix-design + verification + risks
+
+Similar memory check:
+
+- Similar improvements found: "Latest follow-up state before stage baseline PASS" (covers reading latest follow-up before referencing closure), "Closure sweep preserves historical failure headings" (covers not rewriting prior closure text), "Pre-fix line citations in post-fix handoff text" (covers stale line-number citations).
+- Gap: prior improvements cover REVIEW of stale closure wording, but not AUTHORING of design that USES a closure-cited root cause as its baseline. The new improvement is about author responsibility to verify cited root cause against source, even when closure text appears authoritative.
+
+Decision:
+
+- Add new improvement because the pattern surfaced explicitly: the Stage 27 closure said "assert silently no-ops under NDEBUG" and cited line 3645, but the file has `#undef NDEBUG` at line 22 making the assertion active. An Architect authoring a follow-up design that inherits the closure wording without verifying would carry forward the imprecision into Stage 28.
+
+Memory update:
+
+- New improvement `Closure-cited root cause must be verified against source before inheritance` stored below.
+
+## Improvement: Closure-cited root cause must be verified against source before inheritance
+
+Condition:
+
+- Authoring new stage design or design correction that inherits a root cause analysis from a prior stage closure part-file (e.g., D-EXEC-NN root cause), and the prior closure cites specific line numbers, abort mechanisms, or NDEBUG/CONFIG_NDEBUG behavior
+
+Action:
+
+- Do read the cited source file directly with read_file and verify the cited line numbers and mechanism. Do grep_search for NDEBUG, __fastfail, abort(), __try, __except and similar symbols at the cited location. Do re-state the root cause in the new design with corrected wording when the prior closure is imprecise; do not silently inherit incorrect technical claims. Do record the correction as an explicit note (e.g., "Prior closure wording: ... Actual code: ...") so future stages can trace the correction. Don't trust prior closure as gospel; don't reject the prior closure's fix scope when the wording is imprecise but the fix is correct.
+
+## Improvement: Drift direction must be computed before listing candidate fixes
+
+Condition:
+
+- Authoring or reviewing a fix design for a metric vs filesystem (or vs physical resource) drift where the drift direction is empirical but the design's candidate root causes are listed without checking whether each candidate would produce the observed direction
+
+Action:
+
+- Do compute the drift direction (resource_bytes / metric_bytes ratio) and per-resource uniformity (file size, record count) before listing candidates. Do verify each candidate would produce the observed direction. Do flag the candidate that produces the opposite direction as not-the-cause. Do require a diagnosis step in the design when no candidate matches the observed direction; do not pick the most-likely candidate and proceed without confirmation. Do record the empirical observation and the per-candidate direction analysis in the design part file so reviewers can audit the candidate set.
+
+## Improvement: 300-line cap pre-allocation for multi-part designs with binding scope
+
+Condition:
+
+- Authoring stage design with binding scope (technical debt inventory, bug fix catalog, or multi-iteration plan) where a single part file risks exceeding 300 lines
+
+Action:
+
+- Do pre-allocate 300-line cap budget per part file before writing; do split into separate part files (one per concern) rather than combining fix-design + verification + risks in one file. Do keep entry doc under 100 lines when possible (link table only). Do verify with line count after writing each part file; do split immediately if count exceeds 250. Do use `## heading` level for per-item subsections and `### subheading` for per-fix details so the lint MD024 (no-duplicate-heading) does not flag cross-item subsections with the same name. Don't try to fit everything in one part file when the scope naturally partitions.
+
+## Improvement: Async worker dead-code investigation must trace callers in both production and test paths
+
+Condition:
+
+- Investigating async worker code as technical debt after a prior stage design declared it retired (e.g., Stage 25 worker retirement Option B chose "replace with stateless helper") but the methods, the worker thread, and the no-op stub still exist in the source tree
+
+Action:
+
+- Do grep_search for every method name (class, start/stop, enqueue_*, process_*, drain_*, handle_*_completion, worker_thread_func, debug_*_for_tests) across tools/server/, tests/, and any documented test helpers. Do classify each match as prod, test-only, or dead before deciding fix approach. Do specifically check whether the worker thread is actually started in the production constructor (not just declared) and whether no-op stubs are wired into production wait loops that burn wall-clock time. Do surface broken production paths (hang or descriptor leak) as new HIGH bugs even when the original task scoped the investigation as MEDIUM. Do promote the deletion to MEDIUM iteration 2 with explicit conditional (compile-clean Phase B first) rather than leaving it deferred to a future stage when the user asks the investigation in-scope. Do not trust comment text claiming the worker is "retained for source compat" without verifying the callers actually exist and the path is non-broken.
+
+## Improvement: Plan-review deliverable filename table must match actual part-file naming
+
+Condition:
+- Reviewing implementation plan whose deliverable table in part-05 (open questions) or similar summary section lists part-file paths that do not match the actual filenames in the same plan directory
+
+Action:
+- Do grep the plan directory for actual part file names (part-01*.md, part-02*.md, etc.) before reviewing. Do flag any deliverable table row referencing a stale filename (e.g., part-01-ordered-implementation-steps.md when actual files are part-01a-*.md + part-01b-*.md). Do record as non-blocking observation since the entry doc links the correct filenames and the stale references are cosmetic; the developer doesn't follow these as implementation instructions. Do verify entry doc link table matches actual filenames since entry doc is the navigation surface.
+
+## Improvement: Plan-review wording-vs-actual-code mismatch in cpp fix snippets
+
+Condition:
+- Reviewing implementation plan that describes a cpp line substitution using a pattern (e.g., if (self->promote_payload(...)) with if-wrapper) that doesn't match the actual code at the cited line (the line has no if, or has a different wrapper, or has been moved)
+
+Action:
+- Do grep the actual line number in the cited file to confirm the substitution pattern matches. Do record as non-blocking observation when the substitution intent is clear (replacing the method name) but the textual pattern is inaccurate; the developer applies the substitution regardless of pattern wording. Do not block sign-off on minor textual mismatch when the design and plan both name the correct method/line and the intent is unambiguous.
+
+## Improvement: Plan-review [[deprecated]] marker location must match symbol's class
+
+Condition:
+- Reviewing implementation plan that marks symbols with [[deprecated]] but lists the wrong header file (e.g., a member of hybrid_cache_controller in server-cache-io-worker.h, or vice versa)
+
+Action:
+- Do grep the actual symbol's class declaration across all .h files in the same directory. Do flag as non-blocking observation when the marker location is wrong but the intent is clear. Do recommend the developer grep for the symbol first and apply the marker to the actual declaration header. Do not block sign-off when the marker is on the right symbol regardless of which header the plan names, as long as the developer can locate the right declaration.
+
+## Improvement: Multi-candidate fix designs vs implementer-chosen alternative
+
+Condition:
+- Reviewing implementation report that cites a design part file as the basis for its fix but the design lists three named candidates (A/B/C) and the implementation takes none of them; the fix report cites the design as if it documented the chosen alternative.
+
+Action:
+- Do grep the design file for the cited "Option" or "Fix N" reference before accepting the citation. Do flag as BLOCKING design-scope drift when the approved design does not document the implementer's chosen strategy. Do require either a design correction (new part file or amendment to existing part) recording the chosen strategy before re-review, OR a revert to one of the approved candidates. Do not accept "achieves same outcome" as a substitute for design approval; design gate exists to constrain strategy choice, not just outcome. Do recommend the Manager decide between design amendment (preferred if the alternative is genuinely better) and revert (preferred if the approved candidates are still viable and the alternative defers critical root-cause fixes).
+
+## Improvement: Counter pattern parity between get_stats() and Prometheus /metrics
+
+Condition:
+- Reviewing implementation that adds a new counter exposed via get_stats() JSON, when the user's checklist explicitly references `/metrics` (the public Prometheus endpoint) and a similar existing counter (e.g., cache_cold_cleanup_total) is exposed in BOTH endpoints.
+
+Action:
+- Do grep server-context.cpp for write_cache_metric calls to verify whether the new counter is exposed in the public Prometheus exporter. Do flag as BLOCKING when the user explicitly cited /metrics in their checklist and the existing pattern exposes similar counters in both endpoints. Do distinguish design-internal-only counters (acceptable in get_stats() alone) from observability-required counters (must be in /metrics). Do record the server-context.cpp line range where the new write_cache_metric line should be added. Do not accept "exposed in get_stats()" as proof of /metrics exposure when both endpoints have separate write_cache_metric wiring.
+
+## Improvement: git diff --check on CRLF cpp files reports CR as trailing whitespace
+
+Condition:
+- Running git diff --check on cpp files in this repo where the file is CRLF throughout (CR count matches line count, design convention says "CRLF for cpp"); diff shows "trailing whitespace" on every newly added line but byte-level scan shows zero trailing space characters.
+
+Action:
+- Do run a byte-level scan (ReadAllBytes + 0x0D/0x20 membership) on the touched cpp file before declaring a hygiene defect. Do report the CR count vs line count to distinguish real CRLF convention from accidental trailing CR. Do flag as INFO, not BLOCKING, when byte scan shows CR matches line count and zero trailing spaces (genuine CRLF hygiene noise). Do flag as BLOCKING when byte scan shows non-zero trailing-space count or CR count > line count + 1 (genuine defect). Don't trust git diff --check exit code alone on a CRLF file; the exit code is 1 for any CR at end of line, which is the project's convention.
+
+## cap

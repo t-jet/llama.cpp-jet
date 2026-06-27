@@ -4641,6 +4641,7 @@ void server_routes::init_routes() {
             write_cache_metric_with_three_labels("counter", "llamacpp:cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
             write_cache_metric_with_label("counter", "llamacpp:cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
             write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_startup_orphan_total", "Orphan .cold files deleted at startup by reconcile pass.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_startup_orphan_total", 0));
             write_cache_metric_with_two_labels("counter", "llamacpp:cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
             const auto write_checkpoint_hits = [&]() {
                 const json rows = cache_stats.contains("cache_checkpoint_hits_by_shape") ?

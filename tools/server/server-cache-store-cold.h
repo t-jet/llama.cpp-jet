@@ -149,6 +149,11 @@ public:
     // Return true only when a valid root path is set and configure() succeeded.
     bool is_configured() const { return configured_; }
 
+    // Return the configured root path, or empty string if not configured.
+    // Used by the hybrid controller's startup reconcile pass to scan for
+    // orphan .cold files left over from prior runs.
+    const std::string & root_path() const { return root_path_; }
+
 #ifdef LLAMA_SERVER_CACHE_TESTS
     // Test hooks for fault injection
     void debug_set_write_failure_for_tests(bool fail) { debug_write_failure_ = fail; }

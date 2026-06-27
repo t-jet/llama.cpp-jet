@@ -13,6 +13,8 @@
 #include <unordered_set>
 #include <utility>
 
+namespace fs = std::filesystem;
+
 // Stage 25: RAII guard that increments the per-thread reentrancy counter
 // on construction and decrements on destruction. Used together with
 // std::lock_guard<std::recursive_mutex> to keep the counter balanced
@@ -374,6 +376,11 @@ hybrid_cache_controller::hybrid_cache_controller(
         io_worker.set_cold_store(&cold_store);
 
         SRV_INF("%s", " - hybrid cache: cold store configured (synchronous worker)\n");
+
+        // Stage 28 R28-BUG-02: delete orphan .cold files left on disk by
+        // prior runs whose per-id map entry is missing (e.g. cleanup-loop
+        // partial delete or remove_payload cold-path unconditional erase).
+        reconcile_cold_store_with_per_id_map();
     } else if (!cold_path.empty()) {
         SRV_INF("%s", " - hybrid cache: cold store path configured but cold writes are disabled\n");
     }
@@ -384,14 +391,84 @@ hybrid_cache_controller::~hybrid_cache_controller() {
     // The destructor is a no-op for the io_worker (it was never started).
 }
 
+void hybrid_cache_controller::reconcile_cold_store_with_per_id_map() {
+    // Stage 28 R28-BUG-02: walk the cold store root and delete .cold files
+    // whose payload_id is not tracked in cold_payload_bytes_by_id_. Such
+    // files are orphans left by prior cleanup-loop partial deletes or
+    // remove_payload cold-path unconditional erase races. Without this
+    // pass the cold store grows unbounded (Stage 24 -07 S02 hybrid: 102
+    // .cold files on disk vs 10 in the per-id map).
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+
+    if (!cold_store.is_configured()) {
+        return;
+    }
+
+    const std::string & root = cold_store.root_path();
+    if (root.empty()) {
+        return;
+    }
+
+    std::error_code ec;
+    fs::path root_path(root);
+    if (!fs::is_directory(root_path, ec)) {
+        return;
+    }
+
+    size_t n_orphan = 0;
+    size_t n_accounted = 0;
+    for (fs::directory_iterator it(root_path, ec), end; !ec && it != end; it.increment(ec)) {
+        const fs::directory_entry & entry = *it;
+        if (!entry.is_regular_file(ec)) {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        // Cold files use the convention `<hex_payload_id>.cold` written by
+        // server_cache_store_cold::final_path. Staging files end in .cold.tmp
+        // and are skipped here (cleanup handled by write() on rename failure).
+        const std::string suffix = ".cold";
+        if (name.size() <= suffix.size() ||
+            name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0) {
+            continue;
+        }
+        const std::string hex_id = name.substr(0, name.size() - suffix.size());
+        uint64_t payload_id = 0;
+        try {
+            payload_id = std::stoull(hex_id, nullptr, 16);
+        } catch (...) {
+            // Skip files whose names are not valid hex payload_ids.
+            continue;
+        }
+        if (cold_payload_bytes_by_id_.find(payload_id) == cold_payload_bytes_by_id_.end()) {
+            std::unordered_set<uint64_t> ids{payload_id};
+            const size_t n_deleted = cold_store.delete_ids(ids);
+            n_orphan += n_deleted;
+            if (n_deleted > 0) {
+                SRV_INF(" - hybrid cache: cold-store startup reconcile deleted orphan file for payload_id %" PRIu64 "\n",
+                        payload_id);
+            }
+        } else {
+            ++n_accounted;
+        }
+    }
+
+    n_cold_cleanup_startup_orphan = n_orphan;
+    if (n_orphan > 0 || n_accounted > 0) {
+        SRV_INF(" - hybrid cache: cold-store startup reconcile done; orphan_deleted=%zu accounted=%zu\n",
+                n_orphan, n_accounted);
+    }
+}
+
 bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
-    // Stage 25: the legacy async demote path is preserved for source
-    // compatibility with the TP-21 / TP-22 / TP-23 test access pattern
-    // (debug_demote_first_checkpoint_for_tests + debug_stop_io_worker_for_tests).
-    // The slot lifecycle now calls tx_demote_payload for inline atomic
-    // demotion. This method enqueues to the io_worker exactly as before;
-    // the worker thread is not started but enqueue is still accepted so
-    // the test pattern continues to work.
+    // Stage 28 R28-BUG-04 Phase C: the legacy async demote path now runs
+    // synchronously on the calling thread. Validation, the demoting
+    // residency transition, the cold-store write, and the
+    // handle_demotion_completion call all happen inline (no enqueue, no
+    // queue-full revert). Slot lifecycle code paths call tx_demote_payload
+    // (which also acquires cache_state_mutex_); this method is the same
+    // synchronous shape without the lock guard so existing
+    // demote_payload() callers (TP-21, TP-22, TP-23, TP-24 test access)
+    // keep working.
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: demote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
@@ -408,7 +485,6 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         return false;
     }
 
-    // Validate eligibility for demotion
     if (descriptor.residency != payload_residency_state::hot) {
         SRV_WRN(" - hybrid cache: demote_payload: payload_id %" PRIu64 " is not hot (residency=%d)\n",
                 payload_id, static_cast<int>(descriptor.residency));
@@ -424,7 +500,6 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         return false;
     }
 
-    // Get the hot payload record
     auto record_it = hot_payloads.find(descriptor.store_ref.id);
     if (record_it == hot_payloads.end()) {
         SRV_ERR(" - hybrid cache: demote_payload: hot record not found for payload_id %" PRIu64 "\n", payload_id);
@@ -445,7 +520,6 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         return false;
     }
 
-    // Validate pairing invariant for target_and_draft
     if (descriptor.pair_state == payload_pair_state::target_and_draft) {
         if (record.draft.empty() || descriptor.draft_size_bytes == 0) {
             SRV_ERR(" - hybrid cache: demote_payload: target_and_draft descriptor missing draft for payload_id %" PRIu64 "\n",
@@ -463,10 +537,8 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         return false;
     }
 
-    // Transition to demoting state (NB-5: hot bytes are NOT released yet)
     descriptor.residency = payload_residency_state::demoting;
 
-    // Build descriptor snapshot for the worker
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
     snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
@@ -476,29 +548,31 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
     snapshot.target_checksum = descriptor.target_checksum;
     snapshot.draft_checksum = descriptor.draft_checksum;
 
-    // Enqueue demotion task (NB-2: fail-fast on queue full)
-    bool enqueued = io_worker.enqueue_demotion(
-        payload_id,
-        snapshot,
-        record.target,
-        record.draft);
-
-    if (!enqueued) {
-        // Queue full: revert to hot immediately (NB-2)
+    // Synchronous inline cold-store write. Returns std::nullopt when no
+    // cold store is wired (treated as failure below).
+    io_worker.set_cold_store(&cold_store);
+    auto completion = io_worker.execute_demotion_inline(
+        payload_id, snapshot, record.target, record.draft);
+    if (!completion.has_value()) {
         descriptor.residency = payload_residency_state::hot;
-        n_demotion_queue_full++;
-        record_payload_transition("demotion", descriptor, "failure", "queue_full");
-        record_stage10_diagnostic("queue_pressure", "failure", "demotion_queue_full", &descriptor);
-        SRV_WRN(" - hybrid cache: demote_payload: queue full, reverting payload_id %" PRIu64 " to hot\n", payload_id);
+        record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
         return false;
     }
 
-    record_payload_transition("demotion", descriptor, "queued", "none");
-    SRV_DBG(" - hybrid cache: demote_payload: enqueued payload_id %" PRIu64 " for demotion\n", payload_id);
-    return true;
+    handle_demotion_completion(*completion);
+    return completion->success;
 }
 
 bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
+    // Stage 28 R28-BUG-04 Phase C: the legacy async promote path now runs
+    // synchronously on the calling thread. The promoting residency
+    // transition, the cold-store read, the handle_promotion_completion
+    // call, and the final residency transition all happen inline (no
+    // enqueue, no queue-full revert). Slot lifecycle code paths call
+    // tx_promote_payload (which also acquires cache_state_mutex_); this
+    // method is the same synchronous shape without the lock guard so
+    // existing promote_payload() callers (TP-10, TP-21, TP-22 test access)
+    // keep working.
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it == payload_descriptors.end()) {
         SRV_WRN(" - hybrid cache: promote_payload: descriptor not found for payload_id %" PRIu64 "\n", payload_id);
@@ -508,9 +582,6 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
 
     payload_descriptor & descriptor = descriptor_it->second;
 
-    // Validate eligibility for promotion
-    // Check for in-progress promotion first (before the cold check, since
-    // promoting is a transient state that should produce a specific diagnostic)
     if (descriptor.residency == payload_residency_state::promoting) {
         SRV_WRN(" - hybrid cache: promote_payload: payload_id %" PRIu64 " is already promoting\n", payload_id);
         record_payload_transition("promotion", descriptor, "failure", "in_progress");
@@ -533,10 +604,8 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
         return false;
     }
 
-    // Transition to promoting state
     descriptor.residency = payload_residency_state::promoting;
 
-    // Build descriptor snapshot for validation during promotion
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
     snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
@@ -546,37 +615,20 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
     snapshot.target_checksum = descriptor.target_checksum;
     snapshot.draft_checksum = descriptor.draft_checksum;
 
-    // Enqueue promotion task (NB-2: fail-fast on queue full)
-    cold_ref ref = descriptor.store_ref.id;
-    bool enqueued = io_worker.enqueue_promotion(payload_id, ref, snapshot);
+    promotion_enqueue_time = std::chrono::steady_clock::now();
 
-    if (!enqueued) {
-        // Queue full: revert to cold immediately (NB-2)
+    // Synchronous inline cold-store read.
+    io_worker.set_cold_store(&cold_store);
+    auto completion = io_worker.execute_promotion_inline(
+        payload_id, descriptor.store_ref.id, snapshot);
+    if (!completion.has_value()) {
         descriptor.residency = payload_residency_state::cold;
-        n_promotion_queue_full++;
-        record_payload_transition("promotion", descriptor, "failure", "queue_full");
-        record_stage10_diagnostic("queue_pressure", "failure", "promotion_queue_full", &descriptor);
-        SRV_WRN(" - hybrid cache: promote_payload: queue full, reverting payload_id %" PRIu64 " to cold\n", payload_id);
+        record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
         return false;
     }
 
-    // Step 10: Record enqueue timestamp for latency tracking
-    promotion_enqueue_time = std::chrono::steady_clock::now();
-
-    record_payload_transition("promotion", descriptor, "queued", "none");
-    SRV_DBG(" - hybrid cache: promote_payload: enqueued payload_id %" PRIu64 " for promotion\n", payload_id);
-    return true;
-}
-
-void hybrid_cache_controller::process_completions() {
-    // Stage 25: under the synchronous transaction model there are no
-    // queued I/O completions (the inline worker runs on the calling
-    // thread and the result is applied inline by tx_demote_payload /
-    // tx_promote_payload). This is a no-op kept for source compatibility
-    // with the existing TP-21 / TP-22 / TP-23 test access path
-    // (debug_stop_io_worker_for_tests still calls process_completions
-    // after stopping the worker; both are no-ops under the new model).
-    (void) io_worker.drain_results();
+    handle_promotion_completion(*completion);
+    return completion->success;
 }
 
 bool hybrid_cache_controller::cold_budget_allows_write(size_t bytes) const {
@@ -1256,6 +1308,7 @@ json hybrid_cache_controller::get_stats() const {
         {"cache_branch_pruning_total", n_cache_branch_prunings},
         {"cache_branch_pruned_metadata_bytes_total", n_cache_branch_pruned_metadata_bytes},
         {"cache_cold_cleanup_total", n_cache_cold_cleanup_total},
+        {"cache_cold_cleanup_startup_orphan_total", n_cold_cleanup_startup_orphan},
         {"cache_branch_metadata_admission_rejections_total", n_cache_branch_metadata_admission_rejections},
         {"cache_checkpoint_admissions_total", n_checkpoint_admission_successes},
         {"cache_checkpoint_admission_failures_total", n_checkpoint_admission_failures},
@@ -1871,26 +1924,24 @@ bool hybrid_cache_controller::checkpoint_path_valid_for_restore(
     if (descriptor_it->second.residency == payload_residency_state::cold) {
         // This helper is called before restore's cold-payload branch. Complete
         // checkpoint promotion here so exact checkpoint restores stay in-request.
+        // Stage 28 R28-BUG-04 Phase C: promote_payload is now synchronous and
+        // applies handle_promotion_completion inline before returning, so the
+        // prior completion-drain loop (which called process_completions in a
+        // 30 s window) is no longer needed. The post-call residency check
+        // verifies the final state.
         auto * self = const_cast<hybrid_cache_controller *>(this);
         if (!self->promote_payload(payload_id)) {
             if (failure_reason) {
-                *failure_reason = "checkpoint promotion not queued";
+                *failure_reason = "checkpoint promotion failed";
             }
             return false;
         }
-        for (int i = 0; i < 6000; ++i) {
-            self->process_completions();
-            descriptor_it = payload_descriptors.find(payload_id);
-            if (descriptor_it == payload_descriptors.end()) {
-                if (failure_reason) {
-                    *failure_reason = "missing checkpoint descriptor";
-                }
-                return false;
+        descriptor_it = payload_descriptors.find(payload_id);
+        if (descriptor_it == payload_descriptors.end()) {
+            if (failure_reason) {
+                *failure_reason = "missing checkpoint descriptor";
             }
-            if (descriptor_it->second.residency != payload_residency_state::promoting) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return false;
         }
         if (descriptor_it->second.residency != payload_residency_state::hot) {
             if (failure_reason) {
@@ -3709,6 +3760,18 @@ bool hybrid_cache_controller::attach_checkpoint_payload(
         n_checkpoint_admission_failures++;
         return false;
     }
+    // D-EXEC-28-NEWBUG-01 fix: reject admission if entry is in evicted
+    // or invalid state. Calling admit on an evicted entry left the
+    // payload_descriptors map out of sync with hot_payloads and caused
+    // STATUS_ACCESS_VIOLATION in validate_checkpoint_descriptor_metadata.
+    if (entry.payload_id == 0 ||
+        entry.n_tokens() == 0) {
+        if (failure_reason) {
+            *failure_reason = "checkpoint entry evicted or invalid";
+        }
+        n_checkpoint_admission_failures++;
+        return false;
+    }
     const prepared_prompt_metadata metadata_snapshot = metadata ? *metadata : entry.metadata;
     const prepared_prompt_metadata * source_metadata = &metadata_snapshot;
     const uint64_t old_checkpoint_payload_id = entry.checkpoint_payload_id;
@@ -3888,6 +3951,20 @@ bool hybrid_cache_controller::admit_latest_checkpoint_and_store_metadata(
         bool runtime_has_draft,
         std::string * failure_reason,
         bool bypass_workload_profile) {
+    // D-EXEC-28-NEWBUG-02 fix: reject admission if the entry has no tokens
+    // or no hot payload. This guards against the memory-layout sensitive
+    // STATUS_ACCESS_VIOLATION observed when entry.checkpoints.clear() runs
+    // on a corrupted entry (entry pointer is valid but the entry's tokens
+    // field is empty even though it should contain 3 tokens). Returning
+    // false here prevents the crash and lets the caller's abort pattern
+    // handle the rejection cleanly.
+    if (entry.n_tokens() == 0 || entry.payload_id == 0) {
+        if (failure_reason) {
+            *failure_reason = "checkpoint entry has no tokens or no payload (evicted or invalid)";
+        }
+        n_checkpoint_admission_failures++;
+        return false;
+    }
     entry.checkpoints.clear();
     if (checkpoints.empty()) {
         return false;
@@ -4861,7 +4938,9 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
 bool hybrid_cache_controller::tx_load(server_slot & slot, const server_task & task) {
     // Stage 25: acquire the cache-state mutex once for the duration of
     // the legacy load. The recursive mutex allows nesting via the
-    // mark_payload_evicted -> demote_payload -> enqueue_demotion chain.
+    // mark_payload_evicted -> tx_demote_payload chain (Stage 28 inline
+    // demotion; the prior async enqueue_demotion chain was retired in
+    // R28-BUG-04 Phase C).
     std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
     if (!tx_guard.active) {
