@@ -853,3 +853,87 @@ Condition:
 
 Action:
 - Do Remove-Item the minimal file before create_file, otherwise create_file fails with File already exists. Verify with Get-Content path | Measure-Object -Line first to confirm file size. After full report written, run get_errors on the markdown path to confirm zero lint errors (MD032 blank-lines-around-lists, MD040 fenced-code-language, MD037 no-space-in-emphasis from underscores in C symbols like exit and endthreadex, MD047 single-trailing-newline). Append a single trailing LF if ReadAllBytes shows last byte is not 0x0A.
+
+## Improvement: verify driver Main dispatcher actually calls the implementation-phase functions
+
+Condition:
+- QA test plan or QA review of an Architect implementation review finds that a multi-phase driver script has all the per-phase functions implemented (Phase 0 / Phase 1 / Phase 2 / Phase 3 helpers) and the implementation review marks each step DONE, but the driver's Main / entry-point dispatcher does NOT actually call those functions on the full execution path (only via dedicated switches like -DryRun or -OutputEquivalenceOnly)
+
+Action:
+- Do read the Main function byte-by-byte and confirm that every phase helper invoked by the design is reachable from the full-execution code path, not just from a smoke-test switch. A Phase 2 cycle loop implemented as `Invoke-CycleLeg` that is never called from Main produces zero per-leg summary.json rows; the report emitter then writes an empty table. The "DONE" status from the implementation review is satisfied (function exists) but the contract is unmet (no rows). Record the gap as a BLOCKING finding in the QA test plan or review with the exact Main line range, the missing call sites, and a suggested Developer fix that extends Main to call the phase helpers in order. Cite the implementation review's DONE-by-function table row that missed the wiring gap. Do not trust a "DONE" status on a function alone when the dispatcher is silent on that function.
+
+## Improvement: verify cited line range matches the actual content before quoting
+
+Condition:
+- QA author drafts a test plan or review that cites a specific line range (e.g. design part-03 L64-72 for output equivalence) and uses the cited content as evidence for a row contract
+
+Action:
+- Do not trust the line range without byte-level verification. Read the cited file at the cited line range and confirm the actual content matches the cited claim. Common drift: off-by-7 to off-by-15 lines because the cited range was eyeballed against a previous session's read or against a stale copy. Cross-check with `Get-Content path | Select-Object -Skip (start-1) -First (end-start+1)` or equivalent. If the cited content does not match, edit the row to cite the correct line range before handoff. Do not block the review on a citation drift when the substance is correct and the cited range is in the same neighborhood (within ~10 lines); record the drift as an INFO finding and update the citation. Do block when the cited content is in a different section entirely.
+
+
+## Improvement: test-plan review verdict when underlying BLOCKING was fixed between authoring and review
+
+Condition:
+- A QA test-plan review session is run in a NEW fresh session (B) on a test plan authored in a prior session (A). The test plan's "Findings from prior review" section still documents a BLOCKING finding (e.g. F-01 driver contract defect) that was authored against pre-fix state. An intervening implementation-fix gate between session A and session B has resolved the BLOCKING and its review document verifies the resolution (e.g. part-08 impl-fix review PASS with byte-level verification of the driver Main dispatcher).
+
+Action:
+- Do not REWORK the test plan solely on the BLOCKING documentation in the "Findings from prior review" section. Read the implementation-fix review document and byte-level verify the driver or code in question in the current session. If the resolution is real, verdict PASS with a NON-BLOCKING finding that flags the historical documentation (e.g. F-RP-NN: "Findings from prior review" section describes pre-fix state; F-01 BLOCKING resolved per <fix-review-doc> PASS 2026-MM-DD; substance rows + PASS criteria remain executable post-fix). The test plan rows + PASS criteria are the binding contract, not the findings section. The findings section is context. Record any line-citation drifts in the findings section (e.g. cited impl log L244 vs actual content at L237) as NON-BLOCKING or INFO findings per the existing `verify cited line range matches the actual content before quoting`rule. Don't make the test-plan review session redo the work of the implementation-fix session; just verify the fix is real and continue.
+
+
+## Improvement: PowerShell here-string backtick is the escape character, not literal
+
+Condition:
+- A QA session needs to append markdown content to a file (memory entry, test report, plan)
+  using PowerShell here-string @"..."@ and the content contains literal backticks for inline
+  code spans (for example the phrase verify cited inside backticks).
+
+Action:
+- Do not put literal backticks inside @"..."@. PowerShell treats the backtick as the escape
+  character even in here-strings: a backtick followed by v becomes vertical tab (0x0B),
+  a backtick followed by n becomes LF (0x0A), a backtick followed by t becomes tab (0x09),
+  etc. The escape sequence consumes the backtick AND the next character, dropping both
+  from output. Use single-quoted here-string at-bracket-quote-quote-bracket-at (no escapes)
+  where backticks must be literal. If you must use double-quoted here-string, replace each
+  single backtick with a doubled backtick to escape it as a literal backtick.
+- After writing, verify the file with [System.IO.File]::ReadAllBytes and confirm:
+  (1) zero 0x0B vertical tab bytes where backticks should be,
+  (2) zero mid-line 0x0A LF bytes injected by backtick-n escape,
+  (3) the backtick count matches what you intended.
+- If 0x0B is found, fix byte-by-byte: locate the 0x0B, prepend a backtick (0x60), and
+  reinsert the character that was eaten (often v, n, r, t, a, b, f, 0, or e depending
+  on which escape was triggered).
+- Run git diff --check after the fix. The original here-string escape can also introduce
+  CR (0x0D) if a backtick-r was interpreted, so normalize CRLF to LF after every here-string
+  append using [System.IO.File]::ReadAllText + replace CRLF with LF + WriteAllText with
+  UTF8Encoding($false).
+
+## Improvement: cross-check driver literal flag strings against server flag registry
+
+Condition:
+- QA session executes a driver script that constructs a server argument list using literal `--<flag>` strings (for example the Stage 29 driver `compare-legacy-vs-hybrid.ps1` L88 used `--cache-cold-dir` but the actual flag registered in `common/arg.cpp:1366` is `--cache-cold-path`), and a child-process launch fails with `error: invalid argument` before the driver can produce any per-leg evidence.
+
+Action:
+- Before launching the full driver path, extract every `--` literal from the driver's `Start-Process -ArgumentList` construction and cross-check it against the server's flag registry in `common/arg.cpp`. Run:
+
+```powershell
+$literals = Select-String -Path <driver.ps1> -Pattern '"--[a-z-]+"' -AllMatches |
+    ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+foreach ($lit in $literals) {
+    $flag = $lit.Trim('"')
+    $found = Select-String -Path 'common/arg.cpp' -Pattern ([regex]::Escape($flag))
+    if (-not $found) { Write-Warning ("UNKNOWN FLAG: " + $flag) }
+}
+```
+
+- Any unknown flag is a BLOCKING driver bug, not a harness setup gap. Do NOT try to rerun around it or patch the driver in QA session. Record the exact driver line, the expected flag per `common/arg.cpp`, and the one-line Developer fix in the durable report.
+- Run the same cross-check for short flags (e.g. `-m`, `-c`, `-lv`) and env vars (`LLAMA_ARG_*`). The registry in `common/arg.cpp` lists both.
+- This rule is the post-Stage-29 follow-up to the prior F-01 Main-dispatcher finding. The implementation review verified function definitions and parameter shapes but did not trace literal flag values to the child process. A stronger implementation review grep `--` literals in the driver and cross-check each against `common/arg.cpp` registration before approving the plan.
+- Pair the cross-check with a direct server smoke test that boots the binary with the same flag list and confirms `/health` 200 within 60s. If the smoke passes but the driver fails, the bug is in the driver string construction, not the binary.
+
+## Improvement: verify driver dot-sources cover transitive wrapper dependencies
+
+Condition:
+- QA reviews an implementation fix or plan that updates a driver script (e.g., `compare-legacy-vs-hybrid.ps1`) which dots a fixed set of lib helpers, and one of those helpers is itself a wrapper that calls functions defined in another lib helper the driver never dots (transitive dependency). The wrapper's header documents its required dot-source order, but the driver ignores it. The defect is latent until QA actually exercises the wrapper's call path: when a prior BLOCKING failure short-circuits before the wrapper is invoked, the dot-source gap stays hidden.
+
+Action:
+- Do enumerate the full set of lib helpers the driver dots, then for each direct helper, recursively resolve every function the helper calls (via `Select-String -Pattern '^[a-zA-Z]+\s+function\b'` or `grep -E '^\s*[a-zA-Z-]+\s*\(\s*\{?\s*\$'`) and verify the called function is defined in either (a) a lib helper the driver dots, (b) a lib helper the calling helper dots, or (c) a PowerShell built-in. When the wrapper header documents a required dot-source order (e.g., `. .\lib\agentic-prompt-generator.ps1` first), confirm the driver honours that order. Cross-check by extracting the wrapper's actual `New-ComparisonWorkload` body and verifying each called function name resolves to a definition in the union of dot-sourced libs. Treat any unresolved transitive call as a BLOCKING driver-contract gap and classify affected rows as `BLOCKED-driver-dot-source`, not `BLOCKED-prior-failure`, so the next session surfaces it instead of inheriting it.

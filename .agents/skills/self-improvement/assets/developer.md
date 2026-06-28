@@ -451,7 +451,7 @@ Condition:
 
 Action:
 
-- Do verify each cited fact with a direct git or file command (`git log --oneline <range>`, `git grep`, `git rev-list --parents`, `git diff <ref1> <ref2> -- <path>`, `Test-Path <build-dir>/build.ninja`) before acting on it; don't propagate the prompt's numbers, paths, or expected content into the implementation log, evidence section, or merge commit message if they disagree with the actual state. Record both the prompt's claim and the actual value in the implementation entry so the next reviewer can see the discrepancy. If the build directory named in the prompt is empty (no `build.ninja`, no `bin/`, no `.vcxproj`), look for the actual populated build directory and use that, noting the substitution in the verification evidence.
+- Do verify each cited fact with a direct git or file command (`git log --oneline <range>`, `git grep`, `git rev-list --parents`, `git diff <ref1> <ref2> -- <path>`, `Test-Path <build-dir>/build.ninja`) before acting on it; don't propagate the prompt's numbers, paths, or expected content into the implementation log, evidence section, or merge commit message if they disagree with the actual state. Record both the prompt's claim and the actual value in the implementation entry so the next reviewer can see the discrepancy. If the build directory named in the prompt is empty (no `build.ninja`, no `bin/`, no `.vcxproj`), look for the actual populated build directory and use that, noting the substitution in the verification evidence. Also do verify the parent-directory prefix (leading dot vs no leading dot, e.g., `._design_docs/` vs `_design_docs/`) by listing the existing sibling design or test files BEFORE creating the new file; a brief that names a path without the leading dot for a new file under a dotted convention (`.test_reports/`, `._design_docs/`, `._test_output/`) often has a path typo, and creating the file in the wrong directory creates an orphan that the rest of the durable-doc tree does not link to. Verified 2026-06-28 (Stage 29 implementation plan): the brief said `d:\source\llama.cpp-jet\_design_docs\cache-handling-phase29-implementation.md` (no leading dot) but the design files live at `d:\source\llama.cpp-jet\._design_docs\cache-handling-phase29-design.md` (with leading dot). Created 6 files at the no-dot path, then discovered the discrepancy via `git status --porcelain` showing only the design files as untracked; had to `Move-Item` all 6 to the dot-prefix directory and update all internal relative links.
 
 ## Improvement: Real-merge build halt may mask other latent duplicates
 
@@ -470,6 +470,48 @@ Condition:
 
 Action:
 - Do classify it as a product bug in `tools/server/server-cache-hybrid.cpp` / `tools/server/server-cache-controller.cpp` demote/evict interaction, not R24-TP-01 host-capacity. The native leg passing under identical `--parallel` and `--cache-ram`-free flags proves the host can run the workload; the hybrid controller is the only thing that stalls. Verified 2026-06-25 (Stage 24 chat S02/S03 comparison, test-report-20260624-04): S02 hybrid log line 534 ends with `mark_payload` warning + cache state `10 entries, 664.422 MiB payload` vs `limits: 512.000 MiB payload`; S03 hybrid had 152 `mark_payload` warnings + 57 `evict_until_` warnings across 6003 log lines with max resident 594264536 bytes; native legs on both rows completed 2564/1539 reqs at 99.8% nonzero cache_n. The S03 unsafe-prefix fix from part-10 still held (hybrid near-prefix 0/64 nonzero cache_n), so the new failure is a separate code path, not a regression of the part-10 fix. Don't recommend fresh QA execution before the fix; the runner evidence is durable and a rerun would produce the same crash. Don't recommend runner-contract fix; the runner correctly labeled `FAIL-http-request` and preserved every required artifact with line citations.
+
+## Improvement: AST parser for PowerShell function surface when dot-source auto-runs body
+
+Condition:
+
+- When a verification step needs to confirm a PowerShell script exposes specific functions, and the script ends with a top-level invocation (e.g., a trailing `Main` line) that would auto-run on dot-source
+
+Action:
+
+- Do use `[System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)` followed by `$ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object Name` for static function extraction. Don't try to dot-source and strip the trailing invocation (the strip pattern is fragile across line-ending variations and regex mode gotchas); the AST parser is read-only, fast, and exact. Verified 2026-06-28 (Stage 29 S29-IMPL-FIX-01 self-test): the user-provided command `pwsh -NoProfile -Command "& { . '.\._design_docs\cache-handling-test-scripts\compare-legacy-vs-hybrid.ps1'; Get-Command -CommandType Function | Select-Object Name }"` failed because the driver ends with `Main` and dot-source auto-runs `Main`, which crashed with `BLOCKED-preflight: {binary_exists:false, ...}` and exited 1 before the function enumeration could run. The AST approach confirmed all 4 required functions (`Invoke-Phase1OutputEquivalence`, `Invoke-CycleLeg`, `Invoke-Phase05WorkloadBuild`, `Write-Stage29Report`) are present in 14 total exposed functions, with exit code 0. Don't trust a dot-source smoke test when the target script has trailing top-level statements.
+
+## Improvement: Cross-check driver CLI flags against server-side mode-coupled validation
+
+Condition:
+
+- When a Driver / test-runner script constructs a server ArgumentList that contains CLI flags which the server validates against runtime state (e.g., cache mode, parallelism, model capability), and the prior review/fix sessions only verified the flag name against `common/arg.cpp` registration without checking the validation blocks in `tools/server/server-context.cpp` (or the equivalent server entry point)
+
+Action:
+
+- Do grep each `--` literal in the driver ArgumentList and trace it through (a) `common/arg.cpp` for registration and (b) any mode-coupled or runtime-state validation in `server-context.cpp` (typically blocks of `if (param_X != default && state_Y != MODE_Z) SRV_ERR(...) return false;`). Verified 2026-06-29 (Stage 29 S29-IMPL-FIX-03, triggered by F-29-EXEC-04 in test-report-20260628-02-stage29-02.md): the prior S29-IMPL-FIX-02 fixed the `--cache-cold-dir` to `--cache-cold-path` typo but did not gate the cold-path flags on `$Mode -eq 'hybrid'`; the server's validation at `tools/server/server-context.cpp:611-625` rejects both `--cache-cold-max-mib` and `--cache-cold-path` when `cache_mode_val != CACHE_MODE_HYBRID`, misclassifying all 11 driver-driven rows as BLOCKED-driver-cold-mode. The fix was a 3-line edit to branch the ArgumentList on `$Mode -eq 'hybrid'`. The QA report's "Self-improvement note" already flagged this gap; the QA report author's pending memory update is fulfilled by this improvement. Don't stop at "flag name registered in arg.cpp"; also check the validation blocks in server-context.cpp for each flag.
+
+## Internal Post-Task Record (2026-06-29, Stage 29 S29-IMPL-FIX-03)
+
+Task completed: Yes (3-line fix at driver L88 + part-12 pointer + entry doc append).
+
+Effectiveness assessment: The fix landed in one rework pass. Verified the bug location on disk (driver L86-93, not the user-cited L167 which is a call site inside Invoke-CycleLeg) by reading the file before editing; the developer review test-report-20260628-02-stage29-02-developer-review.md already flagged the L167 vs L86-88 discrepancy. The fix applied exactly as the user brief specified (branch `$args` construction on `$Mode` so cold-path flags are appended only when `$Mode -eq 'hybrid'`; hybrid arms keep both flags). PowerShell AST parse returned 0 errors; `cache-cold` SimpleMatch grep across driver + 5 lib helpers confirmed only the new conditional branch (L90) carries the `--cache-cold-max-mib` and `--cache-cold-path` CLI literals; L23 still carries the `$CacheColdPath` parameter default (`'D:\tmp\cache-cold-stage29'`), which is a directory path string, not a CLI flag. Driver grew from 243 to 246 LF (+3 from the if-block), under the 300-cap. Byte-level audit: LF=246, CR=0, no BOM, last 0x0A, no trailing whitespace, no non-ASCII. `git diff --check` exit 0.
+
+Implementation log entry doc append: started at 297 LF, +4 LF initial draft pushed to 301 (1 over cap), trimmed to a single consolidated paragraph (header + blank + 1 long paragraph) to land at 297 LF (same as pre-edit). Final state: 297 LF, CR=0, no BOM, last 0x0A, no trailing whitespace, no non-ASCII, `git diff --check` exit 0. Used the existing "Split near-limit planning docs early" improvement's recipe: aim for a buffer below the cap and confirm with `Measure-Object -Line` (or LF count) immediately after each trim.
+
+part-12 pointer file: create_file initially wrote CRLF (164 CRLF sequences, 0 bare LF, last byte 0x2E, missing trailing newline), which the post-write markdown lint surfaced as MD047. Fixed with the existing "Verify untracked documentation edits" recipe: re-read, replace CRLF with LF (`-replace` with backtick-r-backtick-n on both sides), append trailing LF if missing, write with the BOM-skipping UTF8Encoding overload to skip BOM, then re-verify with byte-level audit. Final state: 165 LF, CR=0, no BOM, last 0x0A, no trailing whitespace, no non-ASCII, `git diff --check` exit 0.
+
+Self-test (per user brief): `-DryRun` was NOT executed live; the Manager brief said "Do NOT execute a full live run." AST parse and grep verification substituted for the live run. The existing "AST parser for PowerShell function surface when dot-source auto-runs body" improvement correctly predicted that dot-source would auto-run `Main` and crash on preflight, so AST was used instead.
+
+Improvement outcome candidate:
+- Condition: When applying a driver-script fix that branches a child-process ArgumentList on a runtime-mode parameter (e.g., `$Mode`, `$Backend`, `$Device`), and the prior code review only verified each flag's name in `common/arg.cpp` without checking the server-side mode-coupled validation blocks
+- Action: Do grep each `--` literal in the ArgumentList and trace it through (a) the arg registration in `common/arg.cpp` AND (b) any mode-coupled or runtime-state validation in `tools/server/server-context.cpp` (or the equivalent entry point); for each flag that is mode-gated, wrap it in a conditional branch that matches the server's gating predicate (e.g., `if ($Mode -eq 'hybrid')`)
+
+Similar memory check: Similar improvement found: No. Existing improvements cover AST parser for auto-run scripts, CRLF/BOM hygiene on untracked docs, and split near-limit planning docs early, but none cover the "verify flag against server-side mode-coupled validation" gap. The QA report's "Self-improvement note" already documented this exact gap as pending; this entry fulfills it.
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Cross-check driver CLI flags against server-side mode-coupled validation".
 
 ## Internal Post-Task Record (2026-06-18, Stage 20 implementation plan)
 
@@ -2152,3 +2194,112 @@ Improvement outcome candidate:
 Similar memory check: Similar improvement found: No. "Cross-merge integration exposes partial function bodies" and "Cross-merge rejects caveman's degraded() fallback" cover merge-specific scenarios, not staged deletion + re-routing.
 
 Decision: Add new improvement.
+
+## Internal Post-Task Record (2026-06-28, Stage 29 implementation plan)
+
+Task completed: Yes (implementation plan only; no code, tests, runner changes, or commits).
+
+Effectiveness assessment: Stage 29 implementation plan authored as 6 files (1 entry + 5 part files, 1220 lines total). Entry doc 233 lines, part-01a (steps 1-5) 251 lines, part-01b (steps 6-10) 236 lines, part-02 (affected files) 122 lines, part-03 (evidence plan) 206 lines, part-04 (risks and OQ resolutions) 172 lines. All under 300-line cap, LF-only UTF-8, no BOM, no non-ASCII, no trailing whitespace, ends with LF. All cross-file links resolve. All design files cited (entry + 11 part files + part-12 review + part-13 re-review) match the actual `._design_docs/cache-handling-phase29-design/` layout. All Stage 25-28 invariants preserved (I-25-01..03, F-21-EXEC-01, F-21-RERUN-01, F-22-DR-01, D-EXEC-26-01..02, D-EXEC-27-08 at `server-cache-hybrid.cpp:3396` historical, R28-BUG-02). 10 ordered steps S29-IMPL-01..10 with preconditions, postconditions, evidence paths, wall-clock estimates, and per-step affected files. 2 implementation-specific risks (R29-IMPL-01..02) and 3 re-reviewer INFO resolutions (C-01..03) recorded in part-04. 1 open question (OQ-29-01) routed to Manager. The plan preserves the design-correct wrapper script (200 lines, not modified) and the 12 design files (not modified). No code, tests, runner scripts, or test plan were modified.
+
+One execution gap: the initial file creation used the brief's path `d:\source\llama.cpp-jet\_design_docs\cache-handling-phase29-implementation.md` (no leading dot) but the design files live at `d:\source\llama.cpp-jet\._design_docs\cache-handling-phase29-design.md` (with leading dot). Created all 6 files in the wrong directory; discovered via `git status --porcelain` showing only the design files as untracked. Recovered by `Move-Item` of all 6 files to the dot-prefix directory, then verified link integrity with a relative-path resolution script. The post-move byte-level audit and stale-reference check confirmed all 6 files are now in the correct directory and all cross-file links resolve.
+
+Improvement outcome candidate:
+
+- Condition: When authoring durable planning or implementation documents under a dotted convention (`.test_reports/`, `._design_docs/`, `._test_output/`) and the brief names a path without the leading dot
+- Action: Do list the existing sibling files in the dotted directory FIRST with `Get-ChildItem -Path '._dir' -ErrorAction SilentlyContinue` or `cmd /c 'dir /B ._dir'` before creating new files; if the sibling files exist, use the dotted path even if the brief omits the dot. Don't trust the brief's exact path string when the existing repo state has a consistent dotted convention; the brief is more likely to have a path typo than the existing repo to be missing the dot. Verified 2026-06-28 (Stage 29 implementation plan): `git status --porcelain` showed `?? ._design_docs/cache-handling-phase29-design.md` and `?? ._design_docs/cache-handling-phase29-design/` (dotted) but my newly created files were at the no-dot path, requiring 6 Move-Item operations after the fact.
+
+Similar memory check: Similar improvement found: Partial. The existing "Verify prompt facts against repo state before acting" improvement (just strengthened above with this case) covers the general "verify before acting" principle but does not specifically cover the dotted-vs-non-dotted directory prefix. The strengthened version of that improvement now references this Stage 29 case as the verification evidence. No new improvement needed; the strengthened existing improvement is sufficient.
+
+## Improvement: Use [Environment]::Exit(N) for script exit codes when invoked via & in -Command
+
+Condition:
+
+- When running a PowerShell script via `pwsh -NoProfile -Command "& '.\path\to\script.ps1' -Arg"` from a parent shell, and the script uses `exit N` inside a try/catch or function scope to set a non-zero exit code
+
+Action:
+
+- Do use `[Environment]::Exit(N)` instead of `exit N` to ensure the exit code propagates back to the parent shell. The plain `exit` statement inside an `&` invocation may exit the script but the exit code can be lost or default to 1, regardless of the value passed. Verified 2026-06-28 (Stage 29 implementation, `-OutputEquivalenceOnly` smoke test): the script's catch block used `exit 4` and `exit 0`, but `$LASTEXITCODE` in the parent shell was always 1 regardless of which branch ran. After replacing all four `exit N` calls with `[Environment]::Exit(N)`, the parent shell's `$LASTEXITCODE` correctly showed 0 for the success branch and 4 for the BLOCKED-server-not-running classification branch. Don't rely on `exit N` inside script functions or try/catch blocks; the parent shell may not see the value. Use `[Environment]::Exit(N)` for explicit, predictable exit code propagation.
+
+## Internal Post-Task Record (2026-06-28, Stage 29 implementation)
+
+Task completed: Yes (implementation session, 7 durable files + 3 non-durable artifacts).
+
+Effectiveness assessment: Authored the Stage 29 driver plus 4 lib helpers per the Manager brief (which diverged from the approved plan's helper names; documented in the implementation log). Driver: 228 lines under 300-line cap; helpers 81-101 lines each; README 176 lines; entry doc log section brought to exactly 300 lines after multiple trims. All 7 durable files LF-only UTF-8 no BOM, no trailing whitespace, no non-ASCII, last byte 0x0A. `git diff --check -- <each>` clean. Dot-source smoke test confirmed all 7 helper functions exposed. -DryRun smoke: exit 0 with preflight JSON. -OutputEquivalenceOnly smoke: exit 4 with BLOCKED-server-not-running classification (after [Environment]::Exit(N) fix). Wrapper script `lib/compare-legacy-vs-hybrid-workload.ps1` NOT modified (per design gate R29-12). No production code, test code, or runner scripts modified.
+
+Two execution gaps observed and fixed during the session:
+
+1. Initial create_file calls produced CRLF on Windows for all 5 new files (the wrapper was LF because it was authored in a prior session and was already on disk). Discovered via byte-level audit showing CR=81 for a file with 81 lines (CR count equals line count = CRLF). Fixed by [System.IO.File]::WriteAllText with New-Object System.Text.UTF8Encoding($false) and -replace "`r`n", "`n" pass; the existing "Preserve local line endings in patch edits" improvement recipe applies but the trigger is broader: create_file on Windows can write CRLF for .ps1, .ps1, and .md files alike. The byte-level audit caught this before any handoff.
+
+2. Initial -OutputEquivalenceOnly used plain `exit N` statements which did not propagate exit code 4 to the parent shell ($LASTEXITCODE was 1). Fixed by replacing all `exit N` with `[Environment]::Exit(N)`. New improvement recorded above.
+
+The implementation handoff is to Manager implementation-gate review. The Manager brief's helper-name divergence from the approved plan is documented in the entry doc's "Divergence from approved plan" subsection with a non-blocking N-INFO classification.
+
+## Improvement: 300-line cap + lint-forced blank lines around headings forces part-file split, not just trim
+
+Condition:
+
+- When appending a new subsection (with header + paragraph + links) to a durable doc that is already at the 300-line cap, and the markdown lint rule MD022 requires blank lines around every heading so a single subsection takes 5-7 lines (header + blank above + paragraph + blank + next header + ...)
+
+Action:
+
+- Do split into a new part file from the start instead of trying to trim the new content; trim attempts hit MD031/MD022/MD047 conflicts that force re-adding the blank lines the trim removed. Move the new section into part-NN-<slug>.md and replace the in-doc content with a 2-3 line pointer that links to the new part file. Verified 2026-06-28 (Stage 29 S29-IMPL-FIX-02): entry doc was at 300 lines (cap). A 5-line S29-IMPL-FIX-02 pointer section pushed it to 305; a 7-line subsection pushed it to 307; trimming blank-line-around-headings to get under 300 triggered MD022 errors that re-forced the blank lines. Splitting into part-11-impl-fix-driver-cache-cold-flag-pointer-20260628.md and replacing the entry-doc section with a 2-line pointer brought the entry doc back to 297 lines and the new part file to 33 lines, both well under cap. Don't try to inline the section into an at-cap entry doc; the markdown lint's blank-line requirements and the 300-line cap are in tension. Move the content out and link it from the entry doc.
+
+## Internal Post-Task Record (2026-06-28, Stage 29 S29-IMPL-FIX-02)
+
+Task completed: Yes (one-character fix landed, two durable docs touched).
+
+Effectiveness assessment: Applied the Manager-identified single-character BLOCKING fix at compare-legacy-vs-hybrid.ps1:88 (--cache-cold-dir to --cache-cold-path). Verified with grep_search (0 remaining matches under cache-handling-test-scripts/), Get-Content on line 88 (shows --cache-cold-path), and scoped git diff --check -- <touched paths> (exit 0). Driver still 243 lines (under 300 cap), LF-only, no BOM, no trailing whitespace, no non-ASCII. The fix log pointer went into a new part-11 file because the entry doc was already at the 300-line cap; initial in-doc attempts triggered MD022 blank-line-around-headings requirements that pushed the doc to 305-307 lines and required a part-file split (new improvement recorded above). No production code, test code, or test plans modified. Constraint compliance verified for ASCII/LF/no-BOM/no-trailing-whitespace on all three touched files (driver, entry doc, part-11).
+
+## Improvement: Driver review must cross-check each -- literal against server mode-coupled validation
+
+Condition:
+
+- When reviewing a PowerShell driver or test runner that constructs a server `ArgumentList` (e.g., the Stage 29 `compare-legacy-vs-hybrid.ps1` `Start-Stage29Server` function), and the server has mode-coupled or context-coupled validation blocks in `tools/server/server-context.cpp` that reject certain flags outside a specific mode (e.g., the cache-mode coupling at server-context.cpp:611-625 rejects `--cache-cold-max-mib` and `--cache-cold-path` when `cache_mode_val != CACHE_MODE_HYBRID`)
+
+Action:
+
+- Do grep for every `--` literal in the driver and trace each one through (a) `common/arg.cpp` registration to confirm the flag name exists, and (b) the mode-coupled / context-coupled validation blocks in `tools/server/server-context.cpp` to confirm the flag is accepted in every mode the driver invokes. Don't rely on byte-level review of the function definition and parameter shapes alone; the Stage 29 driver at L86-88 has correct syntax and correct parameter names but still produces an ArgumentList that the server rejects because the cold-path flags are appended unconditionally across modes. Verified 2026-06-29 (Stage 29 S29-IMPL-FIX-02 follow-up, F-29-EXEC-04): the prior Developer fix session verified the typo fix (`--cache-cold-dir` to `--cache-cold-path`) but did not cross-check the now-correct cold-path flags against the server's mode-coupled validation. The result was a second BLOCKING bug discovered by QA execution on 2026-06-28 (F-29-EXEC-04), one day after the first fix, blocking 11 of 14 test rows. The QA report notes this is the third driver bug at this stage (after F-01 Main dispatcher and F-29-EXEC-01 flag-typo) and explicitly recommends the cross-check as a stronger review pattern. Also, do treat prompt-cited line numbers (e.g., "driver L167" in a Manager brief) as approximate; the actual bug location at L86-88 differed from the brief's citation, and citing the verified line numbers in the review is required for the audit trail.
+
+## Internal Post-Task Record (2026-06-29, Stage 29 test-results review of QA report -02)
+
+Task completed: Yes (REWORK review authored at test-report-20260628-02-stage29-02-developer-review.md; 14 rows accepted, 0 overridden; 0 product bugs found; closure deferred pending ~3-line driver fix and QA re-execution).
+
+Effectiveness assessment: Followed the existing "Test-results review gate classification" improvement to classify each non-pass item (11 driver-cold-mode as driver defects, 1 pytest env as environment gap, 1 coverage as tooling gap). Followed the existing "Reconcile test report prose summary count against per-row sums" improvement to verify QA report's per-row sums (1 PASS, 1 PARTIAL, 12 BLOCKED) matched the prose summary (no counting discrepancy to flag). Followed the existing "Verify prompt facts against repo state before acting" improvement to verify the bug location (prompt said L167, actual is L86-88 per `grep -n cache-cold-max-mib compare-legacy-vs-hybrid.ps1`), the server validation contract (read tools/server/server-context.cpp:611-625 directly to confirm three checks), and the test_reports path (prompt said `_design_docs` no leading dot, actual is `._design_docs` with leading dot per `list_dir`). Followed the existing "Plain ASCII scan on humanizer-cleaned report tables" improvement by using only straight quotes and hyphens (no em dashes or smart quotes; verified 0 non-ASCII bytes post-conversion). Hit the existing "Preserve local line endings in patch edits" and "Verify untracked documentation edits" improvements exactly: `create_file` produced a CRLF file (CR=273, LF=273, last bytes 0x0D 0x0A); the byte-level audit caught it; converted CRLF to LF with `New-Object System.Text.UTF8Encoding($false)` and `-replace "`r`n", "`n"`; re-verified to CR=0, LF=273, last byte 0x0A, no BOM, no trailing whitespace, no non-ASCII. Final file is 273 LF (well under 300 cap), git diff --check scoped to the file is clean (exit 0). Recorded the third driver-bug pattern as a new improvement (above) because the prior two existing entries (driver function definition review, parameter shape review) were not sufficient to catch mode-coupled flag validation gaps.
+
+Improvement outcome candidate:
+
+- Condition: When authoring a Developer test-results review for a test report that has 12+ rows with consistent BLOCKED-driver-cold-mode or BLOCKED-driver-bug classifications across most rows
+- Action: Do still walk every row individually with explicit evidence; do not summarize "11 rows are driver defects" without naming each row ID and citing the per-row evidence path; the per-row table is the auditable surface that downstream handoffs (Manager closure decision, document-index status row, tracker update) cite, and a one-line summary without per-row citations can be paraphrased incorrectly downstream. Similar memory check: existing "Test-results review gate classification" covers classification; no existing improvement covers the per-row evidence citation discipline.
+
+Decision: Skip (low value; existing per-row review convention in the test-results-review template is sufficient and adding a new improvement for it would duplicate the existing convention).
+
+Memory update: Final improvement outcome stored under "Improvement: Driver review must cross-check each -- literal against server mode-coupled validation" (new entry). Post-task record appended below.
+
+## Improvement: Byte-verify new untracked markdown immediately after `create_file` on Windows
+
+Condition:
+
+- When creating a new untracked markdown file via `create_file` (or `multi_replace_string_in_file` that creates a new file) on Windows, especially for durable planning docs under `._design_docs/` (e.g., part files in `._design_docs/cache-handling-phaseN-implementation/`)
+
+Action:
+
+- Do run the byte-level CR/LF check in the same tool-call batch as the `create_file`, BEFORE any subsequent `replace_string_in_file` or further `create_file` calls; the aggregate post-task audit catches the issue but adds an extra round-trip. The check is: CR=0, LF matches `(Get-Content).Count` line count, BOM=False, LastByte=0x0A, trailing whitespace=0, non-ASCII=0. The fix recipe for CRLF files is documented in the existing "Preserve local line endings in patch edits" improvement: read the file, strip BOM if present (`if ($content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }`), replace CRLF with LF (`$content -replace "CRLF", "LF"` where CRLF and LF denote the actual CR and LF bytes via a `replace CRLF with LF` operation; in PowerShell this is `$content -replace [char]13 + [char]10, [char]10`), and write back with `New-Object System.Text.UTF8Encoding($false)`. Verified 2026-06-29 (S29-IMPL-FIX-04): `create_file` of `part-14-impl-fix-driver-dot-source-20260629.md` produced a 6602-byte file with CR=112, LF=112 (CRLF, no BOM); the line count and `Get-Content` reported 112 lines, so the issue was not visible from line counting alone. Caught by the post-batch byte-level audit, fixed in one round-trip with the documented recipe (6490 bytes, CR=0, LF=112). Don't defer the byte-level check to the post-task aggregate audit; the immediate check catches the issue in the first batch and avoids the second round-trip. Don't assume `create_file` produces LF on Windows; it produces CRLF for markdown content unless the host forces LF.
+
+## Internal Post-Task Record (2026-06-29, S29-IMPL-FIX-04 driver dot-source)
+
+Task completed: Yes.
+
+Effectiveness assessment: The one-line fix at driver L40-44 (insert `. (Join-Path $libDir 'agentic-prompt-generator.ps1')` before the wrapper dot-source) was correct. The pre-change file was 246 LF; the post-change file is 247 LF (+1 line). The fix restores the wrapper's documented dot-source order. The verification steps all passed: AST parse 0 errors, `git diff --check -- <driver>` exit 0, `-DryRun` exit 0 with preflight `status: PASS` (all 5 gating sub-checks PASS), grep for `New-AgenticChatPrompt` returns 9 matches with 0 in the driver (confirms the function is loaded by dot-source, not duplicated). The pointer part file (`part-14-impl-fix-driver-dot-source-20260629.md`) was created with CRLF (CR=112) by `create_file` on Windows; caught by the post-batch byte-level audit and fixed with the existing "Preserve local line endings in patch edits" recipe (UTF8Encoding($false) + replace CRLF with LF). The fix did not need a full live run; the Manager brief explicitly said "Do NOT execute a full live run." No code, test, runner, design, or test plan was modified; only the driver (untracked), the entry doc (untracked append), and the new part-14 file (untracked) were touched. All 3 files are LF-only, no BOM, no trailing whitespace, no non-ASCII.
+
+Improvement outcome candidate:
+
+- Condition: When creating a new untracked markdown file via `create_file` on Windows
+- Action: Do run the byte-level CR/LF check in the same tool-call batch as the `create_file`, before any subsequent `replace_string_in_file` or `create_file` calls
+
+Similar memory check:
+
+- Similar improvement found: Partial. The existing "Verify untracked documentation edits" covers the byte-level check itself, and the existing "Preserve local line endings in patch edits" covers the fix recipe, but neither covers the TIMING aspect (immediate vs deferred). The new improvement is distinct because it makes the check proactive in the same tool batch rather than deferred to a post-task aggregate audit.
+- Existing improvement: "Verify untracked documentation edits" (the audit step) and "Preserve local line endings in patch edits" (the fix recipe).
+- Decision: Add new improvement focused on the timing.
+
+Memory update: Final improvement outcome stored under "Improvement: Byte-verify new untracked markdown immediately after `create_file` on Windows" (new entry, above this post-task record).
