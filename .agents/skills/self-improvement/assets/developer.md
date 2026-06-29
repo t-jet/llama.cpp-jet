@@ -1,5 +1,25 @@
 # Developer improvement memory
 
+## Improvement: PowerShell hashtable property access can return padded string under redirected execution context
+
+Condition:
+
+- When a PowerShell driver script returns a hashtable from a function (e.g., `return @{ workload = 'D:\path'; equivalence = 'D:\path' }`), and the caller accesses hashtable properties (e.g., `$wl.workload`) and passes them as arguments to a downstream cmdlet or external process, and the driver is invoked under `Start-Process pwsh -ArgumentList @('-NoProfile','-File',$driver) -RedirectStandardOutput $mainLog`
+
+Action:
+
+- Do assign `$wlPath = [string]$wl.workload` and use the explicit local variable at every downstream call site; the `[string]` cast normalizes the type and the explicit local bypasses any hashtable-scope or pipe-scope interaction that surfaces only under redirected execution. Verified 2026-06-29 (Stage 29 S29-IMPL-FIX-07, part-22): QA -09 part-21 captured `main.stdout.log` line 1 as `Workload built at   D:\...` (3 spaces at indices 17-19 = 0x20 0x20 0x20); the Manager's standalone probe showed `$wl.workload` returns a clean string in isolation, so the whitespace only surfaces when the path argument flows through `Get-Content -LiteralPath $WorkloadPath` inside a child function under redirected stdout. Driver died with `Cannot find drive. A drive with the name '  D' does not exist.` Fix: replace all 4 `Invoke-CycleLeg -WorkloadPath $wl.workload` arguments with `-WorkloadPath $wlPath` and add the `[string]` cast at the assignment site. Don't trust standalone probe results alone when the failing path runs under Start-Process redirection; sidestep the question with an explicit local variable assignment.
+
+## Improvement: Brief line numbers drift when prior session edits land first
+
+Condition:
+
+- When a Manager brief specifies line numbers from a stale read of the file (e.g., "Current L440-442") but the file's actual current lines differ (e.g., L229-232) because prior S29-IMPL-FIX-XX edits have already landed in the worktree
+
+Action:
+
+- Do re-read the file from disk with line numbers and locate the actual current line range before applying edits; rely on the brief's `oldString` content as the real anchor, not the line numbers, and confirm the text matches the live file before using `replace_string_in_file`. Verified 2026-06-29 (Stage 29 S29-IMPL-FIX-07): brief said "Current L440-442 (Main dispatcher)" but actual lines were L229-L232 after the pre-existing S29-IMPL-FIX-06 diff landed (4 edits adding `-MaxIterations 200 -SizeClass '2k'` to two `New-ComparisonWorkload` calls); the `oldString` content matched L229-L232 verbatim so the edit succeeded via text matching. Don't reject a brief because line numbers drifted; verify the text matches live content and proceed.
+
 ## Improvement: NDEBUG-silenced asserts in new regression tests gate preconditions, not test results
 
 Condition:
@@ -2303,3 +2323,73 @@ Similar memory check:
 - Decision: Add new improvement focused on the timing.
 
 Memory update: Final improvement outcome stored under "Improvement: Byte-verify new untracked markdown immediately after `create_file` on Windows" (new entry, above this post-task record).
+
+## Internal Post-Task Record (2026-06-29, Stage 29 S29-IMPL-FIX-05)
+
+Task completed: Yes (5-line plumbing fix, wrapper + driver + 2 docs updated).
+
+Effectiveness assessment: Plumbed `-MaxIterations` through wrapper signature (default 200) and both `New-AgenticChatPrompt` call sites; driver passes 200 for main workload and 50 for output equivalence workload. Caught the brief's line-ref discrepancy before editing (brief said L107-118 / L187 but actual disk state had L53-66 / L106+L142) by reading disk before each edit; recorded the discrepancy in the implementation log paragraph update so the next reviewer can see what the brief expected vs what was actually edited. Caught the `create_file` CRLF issue on part-15 (LF=164, CR=164) and converted to LF-only using the existing recipe before declaring done. AST parse clean across all 3 .ps1 files (0 errors, function surface unchanged). Scoped `git diff --check` exit 0. All 4 files under caps: wrapper 203/300, driver 247/300, implementation log 297/300 (3 LF buffer from prior S29-IMPL-FIX-03 trim), part-15 164/300. ASCII-only, LF-only, no BOM, no trailing whitespace, no non-ASCII.
+
+Improvement outcome candidate:
+
+- Condition: When a Manager or user brief cites specific line numbers in source files (signature, call site, driver call) and the brief is treated as authoritative for the edit shape
+- Action: Do read the cited line ranges from disk BEFORE applying any edit; if the cited line numbers don't match actual disk state, edit at the actual locations AND record the discrepancy (brief line refs vs actual locations) in the implementation log so the next reviewer can trace the brief's intent to the actual edit
+
+Similar memory check: Similar improvement found: Yes. The existing "Verify prompt facts against repo state before acting" improvement (verified 2026-06-28 Stage 29 implementation plan) already covers verifying cited facts (line numbers, paths) with direct file reads before acting. The post-fix record I wrote in the implementation log paragraph is exactly the "Record both the prompt's claim and the actual value" guidance from that existing improvement.
+
+- Decision: No update. Existing improvement covers this case; I followed its guidance (verified line refs, recorded discrepancy in log).
+
+Memory update: No new entry. The existing "Verify prompt facts against repo state before acting" improvement already enforces this behavior; the discrepancy I recorded in the implementation log paragraph is the artifact the improvement prescribes.
+
+## Improvement: Brief line numbers for fix targets can drift; disambiguate by surrounding code context
+
+Condition:
+- When a Manager/QA brief specifies line numbers for a one-line fix that targets one of multiple call sites with the same parameter pattern in the same file (e.g., brief says "L292 already has `-MaxIterations 200`; fix L294 which has `-MaxIterations 50`")
+
+Action:
+- Do verify BOTH line locations on disk with a byte-level read BEFORE applying the fix; brief line numbers can drift by +/- N lines (this case: brief L292/L294, disk L147/L149, off by 145). Use surrounding code context (variable names like `$OutputEquivalencePrompts` vs `$RequestCount`, function arguments, comments) to make the `replace_string_in_file` match unique, not the brief's line number. Verify the change preserves LF count (a parameter value change should not add or remove lines) and that the AST parse is clean. Verified 2026-06-29 (Stage 29 S29-IMPL-FIX-06): brief L292/L294 was off by 145 lines; targeting by the equivalence call site's unique variables (`$OutputEquivalencePrompts` + `$eqPath`) made the replace unambiguous, LF count stayed at 247 (only the parameter value `50` -> `200` changed on the same line). Don't trust brief line numbers alone; verify with disk read and use unique surrounding context.
+
+## Internal Post-Task Record (2026-06-29, Stage 29 S29-IMPL-FIX-06)
+
+Task completed: Yes (one-line fix at driver L149 `-MaxIterations 50` -> `-MaxIterations 200`; entry doc +1 LF paragraph; part-15 +4 LF follow-on section).
+
+Effectiveness assessment: Fix landed in one pass. Verified disk state before editing; brief line numbers (L292/L294) were off by 145 lines from disk (L147/L149). Used surrounding code context (`$OutputEquivalencePrompts` + `$eqPath` on the equivalence path vs `$RequestCount` + `$wlPath` on the main path) to disambiguate the replace target. Driver LF stayed at 247 (only the parameter value changed, no line added). AST parse clean (0 errors). Entry doc: 298 -> 299 LF (under 300 cap). part-15: 164 -> 168 LF (well under cap). Grep confirmed 0 `-MaxIterations 50` matches and 2 `-MaxIterations 200` matches (both driver call sites). `git diff --check` exit 0. No live run per Manager brief. Follow-on section appended to existing part-15 (not a new part file) because entry doc was already at 298 LF (only 2 LF below the 300 cap); a new part-17 pointer file would have required adding a 2nd cross-reference paragraph to the entry doc and risked pushing it over the cap.
+
+Improvement outcome candidate:
+- Condition: When a brief specifies line numbers for a one-line fix targeting one of multiple call sites with the same parameter pattern in the same file
+- Action: Do verify both line locations on disk with a byte-level read before applying the fix; use surrounding code context (variable names, function arguments) to make replace_string_in_file unique, not the brief's line number
+
+Similar memory check:
+- Similar improvement found: Partial. The existing "Verify prompt facts against repo state before acting" covers general factual verification (paths, build directories, commit counts) but does not specifically cover line-number drift for a fix target. "Replace stale test-report references" covers stale report IDs. No existing improvement covers "brief line numbers for fix target are stale; disambiguate by content".
+
+Decision: Add new improvement.
+
+Memory update: Final improvement outcome stored under "Improvement: Brief line numbers for fix targets can drift; disambiguate by surrounding code context".
+
+## Internal Post-Task Record (2026-06-29, Stage 29 S29-IMPL-FIX-06 SizeClass)
+
+Task completed: Yes (4-edit fix: wrapper SizeClassMap 2k entry + wrapper default 2k + agentic lib ValidateSet 2k + driver -SizeClass 2k on both New-ComparisonWorkload call sites; entry doc +2 LF paragraph; new part-18 pointer file at 176 LF).
+
+Effectiveness assessment: Fix landed in one multi-replace pass. AST parse clean on all 3 modified scripts (0 errors). -DryRun with model+server passed: exit 0, preflight status PASS. git diff --check exit 0 on all 5 touched paths. SizeClass grep returned expected 17 matches across the 3 .ps1 files. Wrapper: 203 -> 204 LF (+1 for the new SizeClassMap entry). Agentic lib: 308 LF unchanged (ValidateSet is a single-line edit; pre-fix 308 was already over 300 from a prior session). Driver: 247 LF unchanged (-SizeClass 2k appended to existing call lines). Entry doc: 298 -> 300 LF (at the 300 cap, +2 for blank line + new paragraph). part-18: 176 LF (under 300 cap).
+
+Two specific execution gaps:
+
+1. create_file on Windows produced part-18 with CRLF line endings (CR=176, LF=176). The existing Verify untracked documentation edits memory already covers this case with a 2026-06-18 verified example. I deferred the byte-level check to the end-of-task summary instead of running it immediately after create_file. The fix recipe (replace CRLF with LF, save with UTF8Encoding($false)) worked, but the LF conversion was a separate pass after the summary surfaced CR=176.
+
+2. Entry doc was at 298 LF (2 below the 300 cap). The existing Split near-limit planning docs early memory says to aim for at least a 5-10 line buffer below the cap instead of landing exactly on 300, because later wording fixes can push it over. I appended a 2-line entry (blank + content), landing exactly at 300 with no buffer. A future typo fix or wording tweak will push it over 300 and require splitting.
+
+Improvement outcome candidate:
+- Condition: When creating a new untracked durable doc via create_file on Windows as part of a multi-file fix session
+- Action: Do run the byte-level CRLF/LF check on the new file as the first verification step after create_file completes, before any other verification or summary check; if the file is CRLF, do the LF conversion before continuing to the next file or summary
+
+Improvement outcome candidate:
+- Condition: When a session is appending a new entry to a durable doc that is already at 295+ LF
+- Action: Do prefer part-file-only updates (point from a short one-line entry to a new part file) or split the doc first; do not land the new entry at exactly 300 LF because any future wording fix will push it over the cap and force an emergency split mid-session
+
+Similar memory check:
+- Similar improvement found: Yes (both behaviors are reinforced by existing entries)
+- Existing improvement 1: Verify untracked documentation edits - already documents the CRLF case with a 2026-06-18 verified example; my session reinforces the recipe (the existing Preserve local line endings in patch edits improvement has the fix recipe; the verify entry has the detect recipe)
+- Existing improvement 2: Split near-limit planning docs early - already documents the 5-10 line buffer rule; my session reinforces the rule by hitting exactly 300
+- Decision: Add new entries to make the timing explicit (first verification step, not deferred) and the threshold explicit (295+ LF triggers part-file-only or split first)
+
+Memory update: Final improvement outcomes stored under Improvement: create_file CRLF on Windows needs immediate byte-level check and Improvement: doc at 295+ LF needs part-file-only updates or split first.

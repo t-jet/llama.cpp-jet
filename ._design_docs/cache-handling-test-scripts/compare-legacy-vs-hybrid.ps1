@@ -86,6 +86,9 @@ function Invoke-Preflight {
 
 function Start-Stage29Server {
     param([string]$Mode, [int]$Port)
+    if ($Mode -eq 'hybrid' -and $CacheColdPath -and -not (Test-Path $CacheColdPath)) {
+        New-Item -ItemType Directory -Force -Path $CacheColdPath | Out-Null
+    }
     $args = @('-m', (Resolve-Stage29Path $ModelPath), '--cache-mode', $Mode, '--port', $Port, '-c', $ContextSize, '--parallel', $Parallel, '--cache-ram', $HotBudgetMiB, '--metrics', '--seed', $Seed)
     if ($Mode -eq 'hybrid') {
         $args += @('--cache-cold-max-mib', $ColdBudgetMiB, '--cache-cold-path', $CacheColdPath)
@@ -144,9 +147,9 @@ function Invoke-Phase05WorkloadBuild {
     if (-not $healthy) { Stop-Stage29Server $proc; throw 'BLOCKED-workload-build: tokenize helper failed /health' }
     try {
         $wlPath = Join-Path $RunRoot 'workload.jsonl'
-        New-ComparisonWorkload -RequestCount $RequestCount -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $wlPath -Seed $Seed -MaxTokens 8
+        New-ComparisonWorkload -RequestCount $RequestCount -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $wlPath -Seed $Seed -MaxTokens 8 -MaxIterations 200 -SizeClass '2k'
         $eqPath = Join-Path $RunRoot 'equivalence-prompts.jsonl'
-        New-ComparisonWorkload -RequestCount $OutputEquivalencePrompts -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $eqPath -Seed $Seed -MaxTokens 8
+        New-ComparisonWorkload -RequestCount $OutputEquivalencePrompts -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $eqPath -Seed $Seed -MaxTokens 8 -MaxIterations 200 -SizeClass '2k'
     } finally {
         Stop-Stage29Server $proc
         Wait-Stage29VramBaseline -BaselineMiB 0 -ToleranceMiB 200 -MaxWaitSec 60 -SleepSec 10 | Out-Null
@@ -224,7 +227,9 @@ function Main {
     }
     if ($preflight.status -ne 'PASS') { Write-Error ("BLOCKED-preflight: " + ($preflight | ConvertTo-Json -Compress)); exit 2 }
     $wl = Invoke-Phase05WorkloadBuild
-    Write-Output ("Workload built at " + $wl.workload)
+    $wlPath = ([string]$wl.workload).TrimStart()
+    $eqPath = ([string]$wl.equivalence).TrimStart()
+    Write-Output ("Workload built at " + $wlPath)
     try {
         $eq = Invoke-Phase1OutputEquivalence
     } catch {
@@ -234,11 +239,11 @@ function Main {
     }
     Write-Output ("OutputEquivalence status=" + $eq.Status + " mismatch=" + $eq.MismatchCount)
     if ($eq.Status -ne 'PASS') { Write-Error ("BLOCKED-output-equivalence: " + ($eq | ConvertTo-Json -Compress)); exit 5 }
-    Invoke-CycleLeg -Cycle 1 -Mode 'legacy' -WorkloadPath $wl.workload -Phase 'cold-start'
-    Invoke-CycleLeg -Cycle 1 -Mode 'hybrid' -WorkloadPath $wl.workload -Phase 'cold-start'
+    Invoke-CycleLeg -Cycle 1 -Mode 'legacy' -WorkloadPath $wlPath -Phase 'cold-start'
+    Invoke-CycleLeg -Cycle 1 -Mode 'hybrid' -WorkloadPath $wlPath -Phase 'cold-start'
     for ($c = 1; $c -le $Cycles; $c++) {
-        Invoke-CycleLeg -Cycle $c -Mode 'legacy' -WorkloadPath $wl.workload -Phase 'warm'
-        Invoke-CycleLeg -Cycle $c -Mode 'hybrid' -WorkloadPath $wl.workload -Phase 'warm'
+        Invoke-CycleLeg -Cycle $c -Mode 'legacy' -WorkloadPath $wlPath -Phase 'warm'
+        Invoke-CycleLeg -Cycle $c -Mode 'hybrid' -WorkloadPath $wlPath -Phase 'warm'
     }
     Write-Stage29Report
     Write-Output ("Report emitted to $ReportPath")

@@ -84,7 +84,7 @@ function New-AgenticChatPrompt {
     param(
         [Parameter(Mandatory = $true)] [int]    $TargetTokens,
         [Parameter(Mandatory = $true)]
-        [ValidateSet('12k','24k','60k')]
+        [ValidateSet('2k','12k','24k','60k')]
         [string] $SizeClass,
         [Parameter(Mandatory = $true)]
         [ValidateSet('exact-repeat','near-duplicate','different-agent-same-prefix','same-branch-continuation')]

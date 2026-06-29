@@ -45,6 +45,7 @@ $script:PromptClassMap = @{
 # Supported SizeClass values. Each entry maps the design label to the
 # (target_tokens, lib-size-class) pair passed to New-AgenticChatPrompt.
 $script:SizeClassMap = @{
+    '2k'  = @{ Target = 2000;  SizeClass = '2k'  }
     '12k' = @{ Target = 12000; SizeClass = '12k' }
     '24k' = @{ Target = 24000; SizeClass = '24k' }
     '60k' = @{ Target = 60000; SizeClass = '60k' }
@@ -61,8 +62,9 @@ function New-ComparisonWorkload {
         [int]    $MaxTokens          = 8,
         [int]    $Temperature        = 0,
         [int]    $MinAnchors         = 10,
-        [string] $SizeClass          = '12k',
-        [int]    $TokenizeTimeoutSec = 60
+        [string] $SizeClass          = '2k',
+        [int]    $TokenizeTimeoutSec = 60,
+        [int]    $MaxIterations      = 200
     )
 
     if ($RequestCount -le 0) {
@@ -110,7 +112,8 @@ function New-ComparisonWorkload {
             -OutPath $anchorPath `
             -ServerUrl $ServerUrl `
             -Seed ($Seed + $i) `
-            -TimeoutSec $TokenizeTimeoutSec | Out-Null
+            -TimeoutSec $TokenizeTimeoutSec `
+            -MaxIterations $MaxIterations | Out-Null
         $anchorJson = Get-Content -Raw -Path $anchorPath | ConvertFrom-Json
         [void]$anchors.Add($anchorJson)
     }
@@ -146,7 +149,8 @@ function New-ComparisonWorkload {
                 -OutPath $freshPath `
                 -ServerUrl $ServerUrl `
                 -Seed ($Seed + $reqIdx + 10000) `
-                -TimeoutSec $TokenizeTimeoutSec | Out-Null
+                -TimeoutSec $TokenizeTimeoutSec `
+                -MaxIterations $MaxIterations | Out-Null
             $freshJson = Get-Content -Raw -Path $freshPath | ConvertFrom-Json
             $messages = @($freshJson.messages)
         }

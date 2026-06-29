@@ -937,3 +937,116 @@ Condition:
 
 Action:
 - Do enumerate the full set of lib helpers the driver dots, then for each direct helper, recursively resolve every function the helper calls (via `Select-String -Pattern '^[a-zA-Z]+\s+function\b'` or `grep -E '^\s*[a-zA-Z-]+\s*\(\s*\{?\s*\$'`) and verify the called function is defined in either (a) a lib helper the driver dots, (b) a lib helper the calling helper dots, or (c) a PowerShell built-in. When the wrapper header documents a required dot-source order (e.g., `. .\lib\agentic-prompt-generator.ps1` first), confirm the driver honours that order. Cross-check by extracting the wrapper's actual `New-ComparisonWorkload` body and verifying each called function name resolves to a definition in the union of dot-sourced libs. Treat any unresolved transitive call as a BLOCKING driver-contract gap and classify affected rows as `BLOCKED-driver-dot-source`, not `BLOCKED-prior-failure`, so the next session surfaces it instead of inheriting it.
+
+## Improvement: verify partial-fix scope when Developer handoff says "fixed"
+
+Condition:
+- A Developer fix targets N call sites of a defect (e.g. wrapper MaxIterations plumbing across L107/L142 in wrapper and L147/L149 in driver), but live re-execution still fails because only N-1 of the call sites were plumbed correctly. The fix author may claim "fixed" based on AST parse or static reading, not based on running both call paths through the same wrapper default.
+
+Action:
+- Do re-execute every distinct call site path the defect could affect, not just the most-prominent one. When a fix touches a default value (e.g. wrapper `[int] $MaxIterations = 200`) and a per-call override (e.g. driver `-MaxIterations 50` for one specific call), invoke the wrapper with both values and confirm convergence at the wrapper's default `SizeClass`. The same exception trace at the unwired call site (e.g. driver L149 instead of L147) is the canonical signal that the fix was partial. Capture the unwired call site's exception in a control-case log alongside the working call site's successful output. Report the partial scope as a NEW BLOCKING (F-NEW-EXEC-NN) rather than re-classifying the original defect as still-open. Cite the exact line numbers of both the unwired call site and the wired call site so the next Developer handoff scopes the single missing line.
+
+## Improvement: classify wrapper SizeClass vs server per-slot context as design BLOCKER before re-execution
+
+Condition:
+- A Stage N driver or wrapper emits prompts of size N tokens (e.g. 12k via `New-AgenticChatPrompt` with `SizeClass='12k'` -> `TargetTokens=12000`), but the server's per-slot context cap is M < N tokens because the model `n_ctx_seq=2048` is binding when `--parallel > 1` (server allocates `n_ctx / n_parallel` per slot). Phase 1 chat completion then returns `400 Bad Request: request (M' tokens) exceeds the available context size (M tokens)`. This is a pre-existing design mismatch that surfaces only when live execution reaches Phase 1 (after Phase 0.5 tokenize-only calls succeed because /tokenize does not require context fit).
+
+Action:
+- Do not trust the test plan's "Phase 1 PASS = byte-identical" contract without first verifying that the wrapper's prompt size fits in the server's actual per-slot context. Read the model file (`.gguf` metadata or `server.err.log: n_ctx_seq` line at session start) for `n_ctx_seq`; read the driver defaults for `-c` and `--parallel`; compute `per_slot_ctx = -c / --parallel`; compare against the wrapper's `SizeClassMap` Target values. If `per_slot_ctx < min(Target values)`, classify the affected rows (CC-01, PR-01..03, AG-01..04) as BLOCKED-context-mismatch at execution, not BLOCKED-driver-contract. Run a single diagnostic server with the driver defaults and `Invoke-WebRequest /props` or the n_ctx_seq line from `server.err.log` to confirm the cap empirically. Record both the model n_ctx_seq and the per-slot computation in the test report. Suggested Developer fix candidates: (a) add a smaller SizeClass to wrapper SizeClassMap and the Stage 20 lib ValidateSet, (b) reduce driver --parallel to 1, or (c) increase driver -c so per-slot context >= the largest SizeClass Target.
+
+## Improvement: bytecode audit driver hashtable return through Start-Process -ArgumentList
+
+Condition:
+- A QA session re-executes a Stage N driver (e.g. Stage 29 `compare-legacy-vs-hybrid.ps1`) via `Start-Process -FilePath 'pwsh' -ArgumentList $argList -RedirectStandardOutput ... -RedirectStandardError ...`. The driver Main dispatcher receives a hashtable return from a helper function via `$wl = Invoke-HelperFn` then accesses `.workload` via `$wl.workload`. The driver writes the path via `Write-Output ("... at " + $wl.workload)`. The redirect captures `0x20 0x20 0x44 0x3A 0x5C ...` (2 leading spaces before `D:\`). Phase 2 / Phase 3 calls to `Get-Content -LiteralPath $wl.workload` then fail with `Cannot find drive. A drive with the name '  D' does not exist.` The bug is reproducible via Start-Process but NOT in a `pwsh -NoProfile -Command { ... }` isolated test (which produced a clean return with no leading whitespace).
+
+Action:
+- Do byte-level audit the redirect-captured stdout before classifying as BLOCKED-driver-contract. `Get-Content -Raw -Encoding Byte` the redirect file (e.g. `main.log`); in the byte array, locate the character after the format-string literal "at " (or wherever the bound variable should appear). If two `0x20` (space) bytes precede the drive letter `0x44 0x3A`, that is the canonical signature of this bug. The fix is one of: (a) replace the hashtable round-trip with two sibling string variables (`$wlPath = Join-Path $RunRoot 'workload.jsonl'` declared in Main), (b) post-process with `.Trim()` on the bound value before passing to subsequent calls, or (c) return the path as a `pscustomobject` instead of a hashtable. Because the bug only surfaces under Start-Process -ArgumentList, an isolated `pwsh -Command` test will not reproduce it. Pair the audit with `git show HEAD:<file>` to confirm the broken line is unmodified from the prior QA-fixing effort (i.e. not a regression from a recent fix). Record the bug as NEW BLOCKING with suggested Developer fix and cite the exact line + bytes (the 2 leading spaces between "at " and "D:").
+- This is the post-Stage-29 follow-up to the existing "verify partial-fix scope" rule. The existing rule detects partial-fix scope (one of N call sites unwired); this rule detects format-string whitespace introduced by hashtable round-trips through Start-Process. Both manifest as `Write-Output` strings with extra bytes before the variable, but the partial-fix rule is "wrong value", while this rule is "correct value with leading padding".
+- This is also distinct from the prior F-RP-NN / driver-dot-source rules: those rule about missing dot-source of transitive lib helpers; this rule is about a wholly-tied-together driver that reaches the cycle legs but fails on the path binding inside Main. Classification label: `BLOCKED-driver-hashtable-padding`. The QA session can route around this by authoring a non-durable QA-only wrapper under `_test_output/` that replicates the cycle flow inline and dot-sources the lib helpers directly, bypassing the buggy Main line.
+
+
+## Improvement: distinguish Manager claim of fabrication from invocation-context-dependent bug
+
+Condition:
+- Manager or user reports a prior-session-claimed bug as "fabricated" with citation of a standalone pwsh -NoProfile -Command test that produced clean hashtable property access, but the durable report cited byte-level evidence (e.g., 3 spaces between "at" and "D:" in a Write-Output line)
+
+Action:
+- Do not treat the Manager "fabricated" claim as ground truth without verification. The Driver or helper may have an invocation-context-dependent bug that does NOT reproduce in pwsh -Command but DOES reproduce when the same script is invoked via Start-Process pwsh -File <script.ps1> -ArgumentList @(...). Read the actual main.log/main.err.log on disk with `[System.IO.File]::ReadAllBytes` and dump the relevant bytes; do not trust Get-Content (which strips CR characters). If the byte evidence on disk shows the alleged artefact (e.g., 0x20 0x20 0x20 between two characters), the bug is real but invocation-context-dependent; report it as RE-OPENED with byte-level evidence rather than dropping it. Run the canonical driver at least once in the new session to confirm reproducibility under the same invocation context. Cite both the Manager's verification (clean return under pwsh -Command) and the canonical-driver log bytes (real artefact under Start-Process invocation context) so the next Developer handoff can isolate the root cause rather than treating the finding as already-resolved.
+
+## Improvement: classify rows as BLOCKED-driver-stopped-at-<phase> with real exit code and stderr
+
+Condition:
+- Brief directs QA to use ONLY the canonical driver and forbids qa-runner.ps1 or other bypass scripts; the canonical driver crashes mid-execution at a known code location (e.g., L174 Get-Content -LiteralPath) with a specific error message and exit code
+
+Action:
+- Do not attempt to fall back to qa-runner.ps1 or any other bypass script. Honor the BLOCKED-driver-stopped-at-<phase> classification for every per-row that depends on the crashed phase. Cite the actual exit code (run a second canonical-driver invocation with minimal -RequestCount to confirm), the actual last stderr line (read main.err.log directly), and the failing source line number with a code link to the canonical driver. Verify Phase 0/0.5/1 outputs are real (Test-Path their cited paths and report actual sizes), and verify per-leg evidence ABSENT (note which summary.json/metrics-after.txt/requests.jsonl files do NOT exist on disk). Reuse the Phase 0.5/1 outputs as PASS evidence where they exist; classify every per-request and aggregated row as BLOCKED-driver-stopped with the cited exit code and stderr. Reserve scope-deviation notes in the report only when budget forces -Cycles/-RequestCount downscoping from test plan spec.
+
+## Improvement: end-to-end gitignore scope for in-tree build artifacts
+
+Condition:
+- Setting up a session root under `._test_output/`, capturing setup-env.json, or running tests that read in-tree build files (e.g., `build-cuda/CMakeCache.txt`)
+
+Action:
+- Do not try to read gitignored paths via `git show HEAD:<path>`. The path is gitignored because the build artifact belongs to the working tree, not git history. Read it directly with `Select-String -Path 'D:\source\llama.cpp-jet\build-cuda\CMakeCache.txt'` or `Get-Content` instead. Capture the resulting values (CMAKE_CXX_FLAGS_RELEASE, GGML_CUDA:BOOL, CMAKE_BUILD_TYPE) in setup-env.json under explicit fields with the actual file path in the field name or value. If you previously captured the field as 'NOT_FOUND' (because git show returned null), regenerate setup-env.json with corrected fields before citing it in the durable report.
+
+## Improvement: pre-create cold path before launching llama-server in hybrid mode
+
+Condition:
+- QA execution runs a canonical driver that passes `--cache-cold-path <dir>` to llama-server for hybrid mode, but the driver does not pre-create the directory; the user brief specifies a non-default path that does not yet exist on disk; the first main run fails at server startup with stderr `cold store: configure failed: root path does not exist` and `/health` timeout within 30s
+
+Action:
+- Do pre-create the cold path directory before invoking the canonical driver (e.g., `New-Item -ItemType Directory -Force -Path $CacheColdPath | Out-Null`). This is a harness setup pre-condition, not a modification to driver or production code. Document the pre-creation in setup-env.json so subsequent sessions know the directory existed before the driver started. Also record the F-29-EXEC-19-style finding in the test report so a Developer can fix the driver to call `New-Item` itself.
+
+## Improvement: handle dual dot-prefixed and non-dot-prefixed workspace paths
+
+Condition:
+- The user's brief specifies paths like `D:\source\llama.cpp-jet\_design_docs\cache-handling-test-scripts\compare-legacy-vs-hybrid.ps1` (non-dotted) but the actual on-disk location is `D:\source\llama.cpp-jet\._design_docs\cache-handling-test-scripts\compare-legacy-vs-hybrid.ps1` (dot-prefixed); `Test-Path -LiteralPath` returns False for the non-dotted path while the dotted path exists
+
+Action:
+- Do verify the on-disk path before running the driver. Use `Get-ChildItem -Path 'D:\source\llama.cpp-jet' -Force | Where-Object { $_.Name -like '*design_docs*' }` or `cmd /c "dir /B"` to enumerate the actual directory names; both `._design_docs` and `_design_docs` may exist as separate workspaces (one canonical, one from a prior fabricating session). Locate the actual scripts under the dotted path (canonical), then mirror the evidence artifacts to the non-dotted path the brief specifies so the report's citations resolve. Do not assume the brief's paths are correct; verify with `Test-Path -LiteralPath` before citing.
+
+## Improvement: classify BLOCKED-driver-stopped-at-<phase> with byte-level evidence
+
+Condition:
+- A QA re-execution must produce a per-row classification even when the canonical driver fatally exits before completing all phases; the prior session's report cited files that did not exist on disk (fabricated); the brief explicitly demands `BLOCKED-driver-stopped-at-<phase>` classification citing exit code and last stderr line
+
+Action:
+- Do classify each row that depends on the crashed phase as `BLOCKED-driver-stopped-at-<phase>` with the row's evidence field citing (a) the exit code from `main.exit.txt`, (b) the last stdout line from `main.stdout.log`, (c) the last stderr line from `main.stderr.log` (if any), and (d) the source line of the failing statement in the driver. Use `Test-Path -LiteralPath` to verify every file path before citing it. Do not fabricate or back-fill evidence from a prior session's tree.
+
+## Improvement: mirror run artifacts to brief-specified path for verifiable citations
+
+Condition:
+- The user brief specifies a run root or report path that differs from the canonical workspace path (e.g., non-dotted `_test_output/` vs dotted `._test_output/`), and the report's citations must resolve via `Test-Path` to satisfy binding integrity rules
+
+Action:
+- Do mirror the entire session's run artifacts to the brief-specified path using `robocopy` with `/E` after the main run completes. Use absolute source and destination paths. Verify with `Get-ChildItem <dst> -Recurse -Force` that the destination has the same files and sizes. Cite the brief-specified path in the durable report; also cite the canonical path as a mirror so future sessions can find evidence via either route.
+
+## Improvement: normalize line endings to LF before claiming doc passes ASCII/LF contract
+
+Condition:
+- QA generates a markdown report via `create_file` or `replace_string_in_file` and needs to satisfy ASCII-only / LF-only / no-BOM / no-trailing-whitespace contract; the tool may insert CRLF on Windows
+
+Action:
+- Do verify line endings after every doc write with `[System.IO.File]::ReadAllBytes(<path>) | Where-Object { $_ -eq 0x0D } | Measure-Object`. If CR > 0, strip all 0x0D bytes via a `[System.Collections.Generic.List[byte]]` rewrite using `[System.IO.File]::OpenWrite` + `SetLength(0)` + `Write(bytes, 0, bytes.Length)`. Then ensure exactly one trailing LF (0x0A). Verify with `get_errors` to confirm zero markdown lint errors before handoff.
+
+## Improvement: verify Developer fix actually fixes the root cause, not just rearranges code
+
+Condition:
+- A Developer fix is documented as DONE in an implementation log part file (e.g. part-22 S29-IMPL-FIX-07), the diff is on disk per git diff HEAD, and the dry-run preflight passes, but the actual driver run still reproduces the same bug with byte-identical output (e.g. 3 leading whitespace bytes 0x20 0x20 0x20 between concatenated string parts)
+
+Action:
+- Don't trust a Developer fix just because (a) the diff is on disk, (b) the dry-run preflight returns PASS, and (c) the implementation log marks it DONE. The fix may be insufficient if it changes the code shape without addressing the actual root cause (e.g. adding [string] cast does not strip whitespace from a hashtable property value).
+- Run the actual driver end-to-end after every Developer fix, not just the dry-run gate. Capture stdout and inspect the first emitted line as raw bytes ([System.IO.File]::ReadAllBytes + hex dump) to confirm the bug is gone, not just moved.
+- When the fix is insufficient, classify it as PARTIAL-fix-ineffective in the QA report and explicitly enumerate what was verified working (e.g. Edit 1 of 2) vs what did not resolve the bug (e.g. Edit 2 of 2). This lets the next Developer iterate on a known-scope sub-bug rather than restart the investigation.
+- Cite the byte-identical reproduction (same hex bytes at same offset) to prove the bug is the same one across sessions, not a new variant. The driver line number where the fatal exit happens is a strong corroborator.
+
+## Improvement: verify Developer fix actually fixes the root cause, not just rearranges code
+
+Condition:
+- A Developer fix is documented as DONE in an implementation log part file (e.g. part-22 S29-IMPL-FIX-07), the diff is on disk per git diff HEAD, and the dry-run preflight passes, but the actual driver run still reproduces the same bug with byte-identical output (e.g. 3 leading whitespace bytes 0x20 0x20 0x20 between concatenated string parts)
+
+Action:
+- Do not trust a Developer fix just because (a) the diff is on disk, (b) the dry-run preflight returns PASS, and (c) the implementation log marks it DONE. The fix may be insufficient if it changes the code shape without addressing the actual root cause (e.g. adding [string] cast does not strip whitespace from a hashtable property value).
+- Do run the actual driver end-to-end after every Developer fix, not just the dry-run gate. Capture stdout and inspect the first emitted line as raw bytes ([System.IO.File]::ReadAllBytes + hex dump) to confirm the bug is gone, not just moved.
+- When the fix is insufficient, classify it as PARTIAL-fix-ineffective in the QA report and explicitly enumerate what was verified working (e.g. Edit 1 of 2) vs what did not resolve the bug (e.g. Edit 2 of 2). This lets the next Developer iterate on a known-scope sub-bug rather than restart the investigation.
+- Do cite the byte-identical reproduction (same hex bytes at same offset) to prove the bug is the same one across sessions, not a new variant. The driver line number where the fatal exit happens is a strong corroborator.

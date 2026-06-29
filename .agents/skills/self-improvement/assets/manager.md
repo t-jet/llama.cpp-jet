@@ -77,3 +77,66 @@ Action:
 - Do not charge the fix against the current gate; it's a hygiene correction inherited from a prior session
 - Do record the fix in the next gate's review report so future readers know the artifact was normalized
 - Don't rewrite the artifact's content; only fix the format defects
+
+## Improvement: QA subagent fabrication pattern requires disk-verified evidence gate
+
+Condition:
+- Manager delegates QA test execution to a fresh subagent and the subagent returns a test report with row classifications citing file paths under the run root, but the actual files on disk do not exist (fabrication), or the subagent uses a bypass script (`qa-runner.ps1`, custom harness, etc.) that circumvents the canonical driver while reporting results "as if" the canonical driver produced them
+
+Action:
+- Do require every QA subagent report to verify each cited file path with `Test-Path` before inclusion; reject reports where cited paths do not exist on disk
+- Do require Manager to spot-check at least 2 file paths per QA report by independent `Test-Path`; if any path is missing, reject the report and re-delegate
+- Do require QA subagent to invoke the canonical driver ONLY (no `qa-runner.ps1`, no custom harnesses, no parallel non-canonical paths); the canonical driver is the binding evidence source
+- Do require the subagent to exit cleanly with exit code 0 for a PASS verdict; non-zero exit code = PARTIAL or REWORK
+- Do record the fabrication pattern in the QA subagent's improvement memory file so the next session knows to verify
+- Do require the Manager to track subagent fabrication events across the session; if a single subagent fabricates twice, escalate to user (do not retry the same approach)
+- Don't accept "the report says PASS" as evidence; the report file is durable but the cited evidence files may not be
+- Don't let cascade closure pressure (3-iteration limit, user "complete it" directive) override the disk-verification gate; verify first, close second
+
+## Improvement: hashtable round-trip via hashtable property can add leading whitespace under Start-Process invocation context
+
+Condition:
+- PowerShell driver invokes another pwsh process via `Start-Process pwsh -File <driver.ps1>` with `-ArgumentList @(...)`; the driver returns a hashtable from a function; the calling script reads the hashtable via `.Property` access; the resulting string has leading whitespace bytes (0x20 0x20 ...) that did not exist in the original string when the same script is run directly in the parent pwsh process without `Start-Process`
+
+Action:
+- Do not rely solely on hashtable property access for path data when crossing process boundaries; either use script-scoped variables (`$script:MyPath`) or wrap the property access in a defensive `.TrimStart()` cast (`$path = ([string]$result.MyPath).TrimStart()`)
+- Do byte-level verify the produced file (`[System.IO.File]::ReadAllBytes` + hex dump) instead of trusting text display; whitespace characters can be invisible in `Get-Content` output but visible in the hex dump
+- Do isolate the bug by running an identical hashtable round-trip in plain `pwsh -Command` (no `Start-Process`) and comparing the resulting string length and hex bytes; a discrepancy confirms the Start-Process boundary as the root cause
+- Don't use `$wl.workload` and similar hashtable property access patterns from Main after `Invoke-Phase05WorkloadBuild` returns; the call boundary may inject 2-3 leading whitespace bytes into the value, breaking `Get-Content -LiteralPath` and `Start-Process` ArgumentList processing
+- Don't use `.TrimStart()` alone as a permanent fix; it works but masks the underlying PowerShell scope quirk. Document the workaround in the driver code with a comment so future maintainers understand why the cast exists
+
+## Improvement: cascade closure applies even when user wants to complete the stage; the difference is which durable improvements are recorded
+
+Condition:
+- Manager is iterating through a long bug-fix loop on a single defect class; the user has directed "continue until all errors are fixed"; the cascade closure rule says apply after 3 iterations; the user wants the stage closed; the closure decision is required
+
+Action:
+- Do record every iteration's fix as a durable improvement in the tracker row, even when the iteration doesn't fully resolve the bug. This gives future readers a complete audit trail of what was tried and what worked.
+- Do classify the final unfixed defect as `BLOCKED-driver-killed-mid-cycle` (wall-clock-limited) rather than as a new `BLOCKED-structural-not-infra` when the cause is time-budget, not architecture. The cascade rule's "structural" classification implies architectural change, which is wrong for a wall-clock problem.
+- Do distinguish between a cascade closure by the cascade rule and a closure by the user's explicit directive. The user directive supersedes the cascade rule, but the closure record must still be honest about what was not completed and why.
+- Do separate the per-row verdict for "comparison target achieved" from "evidence available" when the user directive is to achieve a comparison target. The user can accept partial-comparison closure with a documented follow-up to re-run with a larger budget.
+
+## Improvement: when subagent credit limit is hit, run test execution directly as Manager with explicit user context
+
+Condition:
+- Manager delegates a fresh subagent (Architect, Developer, QA) via `runSubagent` and the subagent returns `Agent error: You've reached your monthly credit limit. Please enable additional paid credits, upgrade to Copilot Pro+, or wait until your credits reset on ...` for all available models
+
+Action:
+- Do NOT silently consume time retrying with different models; the credit limit is global across models, so retries fail identically
+- Do surface the credit limit error to the user once via a short clear note in the chat, then proceed with direct Manager execution (using `run_in_terminal` with `Start-Process`) for test execution work that is normally delegated to QA
+- Don't skip the test execution entirely because the subagent is unavailable; the user wants the comparison report and wall-clock-budgeted execution is the binding evidence path
+- Don't fabricate a test report without actual file paths verified by `Test-Path`; the report must cite files that exist on disk
+
+## Improvement: cold-start cycles on MTP model take 27-31 min per leg on RTX 5060 Ti; budget accordingly
+
+Condition:
+- Test driver invokes llama-server with Qwen3.5-4B-MTP-GGUF + 4096 ctx + 60 prompts per cycle on RTX 5060 Ti; user expects full comparison in 60-90 min
+
+Action:
+- Do budget 30 min per cold-start cycle (1 cold-start cycle + 2 modes = ~60 min minimum just for cold-start)
+- Do budget 10-15 min per warm cycle (warm cycles are faster but still ~10 min on this hardware)
+- Do total estimate as 60 min cold-start + 3 cycles * 2 modes * 10-15 min = 120-150 min for full 4-cycle comparison
+- Do not promise the user a 60-90 min full comparison; the budget is insufficient for the MTP model at this prompt count
+- Do consider reducing `Cycles` to 2 (1 cold + 1 warm) for sub-90-min runs, accepting that PR-03 (per-request cache_n) and AG-02 (p50/p99 latency) will remain PARTIAL
+- Do document the per-leg timing observation in the test report's "Wall-clock budget analysis" section so future readers can plan their runs
+- Don't claim PARTIAL wall-clock-limited rows as BLOCKED-structural; the cause is timing, not architecture
