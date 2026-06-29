@@ -150,7 +150,7 @@ Condition:
 - Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
 
 Action:
-- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index. Rerun line-count, ASCII-byte, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including new untracked part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
+- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index; for files under `._design_docs/cache-handling-test-plan/`, sibling design docs usually resolve as `../cache-handling-*.md`, not `../../cache-handling-*.md`. Rerun line-count, ASCII-byte, LF/no-CR, BOM, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including fresh untracked reports and part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
 
 ## Improvement: separate own QA edits from dirty sources
 
@@ -158,7 +158,7 @@ Condition:
 - QA review task uses or indexes documents that are already modified or untracked in working tree
 
 Action:
-- Check `git status --short` for reviewed and edited paths. Distinguish pre-existing plan/source changes from files changed in review. Report only review-owned edits as own handoff changes.
+- Check `git status --short` for reviewed and edited paths before editing. If final `git diff` includes older dirty changes in the same files, separate them from the review-owned patch by comparing against the pre-edit status and the specific lines added during the session. Report only review-owned edits as own handoff changes, and note pre-existing dirty files only as context.
 
 ## Improvement: blank line between single-line label and following list
 

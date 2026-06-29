@@ -433,6 +433,7 @@ public:
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
     cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft) const;
+    std::string debug_compute_namespace_id_for_tests(const prepared_prompt_metadata & metadata) const;
     bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
     bool debug_corrupt_first_payload_for_tests();
     bool debug_evict_first_payload_for_tests();
@@ -584,6 +585,7 @@ private:
     void debug_mark_first_entry_used_for_tests();
     cache_compatibility_key debug_get_compatibility_key_for_tests() const;
     cache_compatibility_key debug_get_compatibility_key_for_tests(bool runtime_has_draft) const;
+    std::string debug_compute_namespace_id_for_tests(const prepared_prompt_metadata & metadata) const;
     bool debug_validate_first_payload_for_tests(bool runtime_has_draft);
     bool debug_corrupt_first_payload_for_tests();
     bool debug_evict_first_payload_for_tests();

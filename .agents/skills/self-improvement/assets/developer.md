@@ -2393,3 +2393,92 @@ Similar memory check:
 - Decision: Add new entries to make the timing explicit (first verification step, not deferred) and the threshold explicit (295+ LF triggers part-file-only or split first)
 
 Memory update: Final improvement outcomes stored under Improvement: create_file CRLF on Windows needs immediate byte-level check and Improvement: doc at 295+ LF needs part-file-only updates or split first.
+
+## Internal Post-Task Record (2026-06-29, Stage 31 implementation planning)
+
+Task completed: Yes (implementation entry doc, part-01 implementation plan, and document-index row created; no production code changed).
+
+Effectiveness assessment: Followed the required self-improvement-first read before any other task action, then loaded developer, humanizer, and caveman skills. Verified the approved Stage 31 design review PASS, read the Manager intake and relevant architecture/requirements anchors, and checked code anchors before writing the plan. Preserved the investigation-first constraint by making P31-01 through P31-05 mandatory before production fixes. Captured the pre-existing dirty worktree state and treated existing document-index changes as prior work. Created new markdown with LF-only, ASCII, no BOM, no trailing whitespace, and under 300 lines; ran scoped `git diff --check` successfully.
+
+Improvement outcome candidate:
+- Condition: When authoring an implementation plan for an investigation-first stage with mandatory probes before fixes
+- Action: Do make the probe steps the first ordered implementation steps and explicitly state that production changes are blocked until probe evidence is recorded
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement: Developer skill and existing planning-doc verification memories already require implementation planning before code changes, durable implementation logs, and verified untracked markdown hygiene.
+- Decision: No update. Existing workflow rules covered the behavior; this task reinforced them without exposing a new failure mode.
+
+Memory update: No new improvement entry added.
+
+## Improvement: Metric HELP/TYPE fixes must include secondary row writers
+
+Condition:
+- When fixing Prometheus HELP/TYPE duplication in a route or endpoint that has local metric lambdas plus older helper functions that append rows to the same output stream
+
+Action:
+- Do search the whole writer scope for every helper call that writes metric rows after the local lambdas are fixed; either route those helper rows through the same one-header-per-name registry or replace the helper call with header-once row emission. Verified 2026-06-29 (Stage 31 implementation): the first metrics fix made the local `write_cache_metric*` lambdas emit one HELP/TYPE per metric name, but `server_write_stage10_cache_rows(prometheus, mode, cache_stats)` still appended repeated HELP/TYPE blocks later in the same `/metrics` output. The final fix removed that route call for Stage 31 output and emitted the needed Stage 10 row families through the same header-once local writer.
+
+## Improvement: Implementation part filenames can drift from prompts
+
+Condition:
+- When a user asks to read numbered implementation parts by approximate title or stale filename, and the first direct read fails for those paths
+
+Action:
+- Do read the implementation entry document's part links and list the part directory before treating missing filenames as blockers; use the live linked filenames as authoritative when the part number and scope match. Verified 2026-06-29 (Stage 31 Developer test-results review): prompt requested `part-03-stage30-evidence-reuse-review.md`, `part-04-stage31-execution.md`, and `part-05-test-results-review.md`, but disk had `part-03-probe-evidence-20260629.md`, `part-04-implementation-evidence-20260629.md`, and `part-05-implementation-review-20260629.md` linked from the entry doc. Reading the entry links recovered the intended parts without blocking.
+
+## Internal Post-Task Record (2026-06-29, Stage 31 implementation execution)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Followed the probe-first gate: added focused current-behavior probes, ran them before production behavior edits, and recorded P31-01..P31-05 evidence in a new implementation part. Then applied the minimal namespace fix, metric shape fix, Stage 30 wording correction, regression tests, build/test evidence, doc-index update, and hygiene checks. Caught one execution gap during final review: local metric lambdas were fixed first, but a later Stage 10 helper still wrote repeated HELP/TYPE rows into the same output. Fixed it before final handoff.
+
+Improvement outcome candidate:
+- Condition:
+  - When fixing Prometheus HELP/TYPE duplication in a route or endpoint that has local metric lambdas plus older helper functions that append rows to the same output stream
+- Action:
+  - Do search the whole writer scope for every helper call that writes metric rows after the local lambdas are fixed; either route those helper rows through the same one-header-per-name registry or replace the helper call with header-once row emission
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+  - None specific to multi-layer Prometheus writers.
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When fixing Prometheus HELP/TYPE duplication in a route or endpoint that has local metric lambdas plus older helper functions that append rows to the same output stream
+  - Action:
+    - Do search the whole writer scope for every helper call that writes metric rows after the local lambdas are fixed; either route those helper rows through the same one-header-per-name registry or replace the helper call with header-once row emission
+
+## Internal Post-Task Record (2026-06-29, Stage 31 Developer test-results review)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Review completed with PASS verdict. Evidence paths were verified, all 11 QA rows were classified PASS, no product bug remained, and the full live Stage 30 rerun was held advisory under Part 35 because no Manager override was found. Created the Developer review report, updated the Stage 31 implementation entry, updated document-index, and ran scoped hygiene checks.
+
+Improvement outcome candidate:
+- Condition:
+  - When a user asks to read numbered implementation parts by approximate title or stale filename, and direct reads fail
+- Action:
+  - Do read the implementation entry document's live part links and list the part directory before treating missing filenames as blockers
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Brief line numbers for fix targets can drift; disambiguate by surrounding code context.
+- Decision:
+  - Add new. Existing entry covers stale line targets, not stale part filenames.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When a user asks to read numbered implementation parts by approximate title or stale filename, and the first direct read fails for those paths
+  - Action:
+    - Do read the implementation entry document's part links and list the part directory before treating missing filenames as blockers; use the live linked filenames as authoritative when the part number and scope match.

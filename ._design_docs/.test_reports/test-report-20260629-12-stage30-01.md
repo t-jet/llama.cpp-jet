@@ -64,7 +64,7 @@ Both modes completed cold-start cycle 1 with metrics-before.txt, metrics-after.t
 | cache_entries (current) | 2 | 2 | 0 | tie |
 | cache_bytes (current) | 444,252,428 (423 MiB) | 168,745,335 (161 MiB) | -275 MiB | **hybrid** (62% less hot RAM) |
 | cache_tokens (current) | 3,907 | 3,893 | -14 | tie (within noise) |
-| cache_hits_total | 0 | 0 | 0 | tie (cold start, no hits yet) |
+| cache_hits_total | 0 | 0 | 0 | tie; Stage 31 later corrected the interpretation: exact-repeat rows can produce in-cycle hits even in one cold server process, so 0 hybrid hits required investigation |
 | cache_misses_total | 0 | 200 | +200 | **legacy** (no cold-path lookups) |
 | cache_eviction_payloads{evict} | 0 | 198 | +198 | hybrid (cold-path demotions) |
 | cache_slot_ref_acquires | 0 | 200 | +200 | hybrid (cold-path slot refs) |
@@ -196,9 +196,9 @@ Per-leg timing extrapolation:
 
 - Cold-start cycles: ~30 min each (long due to model load + cold cache + MTP decode)
 - Warm cycles: ~10-15 min each (no model load; cache hit reduces processing)
-- 4 cycles × 2 modes = 8 legs total expected: ~30+30+10+10+10+10+10+10 = 120 min
+- 4 cycles x 2 modes = 8 legs total expected: ~30+30+10+10+10+10+10+10 = 120 min
 
-The 60-90 min budget was insufficient for the full 4-cycle × 2-mode comparison. A 120-150 min budget is recommended for follow-up runs.
+The 60-90 min budget was insufficient for the full 4-cycle x 2-mode comparison. A 120-150 min budget is recommended for follow-up runs.
 
 ## Anomalies observed
 

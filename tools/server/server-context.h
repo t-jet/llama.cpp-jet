@@ -15,6 +15,7 @@ struct server_context_impl; // private implementation
 
 #ifdef LLAMA_SERVER_CACHE_TESTS
 std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_stats);
+std::string server_cache_stage31_prometheus_rows_for_tests(const json & cache_stats);
 #endif
 
 struct server_context_meta {

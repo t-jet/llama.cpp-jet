@@ -1685,6 +1685,11 @@ cache_compatibility_key hybrid_cache_controller::debug_get_compatibility_key_for
     return build_compatibility_key(runtime_has_draft);
 }
 
+std::string hybrid_cache_controller::debug_compute_namespace_id_for_tests(
+        const prepared_prompt_metadata & metadata) const {
+    return compute_namespace_id(metadata);
+}
+
 cache_workload_profile hybrid_cache_controller::debug_detect_workload_profile_for_tests() const {
     return detect_workload_profile();
 }
@@ -4241,29 +4246,12 @@ std::string hybrid_cache_controller::compute_namespace_id() const {
 }
 
 std::string hybrid_cache_controller::compute_namespace_id(const prepared_prompt_metadata & metadata) const {
-    // Phase 3: Use comprehensive compatibility key with metadata augmentation (Gap 2.2)
     cache_compatibility_key compat_key = build_compatibility_key();
-    
-    // Augment with metadata-specific information
     std::stringstream augmented_key;
     augmented_key << compat_key.compute();
-    augmented_key << "|meta.compat=" << metadata.compatibility_key;
-    augmented_key << "|meta.prep=" << metadata.preparation_id;
-    
-    if (!metadata.degraded_reason.empty()) {
-        augmented_key << "|meta.degraded=" << metadata.degraded_reason;
+    if (!metadata.compatibility_key.empty()) {
+        augmented_key << "|meta.compat=" << metadata.compatibility_key;
     }
-    
-    // Include boundary information for finer-grained cache isolation
-    for (const auto & boundary : metadata.boundaries) {
-        augmented_key << "|span="
-            << static_cast<int>(boundary.type) << ':'
-            << boundary.token_start << ':'
-            << boundary.token_end << ':'
-            << boundary.checksum << ':'
-            << boundary.metadata;
-    }
-    
     return std::to_string(std::hash<std::string>{}(augmented_key.str()));
 }
 

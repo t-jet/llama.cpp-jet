@@ -1,6 +1,7 @@
 #include "server-cache-controller.h"
 #include "server-cache-legacy.h"
 #include "server-cache-hybrid.h"
+#include "server-context.h"
 #include "server-task.h"
 #include "common.h"
 
@@ -16,6 +17,7 @@
 #include <map>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <filesystem>
 #include <thread>
 
@@ -43,6 +45,23 @@ static uint64_t token_checksum(const std::vector<int> & ids) {
         hash *= 1099511628211ull;
     }
     return hash;
+}
+
+static void require_or_abort(bool condition, const char * message) {
+    if (!condition) {
+        fprintf(stderr, "FAIL: %s\n", message);
+        std::abort();
+    }
+}
+
+static size_t count_occurrences(const std::string & haystack, const std::string & needle) {
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
 }
 
 // Helper to create test common_params with configurable fields
@@ -1496,6 +1515,149 @@ void test_namespace_isolation_template() {
 
     // Both entries should exist (different templates)
     assert(hybrid->debug_entry_count_for_tests() == 2);
+
+    printf("  PASSED\n");
+}
+
+static prepared_prompt_metadata stage31_meta(
+        const std::string & prep,
+        const std::vector<int> & tokens,
+        int token_end,
+        const std::string & label) {
+    prepared_prompt_metadata meta;
+    meta.compatibility_key = "server-prepared-prompt-v1";
+    meta.preparation_id = prep;
+    meta.degraded_reason = prep == "rendered-text-boundary-inference" ?
+        "rendered text boundary inference" :
+        "minimal token span metadata";
+    meta.add_span(
+        prompt_boundary::MESSAGE_END,
+        0,
+        token_end,
+        token_checksum(tokens),
+        false,
+        label);
+    return meta;
+}
+
+void test_stage31_namespace_uses_runtime_compatibility_only() {
+    printf("test-cache-controller: Stage 31 namespace uses runtime compatibility only...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prompt_a = { 10, 11, 12, 13 };
+    const std::vector<int> prompt_b = { 10, 11, 12, 13, 99 };
+    const prepared_prompt_metadata meta_a =
+        stage31_meta("rendered-text-boundary-inference", prompt_a, 4, "prompt");
+    const prepared_prompt_metadata meta_a_repeat = meta_a;
+    const prepared_prompt_metadata meta_b =
+        stage31_meta("rendered-text-boundary-inference", prompt_b, 5, "prompt");
+    prepared_prompt_metadata meta_a_fallback =
+        stage31_meta("token-position-fallback", prompt_a, 4, "prompt");
+
+    const std::string ns_a = ctrl.debug_compute_namespace_id_for_tests(meta_a);
+    const std::string ns_a_repeat = ctrl.debug_compute_namespace_id_for_tests(meta_a_repeat);
+    const std::string ns_b = ctrl.debug_compute_namespace_id_for_tests(meta_b);
+    const std::string ns_a_fallback = ctrl.debug_compute_namespace_id_for_tests(meta_a_fallback);
+
+    require_or_abort(ns_a == ns_a_repeat, "P31-01/P31-04 exact repeat namespace parity failed");
+    require_or_abort(ns_a == ns_b, "TP31-02 near-prefix prompt-local metadata changed namespace");
+    require_or_abort(ns_a == ns_a_fallback, "TP31-03 preparation_id/degraded reason changed namespace");
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prompt_a), meta_a);
+    require_or_abort(
+        ctrl.debug_find_match_tokens_for_tests(create_tokens(prompt_a), meta_a_repeat) == 4,
+        "TP31-01 exact repeat lookup did not match same metadata");
+    require_or_abort(
+        ctrl.debug_find_match_tokens_for_tests(create_tokens(prompt_b), meta_b) == 4,
+        "TP31-02 near-prefix lookup did not search shared namespace");
+
+    printf("  PASSED\n");
+}
+
+void test_stage31_namespace_cardinality_bounded_for_prompt_variants() {
+    printf("test-cache-controller: Stage 31 namespace cardinality bounded for prompt variants...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    std::unordered_set<std::string> namespaces;
+
+    for (int i = 0; i < 20; ++i) {
+        std::vector<int> ids = { 1, 2, 3, 4, 100 + i };
+        prepared_prompt_metadata meta =
+            stage31_meta("rendered-text-boundary-inference", ids, int(ids.size()), "prompt");
+        namespaces.insert(ctrl.debug_compute_namespace_id_for_tests(meta));
+        ctrl.debug_add_entry_for_tests(create_tokens(ids), meta);
+    }
+
+    json stats = ctrl.get_stats();
+    require_or_abort(namespaces.size() == 1, "TP31-02 prompt variants split runtime namespace");
+    require_or_abort(stats["branch_forest"]["namespaces"].size() == 1, "TP31-02 branch forest namespace count not bounded");
+    require_or_abort(stats["branch_lookup_namespaces"].contains("token_span"), "TP31-05 lookup stats JSON missing token_span bucket");
+
+    printf("  PASSED\n");
+}
+
+void test_stage31_workload_token_fixture() {
+    printf("test-cache-controller: Stage 31 workload token fixture...\n");
+
+    const server_tokens exact_a = create_tokens({ 7, 8, 9, 10, 11 });
+    const server_tokens exact_b = create_tokens({ 7, 8, 9, 10, 11 });
+    const server_tokens near_prefix = create_tokens({ 7, 8, 9, 10, 11, 12, 99 });
+
+    require_or_abort(exact_a.get_common_prefix(exact_b) == exact_a.size(), "TP31-01 exact fixture tokens differ");
+    require_or_abort(near_prefix.get_common_prefix(exact_a) == exact_a.size(), "TP31-02 near-prefix fixture lacks shared prefix");
+    require_or_abort(near_prefix.size() > exact_a.size(), "TP31-02 near-prefix fixture is not longer than anchor");
+
+    printf("  PASSED\n");
+}
+
+void test_stage31_metric_shape_bounded_labels() {
+    printf("test-cache-controller: Stage 31 metric shape bounded labels...\n");
+
+    json stats = {
+        {"type", "hybrid"},
+        {"branch_lookup_namespaces", {
+            {"token_span", {
+                {"123456", 2},
+                {"789012", 3},
+            }},
+            {"checksum_span", {
+                {"123456", 5},
+            }},
+        }},
+        {"branch_forest", {
+            {"namespaces", {
+                {"123456", {
+                    {"nodes", 4},
+                    {"roots", 1},
+                    {"metadata_bytes", 40},
+                }},
+                {"789012", {
+                    {"nodes", 6},
+                    {"roots", 2},
+                    {"metadata_bytes", 60},
+                }},
+            }},
+        }},
+    };
+
+    const std::string rows = server_cache_stage31_prometheus_rows_for_tests(stats);
+    require_or_abort(count_occurrences(rows, "# HELP llamacpp:cache_branch_lookups_total ") == 1,
+        "TP31-05 branch lookup HELP repeated");
+    require_or_abort(count_occurrences(rows, "# TYPE llamacpp:cache_branch_lookups_total ") == 1,
+        "TP31-05 branch lookup TYPE repeated");
+    require_or_abort(count_occurrences(rows, "# HELP llamacpp:cache_namespace_nodes ") == 1,
+        "TP31-05 namespace nodes HELP repeated");
+    require_or_abort(rows.find("namespace=\"123456\"") == std::string::npos,
+        "TP31-05 raw namespace id leaked as public label");
+    require_or_abort(rows.find("method=\"token_span\"} 5") != std::string::npos,
+        "TP31-05 token lookup total not aggregated");
+    require_or_abort(rows.find("method=\"checksum_span\"} 5") != std::string::npos,
+        "TP31-05 checksum lookup total not aggregated");
+    require_or_abort(rows.find("scope=\"all\"} 10") != std::string::npos,
+        "TP31-05 namespace node total not aggregated");
 
     printf("  PASSED\n");
 }
@@ -5392,6 +5554,10 @@ int main() {
     test_namespace_isolation_draft_context_modes();
     test_namespace_isolation_metadata_compat_key();
     test_namespace_isolation_template();
+    test_stage31_namespace_uses_runtime_compatibility_only();
+    test_stage31_namespace_cardinality_bounded_for_prompt_variants();
+    test_stage31_workload_token_fixture();
+    test_stage31_metric_shape_bounded_labels();
     test_namespace_isolation_validation();
 
     // Phase 3: Part 14 comprehensive field tests

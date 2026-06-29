@@ -204,6 +204,60 @@ std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_st
     server_write_stage10_cache_rows(prometheus, mode, cache_stats);
     return prometheus.str();
 }
+
+std::string server_cache_stage31_prometheus_rows_for_tests(const json & cache_stats) {
+    std::stringstream prometheus;
+    const std::string mode = server_prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
+    std::unordered_set<std::string> emitted;
+    const auto header = [&](const char * type, const char * name, const char * help) {
+        if (emitted.insert(name).second) {
+            prometheus << "# HELP " << name << " " << help << "\n"
+                       << "# TYPE " << name << " " << type << "\n";
+        }
+    };
+    const auto one_label = [&](const char * type, const char * name, const char * help,
+            const char * label, const std::string & value, size_t sample) {
+        header(type, name, help);
+        prometheus << name << "{mode=\"" << mode << "\"," << label << "=\""
+                   << server_prometheus_label_value(value) << "\"} " << sample << "\n";
+    };
+
+    const json branch_lookup_namespaces = cache_stats.contains("branch_lookup_namespaces") ?
+        cache_stats["branch_lookup_namespaces"] : json::object();
+    for (const char * method : { "token_span", "checksum_span" }) {
+        size_t total = 0;
+        const json method_stats = branch_lookup_namespaces.contains(method) ?
+            branch_lookup_namespaces[method] : json::object();
+        if (method_stats.empty()) {
+            total = json_value(cache_stats, std::string(method) == "token_span" ?
+                "n_branch_token_lookups" : "n_branch_checksum_lookups", 0);
+        } else {
+            for (const auto & ns : method_stats.items()) {
+                total += ns.value().get<size_t>();
+            }
+        }
+        one_label("counter", "llamacpp:cache_branch_lookups_total",
+            "Branch lookups by method.", "method", method, total);
+    }
+
+    const json branch_forest = cache_stats.contains("branch_forest") ? cache_stats["branch_forest"] : json::object();
+    const json namespace_stats = branch_forest.contains("namespaces") ? branch_forest["namespaces"] : json::object();
+    size_t nodes = 0;
+    size_t roots = 0;
+    size_t metadata_bytes = 0;
+    for (const auto & ns : namespace_stats.items()) {
+        nodes += json_value(ns.value(), "nodes", 0);
+        roots += json_value(ns.value(), "roots", 0);
+        metadata_bytes += json_value(ns.value(), "metadata_bytes", 0);
+    }
+    one_label("gauge", "llamacpp:cache_namespace_nodes",
+        "Branch nodes across namespaces.", "scope", "all", nodes);
+    one_label("gauge", "llamacpp:cache_namespace_roots",
+        "Branch roots across namespaces.", "scope", "all", roots);
+    one_label("gauge", "llamacpp:cache_namespace_metadata_bytes",
+        "Branch metadata bytes across namespaces.", "scope", "all", metadata_bytes);
+    return prometheus.str();
+}
 #endif
 
 static uint32_t server_n_outputs_max(const common_params & params) {
@@ -4343,57 +4397,89 @@ void server_routes::init_routes() {
             const json cache_stats = this->ctx_server.get_cache_stats();
             const auto prometheus_label_value = server_prometheus_label_value;
             const std::string mode = prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
-            const auto write_cache_metric = [&prometheus, &mode](const char * type, const char * name, const char * help, auto value) {
+            std::unordered_set<std::string> cache_metric_headers;
+            const auto write_cache_metric_header = [&prometheus, &cache_metric_headers](const char * type, const char * name, const char * help) {
+                if (!cache_metric_headers.insert(name).second) {
+                    return;
+                }
                 prometheus << "# HELP " << name << " " << help << "\n"
-                            << "# TYPE " << name << " " << type << "\n"
-                            << name << "{mode=\"" << mode << "\"} " << value << "\n";
+                           << "# TYPE " << name << " " << type << "\n";
             };
-            const auto write_cache_metric_with_label = [&prometheus, &mode, &prometheus_label_value](
+            const auto write_cache_metric = [&prometheus, &mode, &write_cache_metric_header](const char * type, const char * name, const char * help, auto value) {
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_label = [&prometheus, &mode, &prometheus_label_value, &write_cache_metric_header](
                     const char * type, const char * name, const char * help,
                     const char * label_name, const std::string & label_value, auto value) {
-                prometheus << "# HELP " << name << " " << help << "\n"
-                            << "# TYPE " << name << " " << type << "\n"
-                            << name << "{mode=\"" << mode << "\"," << label_name << "=\""
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"," << label_name << "=\""
                             << prometheus_label_value(label_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_two_labels = [&prometheus, &mode, &prometheus_label_value](
+            const auto write_cache_metric_with_two_labels = [&prometheus, &mode, &prometheus_label_value, &write_cache_metric_header](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
                     auto value) {
-                prometheus << "# HELP " << name << " " << help << "\n"
-                            << "# TYPE " << name << " " << type << "\n"
-                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
                             << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
                             << prometheus_label_value(label_b_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_three_labels = [&prometheus, &mode, &prometheus_label_value](
+            const auto write_cache_metric_with_three_labels = [&prometheus, &mode, &prometheus_label_value, &write_cache_metric_header](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
                     const char * label_c_name, const std::string & label_c_value,
                     auto value) {
-                prometheus << "# HELP " << name << " " << help << "\n"
-                            << "# TYPE " << name << " " << type << "\n"
-                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
                             << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
                             << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
                             << prometheus_label_value(label_c_value) << "\"} " << value << "\n";
             };
-            const auto write_cache_metric_with_four_labels = [&prometheus, &mode, &prometheus_label_value](
+            const auto write_cache_metric_with_four_labels = [&prometheus, &mode, &prometheus_label_value, &write_cache_metric_header](
                     const char * type, const char * name, const char * help,
                     const char * label_a_name, const std::string & label_a_value,
                     const char * label_b_name, const std::string & label_b_value,
                     const char * label_c_name, const std::string & label_c_value,
                     const char * label_d_name, const std::string & label_d_value,
                     auto value) {
-                prometheus << "# HELP " << name << " " << help << "\n"
-                            << "# TYPE " << name << " " << type << "\n"
-                            << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"," << label_a_name << "=\""
                             << prometheus_label_value(label_a_value) << "\"," << label_b_name << "=\""
                             << prometheus_label_value(label_b_value) << "\"," << label_c_name << "=\""
                             << prometheus_label_value(label_c_value) << "\"," << label_d_name << "=\""
                             << prometheus_label_value(label_d_value) << "\"} " << value << "\n";
+            };
+            const auto write_cache_metric_with_labels = [&prometheus, &mode, &prometheus_label_value, &write_cache_metric_header](
+                    const char * type, const char * name, const char * help,
+                    const prometheus_labels & labels, auto value) {
+                write_cache_metric_header(type, name, help);
+                prometheus << name << "{mode=\"" << mode << "\"";
+                for (const auto & label : labels) {
+                    prometheus << "," << label.first << "=\""
+                               << prometheus_label_value(label.second) << "\"";
+                }
+                prometheus << "} " << value << "\n";
+            };
+            const auto write_stage10_rows_once = [&write_cache_metric_with_labels](
+                    const char * name,
+                    const char * help,
+                    const json & rows,
+                    const prometheus_labels & defaults) {
+                if (rows.empty()) {
+                    write_cache_metric_with_labels("counter", name, help, defaults, 0);
+                    return;
+                }
+                for (const auto & row : rows) {
+                    prometheus_labels labels;
+                    labels.reserve(defaults.size());
+                    for (const auto & label : defaults) {
+                        labels.emplace_back(label.first, json_value(row, label.first, label.second));
+                    }
+                    write_cache_metric_with_labels("counter", name, help, labels, json_value(row, "value", 0));
+                }
             };
 
             write_cache_metric("gauge",   "llamacpp:cache_entries", "Current cache entry count by mode.", json_value(cache_stats, "n_entries", 0));
@@ -4416,25 +4502,18 @@ void server_routes::init_routes() {
                     const json & namespace_stats) {
                 const json method_stats = branch_lookup_namespaces.contains(method) ?
                     branch_lookup_namespaces[method] : json::object();
+                size_t total = 0;
                 if (method_stats.empty()) {
-                    if (namespace_stats.empty()) {
-                        write_cache_metric_with_two_labels(
-                            "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
-                            "namespace", "none", "method", method, json_value(cache_stats, legacy_total_key, 0));
-                    } else {
-                        for (const auto & ns : namespace_stats.items()) {
-                            write_cache_metric_with_two_labels(
-                                "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
-                                "namespace", ns.key(), "method", method, 0);
-                        }
+                    total = json_value(cache_stats, legacy_total_key, 0);
+                } else {
+                    for (const auto & ns : method_stats.items()) {
+                        total += ns.value().get<size_t>();
                     }
-                    return;
                 }
-                for (const auto & ns : method_stats.items()) {
-                    write_cache_metric_with_two_labels(
-                        "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by namespace and method.",
-                        "namespace", ns.key(), "method", method, ns.value());
-                }
+                GGML_UNUSED(namespace_stats);
+                write_cache_metric_with_label(
+                    "counter", "llamacpp:cache_branch_lookups_total", "Branch lookups by method.",
+                    "method", method, total);
             };
             write_cache_metric("counter", "llamacpp:cache_branch_lookup_hits_total", "Branch lookup hits by mode.", json_value(cache_stats, "n_branch_lookup_hits", 0));
             const json branch_forest = cache_stats.contains("branch_forest") ? cache_stats["branch_forest"] : json::object();
@@ -4446,18 +4525,17 @@ void server_routes::init_routes() {
             write_cache_metric_with_label("counter", "llamacpp:cache_branch_traversals_total", "Branch traversals by operation.", "operation", "descendants", json_value(branch_traversals, "descendants", 0));
             write_cache_metric_with_label("counter", "llamacpp:cache_branch_traversals_total", "Branch traversals by operation.", "operation", "children", json_value(branch_traversals, "children", 0));
             write_cache_metric("gauge",   "llamacpp:cache_namespace_count", "Current branch namespace count by mode.", namespace_stats.size());
-            if (namespace_stats.empty()) {
-                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_nodes", "Branch nodes by namespace.", "namespace", "none", 0);
-                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_roots", "Branch roots by namespace.", "namespace", "none", 0);
-                write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", "none", 0);
-            } else {
-                for (const auto & ns : namespace_stats.items()) {
-                    const std::string namespace_id = ns.key();
-                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_nodes", "Branch nodes by namespace.", "namespace", namespace_id, json_value(ns.value(), "nodes", 0));
-                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_roots", "Branch roots by namespace.", "namespace", namespace_id, json_value(ns.value(), "roots", 0));
-                    write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_metadata_bytes", "Branch metadata bytes by namespace.", "namespace", namespace_id, json_value(ns.value(), "metadata_bytes", 0));
-                }
+            size_t namespace_nodes = 0;
+            size_t namespace_roots = 0;
+            size_t namespace_metadata_bytes = 0;
+            for (const auto & ns : namespace_stats.items()) {
+                namespace_nodes += json_value(ns.value(), "nodes", 0);
+                namespace_roots += json_value(ns.value(), "roots", 0);
+                namespace_metadata_bytes += json_value(ns.value(), "metadata_bytes", 0);
             }
+            write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_nodes", "Branch nodes across namespaces.", "scope", "all", namespace_nodes);
+            write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_roots", "Branch roots across namespaces.", "scope", "all", namespace_roots);
+            write_cache_metric_with_label("gauge", "llamacpp:cache_namespace_metadata_bytes", "Branch metadata bytes across namespaces.", "scope", "all", namespace_metadata_bytes);
             write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_bytes", "Current branch metadata RAM bytes by mode.", json_value(cache_stats, "branch_metadata_bytes", 0));
             write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_soft_max_bytes", "Branch metadata RAM soft limit by mode.", json_value(cache_stats, "branch_metadata_soft_max_bytes", 0));
             write_cache_metric("gauge",   "llamacpp:cache_budget_branch_metadata_ratio", "Branch metadata RAM ratio by mode.", json_value(branch_forest, "metadata_ratio", 0.0));
@@ -4574,7 +4652,42 @@ void server_routes::init_routes() {
             // Step 10: Demotion failure reason counters
             write_cache_metric("counter", "llamacpp:cache_demotion_failure_write_error_total", "Demotion failures due to write error by mode.", json_value(cache_stats, "n_demotion_failure_write_error", 0));
             write_cache_metric("counter", "llamacpp:cache_demotion_failure_other_total", "Demotion failures due to other reasons by mode.", json_value(cache_stats, "n_demotion_failure_other", 0));
-            server_write_stage10_cache_rows(prometheus, mode, cache_stats);
+            write_stage10_rows_once(
+                "llamacpp:cache_exact_blob_restores_total",
+                "Exact blob restore attempts by bounded result shape.",
+                cache_stats.contains("cache_exact_blob_restores_by_shape") ?
+                    cache_stats["cache_exact_blob_restores_by_shape"] : json::array(),
+                {
+                    {"payload_kind", "none"},
+                    {"profile", "none"},
+                    {"pair_state", "none"},
+                    {"residency", "none"},
+                    {"result", "none"},
+                    {"reason", "none"},
+                });
+            write_stage10_rows_once(
+                "llamacpp:cache_payload_transitions_total",
+                "Payload promotion and demotion decisions by bounded result shape.",
+                cache_stats.contains("cache_payload_transitions_by_shape") ?
+                    cache_stats["cache_payload_transitions_by_shape"] : json::array(),
+                {
+                    {"operation", "none"},
+                    {"payload_kind", "none"},
+                    {"pair_state", "none"},
+                    {"result", "none"},
+                    {"reason", "none"},
+                });
+            write_stage10_rows_once(
+                "llamacpp:cache_payload_evictions_by_shape_total",
+                "Payload eviction decisions by bounded result shape.",
+                cache_stats.contains("cache_payload_evictions_by_shape") ?
+                    cache_stats["cache_payload_evictions_by_shape"] : json::array(),
+                {
+                    {"payload_kind", "none"},
+                    {"pair_state", "none"},
+                    {"result", "none"},
+                    {"reason", "none"},
+                });
             const json protected_rows = cache_stats.contains("cache_protected_root_decisions_by_shape") ?
                 cache_stats["cache_protected_root_decisions_by_shape"] : json::array();
             if (protected_rows.empty()) {

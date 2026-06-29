@@ -328,7 +328,7 @@ Condition:
 
 Action:
 
-- Do record independent design review as PASS in the review report, entry doc, index, and tracker; do keep Manager design gate explicitly pending and name Manager as next owner. Do not imply code work is authorized until Manager gate passes, even if tracker status moves to implementation-planning per task instruction.
+- Do record independent design review as PASS in the review report, entry doc, index, and tracker; do update every entry-doc gate field that still says `design`, `ready for design review`, or similar stale review-pending wording. Do keep Manager design gate explicitly pending and name Manager as next owner when that stage requires Manager approval before implementation planning. Do not imply code work is authorized until the required next gate passes, even if tracker status moves to implementation-planning per task instruction.
 
 ## Improvement: Operational stage design keeps architecture scope verbatim
 
@@ -2941,3 +2941,31 @@ Condition:
 Action:
 
 - Do fix MD041 by adding `# Title` as the first line and moving VERDICT below it as a section. Do fix MD056 by counting pipes in every row against the table header; if a row has fewer pipes than the header, do fix that row by splitting the long cell content (e.g., File+Line combined) into separate File and Line cells, or moving long content to a follow-up paragraph. Don't treat MD041 and MD056 as the same defect. Don't suppress MD041 to keep VERDICT as first line; user contract allowing VERDICT first is overridden by lint convention. Don't ignore MD056 as a false positive; it is a real column-count defect that downstream consumers parse.
+
+## Improvement: PowerShell disjoint line-range reads
+
+Condition:
+- Reading several non-contiguous line ranges from one file in PowerShell
+
+Action:
+- Do use separate `foreach($n in A..B)` loops or an array of explicit range objects. Don't assign `$ranges=@(A..B,C..D)` and then iterate as if each item were a range; PowerShell flattens or casts it poorly and can fail before any useful output.
+
+## Improvement: Whole-file ASCII scan after touching dirty index docs
+
+Condition:
+
+- Editing an already-dirty markdown index or tracker file under a user constraint that touched markdown must be ASCII-only
+
+Action:
+
+- Do scan the whole touched file for non-ASCII after edits, not only the new hunk. Do convert pre-existing non-ASCII punctuation in that touched file to ASCII equivalents before final verification. Don't claim ASCII compliance from the authored section alone.
+
+## Improvement: Focused evidence vs missing live rerun in implementation review
+
+Condition:
+
+- Reviewing implementation where the approved plan allows focused deterministic tests, but a prior live workload rerun has not been repeated after the fix
+
+Action:
+
+- Do decide pass or rework from the approved evidence contract and code-level coverage. Do record the missing live rerun as an advisory or Manager/QA gate decision when focused tests prove the root behavior and no design requirement mandates the live rerun. Don't hide the gap inside a PASS verdict, and don't block solely because a full rerun would be stronger evidence.

@@ -1,8 +1,8 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-06-23
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 24
+Last updated: 2026-06-29
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 31
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -207,6 +207,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 24: test output folder convention](./cache-handling-test-plan/part-24-test-output-folder-convention.md)
 - [Part 25: Stage 15 full test suite validation, bug-fix loop, and benchmark report](./cache-handling-test-plan/part-25-stage15-full-test-suite-validation.md)
 - [Part 29: Stage 24 chat S02/S03 comparison](./cache-handling-test-plan/part-29-stage24-chat-s02-s03-comparison.md)
+- [Part 35: Stage 31 hybrid cache misbehavior](./cache-handling-test-plan/part-35-stage31-hybrid-cache-misbehavior.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -248,6 +249,7 @@ cites the T114 row only and is not affected by the split.
 - [Stage 24 Manager CUDA rerun gate 02: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-02-20260624.md)
 - [Stage 24 Manager build-path gate: 2026-06-24](./cache-handling-test-plan/stage-24-manager-build-path-gate-20260624.md)
 - [Stage 24 Manager CUDA rerun gate 03: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-03-20260624.md)
+- [Stage 31 test-plan review: 2026-06-29](./cache-handling-test-plan/stage-31-test-plan-review-20260629.md)
 
 ## Test scripts
 

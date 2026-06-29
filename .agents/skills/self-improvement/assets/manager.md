@@ -93,6 +93,14 @@ Action:
 - Don't accept "the report says PASS" as evidence; the report file is durable but the cited evidence files may not be
 - Don't let cascade closure pressure (3-iteration limit, user "complete it" directive) override the disk-verification gate; verify first, close second
 
+## Improvement: no chat before required memory load
+
+Condition:
+- Task instructions require self-improvement memory loading before task work, and the session also needs skill-use announcement or progress update
+
+Action:
+- Do read the self-improvement skill and current role memory as the first action. Don't send a skill-use announcement, acknowledgement, or progress update until those reads complete. Treat announcements as task work for the memory-first rule.
+
 ## Improvement: hashtable round-trip via hashtable property can add leading whitespace under Start-Process invocation context
 
 Condition:
@@ -104,6 +112,15 @@ Action:
 - Do isolate the bug by running an identical hashtable round-trip in plain `pwsh -Command` (no `Start-Process`) and comparing the resulting string length and hex bytes; a discrepancy confirms the Start-Process boundary as the root cause
 - Don't use `$wl.workload` and similar hashtable property access patterns from Main after `Invoke-Phase05WorkloadBuild` returns; the call boundary may inject 2-3 leading whitespace bytes into the value, breaking `Get-Content -LiteralPath` and `Start-Process` ArgumentList processing
 - Don't use `.TrimStart()` alone as a permanent fix; it works but masks the underlying PowerShell scope quirk. Document the workaround in the driver code with a comment so future maintainers understand why the cast exists
+
+## Improvement: avoid near-cap shared test-plan edits at closure
+
+Condition:
+- Stage closure needs closed-state documentation and the shared `cache-handling-test-plan.md` entry file is already near the 300-line cap
+
+Action:
+- Do record final closure state in the stage implementation closure part and `document-index.md`; update test-plan part files or review records only if their content is stale or wrong
+- Don't add run-specific closure links or status churn to the shared test-plan entry file when it would force a split and the stage-specific test-plan part plus index already preserve the closure evidence
 
 ## Improvement: cascade closure applies even when user wants to complete the stage; the difference is which durable improvements are recorded
 
