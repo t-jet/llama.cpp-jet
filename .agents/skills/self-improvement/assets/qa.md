@@ -1066,3 +1066,25 @@ Condition:
 
 Action:
 - Do first stop the concrete server process by name or known PID, then enumerate candidate driver processes with full command lines and exclude the current PowerShell process id and any wrapper whose command line contains the cleanup query itself. Kill only the exact driver PID whose command line starts with `pwsh -NoProfile -File <driver.ps1>` and contains the target run id. Re-query after cleanup with an exact driver-script predicate, and treat self-matching query wrappers as noise rather than failed cleanup.
+
+## Improvement: verify hybrid cache_hits_total against actual duplicate message distribution before reporting FAIL
+
+Condition:
+- QA classifies the Hybrid reuse row of a full-comparison run as FAIL because `llamacpp:cache_hits_total{mode="hybrid"}` stayed at 0 across all completed hybrid legs, but the workload generator marked N requests as `cache_class=exact` without verifying how many actual duplicate message hashes exist and how spaced the duplicates are
+
+Action:
+- Do compute the unique-message-hash distribution among the cache_class=exact requests before classifying Hybrid reuse as FAIL. For each `cache_class=exact` request, hash the messages payload with SHA-256 and group by hash. If the unique-hash count equals the request count, the workload has no actual duplicates and 0 hits is expected regardless of cache health. If the unique-hash count is smaller, examine spacing: a hot cache of N entries can retain at most N anchor messages; if the duplicate spacing exceeds N requests, the second occurrence will miss.
+- Do record the hot cache budget (`--cache-ram`) and observed per-entry size from the metrics-after `cache_bytes` and `cache_entries` to compute the actual hot cache capacity. Compare capacity to the workload duplicate spacing.
+- Do also inspect the metrics-before of the warm cycle hybrid legs. If `cache_entries=0` at start, the cold-store is not auto-loaded into the hot cache at server start; this is a separate product observation, not a Stage 32 driver-extraction regression.
+- When 0 hits is observed but the workload is too sparse for the hot cache to retain duplicates, record the verdict as FAIL with a `workload-design` finding so the Developer can reclassify. Do not silently accept the runner classification without computing the unique-hash distribution and capacity-vs-spacing comparison.
+
+## Improvement: verify hybrid cache_hits_total against actual duplicate message distribution before reporting FAIL
+
+Condition:
+- QA classifies the Hybrid reuse row of a full-comparison run as FAIL because `llamacpp:cache_hits_total{mode="hybrid"}` stayed at 0 across all completed hybrid legs, but the workload generator marked N requests as `cache_class=exact` without verifying how many actual duplicate message hashes exist and how spaced the duplicates are
+
+Action:
+- Do compute the unique-message-hash distribution among the cache_class=exact requests before classifying Hybrid reuse as FAIL. For each `cache_class=exact` request, hash the messages payload with SHA-256 and group by hash. If the unique-hash count equals the request count, the workload has no actual duplicates and 0 hits is expected regardless of cache health. If the unique-hash count is smaller, examine spacing: a hot cache of N entries can retain at most N anchor messages; if the duplicate spacing exceeds N requests, the second occurrence will miss.
+- Do record the hot cache budget (`--cache-ram`) and observed per-entry size from the metrics-after `cache_bytes` and `cache_entries` to compute the actual hot cache capacity. Compare capacity to the workload duplicate spacing.
+- Do also inspect the metrics-before of the warm cycle hybrid legs. If `cache_entries=0` at start, the cold-store is not auto-loaded into the hot cache at server start; this is a separate product observation, not a Stage 32 driver-extraction regression.
+- When 0 hits is observed but the workload is too sparse for the hot cache to retain duplicates, record the verdict as FAIL with a `workload-design` finding so the Developer can reclassify. Do not silently accept the runner classification without computing the unique-hash distribution and capacity-vs-spacing comparison.

@@ -172,3 +172,18 @@ Action:
 - Don't implement code fixes, run QA evidence, or perform Developer review as
   Manager when the user has explicitly disallowed that role crossing and
   subagent delegation is available
+
+## Improvement: accept evidence-based reclassification when downstream reviewer proves upstream verdict rule was heuristic, not a hard contract
+
+Condition:
+- A downstream reviewer (Developer test-results review or Architect implementation review) returns a verdict that reclassifies one or more upstream QA FAIL rows to a non-bug status (EXPECTED BEHAVIOR, workload design mismatch, cache-budget mismatch, etc.), supported by concrete numerical analysis citing actual on-disk files (metrics-after.txt, requests.jsonl, driver source code line ranges, workload generator output)
+
+Action:
+- Do accept the reclassification when the downstream reviewer provides: (a) the upstream failure mode (e.g., 0 hits, 0 reuse, non-zero miss delta), (b) the upstream root cause hypothesis they tested, (c) the concrete numbers from the actual evidence files, (d) the discrepancy analysis (e.g., predicted hot-cache retention window vs measured duplicate inter-arrival interval), and (e) explicit "no product bug" or equivalent verdict
+- Do record the reclassification in the Manager closure with explicit decisions (D{N}-CLOSURE-XX) so a future reader can reconstruct why the original FAIL was accepted as a non-bug
+- Do require the reviewer to verify the cited driver / workload generator / architecture code path, not just the symptoms; the reclassification must explain why the upstream literal-verdict rule's precondition does not apply to this workload shape
+- Do spot-check the reviewer's cited file paths with Test-Path before accepting the reclassification, and verify at least one cited numerical claim against the actual file content (e.g., read the driver's extraction function and confirm it reads `usage.prompt_tokens_details.cached_tokens`)
+- Do require the reclassification to enumerate the upstream verdict rule (e.g., "FAIL when hybrid reuse remains zero") and explain why the rule's precondition was a heuristic, not a hard contract for this workload
+- Don't accept a reclassification based on the reviewer's intuition alone; require concrete file-path verification with Test-Path and concrete numerical evidence
+- Don't apply the literal verdict rule (e.g., "FAIL when hybrid reuse is zero") when the downstream evidence proves the rule's precondition was heuristic; the literal rule was a starting heuristic for the QA gate, not an absolute contract, and the Manager has authority to override it on evidence
+- Don't open a correction loop when the reclassification is backed by concrete numerical analysis; correction loops are for product bugs, not for workload-design mismatches

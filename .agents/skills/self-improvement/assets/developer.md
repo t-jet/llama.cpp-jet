@@ -2626,3 +2626,37 @@ Similar memory check:
 
 Memory update:
 - No new improvement entry added.
+
+## Improvement: Long-spaced duplicate workload produces 0 hits by eviction, not product regression
+
+Condition:
+- When a multi-cycle A/B comparison driver (e.g., Stage 29/33 `compare-legacy-vs-hybrid.ps1`) reports `llamacpp:cache_hits_total{mode="hybrid"} = 0` and `cache_n_gt_0` rows = 0 in `requests.jsonl` for hybrid legs, and an earlier focused retest from the same stage closure proved the driver extraction works (e.g., Stage 32 focused retest hit_delta=5 on 6 chat-completion requests), and the workload is the long-spaced 200-request agent shape rather than the tight-burst 6-request shape
+
+Action:
+- Do compute the concrete numbers before classifying as product regression: (a) hot cache capacity in entries = `floor(hot_budget_MiB / per_entry_MiB)` from final `cache_bytes` / `cache_entries`, (b) effective admission rate per slot from `prompt_ms` and `--parallel`, (c) predicted retention time for an admitted entry, (d) actual duplicate arrival interval from `cache_class=exact` workload rows grouped by message hash (compute `requests_between` per anchor, multiply by `prompt_ms/1000` for seconds), and (e) compare median and closest duplicate interval to predicted retention. If every measured duplicate interval exceeds predicted retention by a wide margin, classify the FAIL as workload design / cache-budget mismatch and not product bug; cite the actual numbers in the developer review. Don't re-grep driver extraction code or submit a fix before doing this calculation - in the Stage 33 case the driver was identical to Stage 32 (lines 148-162 of compare-legacy-vs-hybrid.ps1) but 78 `cache_class=exact` rows over 41 unique message hashes with median inter-arrival 758 s and closest 107 s far exceeded the ~25 s predicted retention of a 6-entry 512-MiB hot cache under `--parallel 2` and ~8.3 s per request, so 0 hits was the correct steady-state answer. Verified 2026-06-30 (Stage 33 test-results review).
+
+## Internal Post-Task Record (2026-06-30, Stage 33 test-results review)
+
+Task completed:
+
+- Yes.
+
+Effectiveness assessment:
+
+- Reclassified the Hybrid reuse FAIL to EXPECTED BEHAVIOR (workload design / cache-budget mismatch) after computing concrete numbers: hot cache fits 6 entries at 85 MiB; under --parallel 2 and ~8.3 s per request the predicted retention ceiling for an admitted entry is roughly 25-50 s; measured median exact-duplicate inter-arrival across 22 multi-occurrence anchors was 758 s with closest at 107 s. Driver extraction lines 148-162 of compare-legacy-vs-hybrid.ps1 are identical to Stage 32 focused retest; Stage 32 hit_delta=5 on tight-burst 6-request probe proves the extraction path. Driver-level `requests.jsonl` showed `cache_n_gt_0` rows = 0 across all 600 hybrid rows in 3 completed legs, and `cache_branch_lookup_hits_total{mode="hybrid"}` = 0 with 1000 cumulative branch_lookups, so the 0 hits is not a metric-extraction artifact. Cold-store auto-load is documented as on-demand (Stage 29 design L96: "cold-store load is also synchronous on first hit"; cache-handling-architecture L9: atomic transactional state machine with cold-store transitions running synchronously inside tx_*), not as a regression. Recommended Manager close Stage 33 as PARTIAL with the Hybrid reuse row reclassified.
+
+Improvement outcome candidate:
+
+- Condition: When a multi-cycle A/B comparison driver reports `cache_hits_total{mode="hybrid"} = 0` and `cache_n_gt_0` rows = 0 in `requests.jsonl` for hybrid legs, and an earlier focused retest from the same stage closure already proved driver extraction works, and the workload is the long-spaced 200-request shape rather than the tight-burst focused shape.
+- Action: Do compute concrete numbers (hot cache entry capacity, predicted retention time, actual duplicate arrival interval grouped by message hash) before classifying as product regression; if measured duplicate intervals exceed predicted retention by a wide margin, classify as workload design / cache-budget mismatch instead of submitting a fix.
+
+Similar memory check:
+
+- Similar improvement found: Partial.
+- Existing improvement: "Hybrid hot-budget eviction stall is a sustained-load defect, not a host-capacity issue" (Stage 24, evicted under sustained demote/evict stall; talks about a different scenario where the controller stalls, not workload-shape mismatch).
+- Existing improvement: "Test-results review gate classification" (broad, classifies into 5 categories but does not include the workload-spacing computation step).
+- Decision: Add new. The existing entries cover eviction stalls and gate-classification breadth, but none cover "compute duplicate-arrival interval vs hot-cache retention before reclassifying a 0-hits A/B comparison as product bug".
+
+Memory update:
+
+- Final improvement outcome stored under "Improvement: Long-spaced duplicate workload produces 0 hits by eviction, not product regression".
