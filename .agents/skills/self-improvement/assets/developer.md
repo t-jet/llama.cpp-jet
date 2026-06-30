@@ -2482,3 +2482,147 @@ Memory update:
     - When a user asks to read numbered implementation parts by approximate title or stale filename, and the first direct read fails for those paths
   - Action:
     - Do read the implementation entry document's part links and list the part directory before treating missing filenames as blockers; use the live linked filenames as authoritative when the part number and scope match.
+
+## Internal Post-Task Record (2026-06-30, Stage 32 implementation planning)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Planning-only gate completed without product or test-script edits. The plan recorded the approved design PASS, exact clean Release CUDA build and focused cache-test commands, stale-binary proof, driver dry-run and full live comparison command, artifact paths, post-processing requirements, classification rules, and non-goals. Existing uncommitted Stage 32 design/index rows were preserved, and the new implementation entry passed scoped hygiene checks.
+
+Improvement outcome candidate:
+- Condition:
+  - When a planning-only stage reuses a driver where a required run-shape value is hardcoded rather than exposed as a CLI parameter
+- Action:
+  - Do state where that value is set and whether the operator can pass it on the command line, so the execution plan still accounts for the required run shape
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Verify prompt facts against repo state before acting, plus durable planning-doc verification memories.
+- Decision:
+  - No new improvement. Existing rules already require verifying script parameters and documenting live facts from disk.
+
+Memory update:
+- No new improvement entry added.
+
+## Internal Post-Task Record (2026-06-30, Stage 32 implementation-plan correction)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Corrected a planning-only REWORK without running the comparison or editing product/test-script code. Added a part file because the executable stale-binary and post-processing commands would push the parent entry near the cap. Verified line counts, LF-only line endings, ASCII, no trailing whitespace, `git diff --check`, and PowerShell parse for the documented command blocks.
+
+Improvement outcome candidate:
+- Condition:
+  - When a planning correction needs executable commands that would bloat the parent implementation entry past the 300-line cap
+- Action:
+  - Do add a focused part file and keep the parent as a short status/link record, then verify both the parent and part stay under the cap
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Split near-limit planning docs early and durable planning-doc verification memories already require part files and cap checks.
+- Decision:
+  - No new improvement. Existing rules covered the behavior and were followed.
+
+Memory update:
+- No new improvement entry added.
+
+## Improvement: Verify live driver response schema before assigning cache behavior bugs
+
+Condition:
+- When a live comparison driver reports zero cache reuse or zero token reuse, but server metrics or focused probes suggest hits occurred, and the endpoint is not the same endpoint used by older scripts
+
+Action:
+- Do inspect the exact response schema for that endpoint before changing product restore code; for `/v1/chat/completions`, read cached prompt tokens from `usage.prompt_tokens_details.cached_tokens` and use `timings.cache_n` only as fallback. Don't classify zero driver `cache_n` as product save/restore failure until the driver is reading the endpoint's current cache-token field.
+
+## Improvement: Close every independent evidence channel before re-review
+
+Condition:
+- When a failed report has separate evidence channels for the same behavior, such as request-row cache reuse and Prometheus hit-delta counters, and a fix explains only one channel
+
+Action:
+- Do run or preserve a focused live probe that closes each independent channel before marking the fix ready for review. For Stage 32-style cache reuse, collect both parsed request rows with non-zero `cache_n` and a positive `llamacpp:cache_hits_total{mode="hybrid"}` delta from the same duplicate-request run.
+
+## Internal Post-Task Record (2026-06-30, Stage 32 F32-FIX-01/F32-FIX-02)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Took ownership of unowned draft edits, verified the Stage 32 failure docs and diffs, and corrected the key classification: zero live reuse in `requests.jsonl` was a Stage 29/32 driver extraction bug for chat completions, while `namespace="all"` remained a public metric-label product bug. Kept product restore code unchanged, narrowed the metric label fix, updated fix docs and implementation/index records, and gathered focused build/test evidence.
+
+Improvement outcome candidate:
+- Condition:
+  - When a live comparison driver reports zero cache reuse or zero token reuse, but server metrics or focused probes suggest hits occurred, and the endpoint differs from older script assumptions
+- Action:
+  - Do inspect the exact response schema for that endpoint before changing product restore code; for `/v1/chat/completions`, read cached prompt tokens from `usage.prompt_tokens_details.cached_tokens` and use `timings.cache_n` only as fallback
+
+Similar memory check:
+- Similar improvement found: No.
+- Existing improvement:
+  - None specific to endpoint response schema vs driver extraction.
+- Decision:
+  - Add new.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When a live comparison driver reports zero cache reuse or zero token reuse, but server metrics or focused probes suggest hits occurred, and the endpoint is not the same endpoint used by older scripts
+  - Action:
+    - Do inspect the exact response schema for that endpoint before changing product restore code; for `/v1/chat/completions`, read cached prompt tokens from `usage.prompt_tokens_details.cached_tokens` and use `timings.cache_n` only as fallback. Don't classify zero driver `cache_n` as product save/restore failure until the driver is reading the endpoint's current cache-token field.
+
+## Internal Post-Task Record (2026-06-30, Stage 32 fix-loop rework)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Rework closed the Architect's blocked evidence gap without product code changes. A live duplicate chat probe used a known exact duplicate from the Stage 32 workload, kept the run short, and captured both request-row reuse and `llamacpp:cache_hits_total{mode="hybrid"}` delta from the same server process. Docs were updated with artifact paths and exact values, and scoped hygiene passed. The prior fix-loop handoff missed an independent evidence channel, so review reopened even though the parser fix was correct.
+
+Improvement outcome candidate:
+- Condition:
+  - When a failed report has separate evidence channels for the same behavior, such as request-row cache reuse and Prometheus hit-delta counters, and a fix explains only one channel
+- Action:
+  - Do run or preserve a focused live probe that closes each independent channel before marking the fix ready for review
+
+Similar memory check:
+- Similar improvement found: Partial.
+- Existing improvement:
+  - Verify live driver response schema before assigning cache behavior bugs.
+- Decision:
+  - Add new. The existing entry covers schema-vs-product classification, but not closing all independent evidence channels before re-review.
+
+Memory update:
+- Final improvement outcome stored:
+  - Condition:
+    - When a failed report has separate evidence channels for the same behavior, such as request-row cache reuse and Prometheus hit-delta counters, and a fix explains only one channel
+  - Action:
+    - Do run or preserve a focused live probe that closes each independent channel before marking the fix ready for review. For Stage 32-style cache reuse, collect both parsed request rows with non-zero `cache_n` and a positive `llamacpp:cache_hits_total{mode="hybrid"}` delta from the same duplicate-request run.
+
+## Internal Post-Task Record (2026-06-30, Stage 32 focused-retest Developer review)
+
+Task completed:
+- Yes.
+
+Effectiveness assessment:
+- Review classified the focused retest as PASS after checking raw artifacts for clean Release CUDA build, direct controller, `ctest -R cache`, duplicate chat request reuse, hybrid hit-counter delta, namespace label shape, HELP/TYPE uniqueness, and server-log hygiene. Durable handoff now states that Manager may close the focused fix loop and that the full 150 to 180 minute comparison rerun is optional/advisory under shorter-run guidance.
+
+Improvement outcome candidate:
+- Condition:
+  - When reviewing a focused retest after an Architect re-review already scoped a shorter live probe
+- Action:
+  - Do distinguish fix-loop closure evidence from broader comparison evidence; close bugs on the focused gate when it covers every failed acceptance channel, and mark long comparison rerun optional unless Manager requires broader performance evidence
+
+Similar memory check:
+- Similar improvement found: Yes.
+- Existing improvement:
+  - Close every independent evidence channel before re-review.
+- Decision:
+  - No new improvement. Existing entry already requires closing each independent failed evidence channel before review; this task reinforced that pattern.
+
+Memory update:
+- No new improvement entry added.

@@ -163,6 +163,26 @@ function Send-Stage29ChatPrompt {
     return Invoke-RestMethod -Uri "$ServerUrl/v1/chat/completions" -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 60
 }
 
+function Get-Stage29ResponseStats {
+    param($Resp)
+    $cacheN = 0
+    $promptN = 0
+    $predictedN = 0
+    $promptMs = 0
+    if ($Resp.timings) {
+        if ($null -ne $Resp.timings.cache_n)     { $cacheN = [int]$Resp.timings.cache_n }
+        if ($null -ne $Resp.timings.prompt_n)    { $promptN = [int]$Resp.timings.prompt_n }
+        if ($null -ne $Resp.timings.predicted_n) { $predictedN = [int]$Resp.timings.predicted_n }
+        if ($null -ne $Resp.timings.prompt_ms)   { $promptMs = [double]$Resp.timings.prompt_ms }
+    }
+    if ($Resp.usage) {
+        if ($null -ne $Resp.usage.prompt_tokens_details.cached_tokens) { $cacheN = [int]$Resp.usage.prompt_tokens_details.cached_tokens }
+        if ($null -ne $Resp.usage.prompt_tokens)                       { $promptN = [int]$Resp.usage.prompt_tokens }
+        if ($null -ne $Resp.usage.completion_tokens)                   { $predictedN = [int]$Resp.usage.completion_tokens }
+    }
+    return [pscustomobject]@{ cache_n = $cacheN; prompt_n = $promptN; predicted_n = $predictedN; prompt_ms = $promptMs }
+}
+
 function Invoke-CycleLeg {
     param([int]$Cycle, [string]$Mode, [string]$WorkloadPath, [string]$Phase)
     $legDir = Join-Path $RunRoot ("$Phase-cycle-$Cycle/$Mode")
@@ -180,7 +200,7 @@ function Invoke-CycleLeg {
         foreach ($line in $lines) {
             $obj = $line | ConvertFrom-Json
             $resp = Send-Stage29ChatPrompt -ServerUrl "http://127.0.0.1:$BasePort" -MessagesJson (ConvertTo-Json -InputObject $obj.messages -Depth 10 -Compress) -MaxTokens $obj.max_tokens -SeedVal $obj.seed
-            $t = $resp.timings
+            $t = Get-Stage29ResponseStats -Resp $resp
             $row = [pscustomobject]@{ request_id = $obj.request_id; cache_class = $obj.cache_class; cache_n = $t.cache_n; prompt_n = $t.prompt_n; predicted_n = $t.predicted_n; prompt_ms = $t.prompt_ms; cache_n_ratio = if ($t.prompt_n -gt 0) { [math]::Round($t.cache_n / $t.prompt_n, 4) } else { 0 }; cache_hit = ($t.cache_n -gt 0); http_status = 200 }
             [void]$reqOut.Add(($row | ConvertTo-Json -Compress))
             if ($counts.ContainsKey($obj.cache_class)) { $counts[$obj.cache_class]++ }

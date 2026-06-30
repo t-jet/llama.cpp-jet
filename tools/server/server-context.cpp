@@ -221,6 +221,28 @@ std::string server_cache_stage31_prometheus_rows_for_tests(const json & cache_st
         prometheus << name << "{mode=\"" << mode << "\"," << label << "=\""
                    << server_prometheus_label_value(value) << "\"} " << sample << "\n";
     };
+    const auto two_labels = [&](const char * type, const char * name, const char * help,
+            const char * label1, const std::string & value1,
+            const char * label2, const std::string & value2,
+            size_t sample) {
+        header(type, name, help);
+        prometheus << name << "{mode=\"" << mode << "\","
+                   << label1 << "=\"" << server_prometheus_label_value(value1) << "\","
+                   << label2 << "=\"" << server_prometheus_label_value(value2) << "\"} "
+                   << sample << "\n";
+    };
+    const auto three_labels = [&](const char * type, const char * name, const char * help,
+            const char * label1, const std::string & value1,
+            const char * label2, const std::string & value2,
+            const char * label3, const std::string & value3,
+            size_t sample) {
+        header(type, name, help);
+        prometheus << name << "{mode=\"" << mode << "\","
+                   << label1 << "=\"" << server_prometheus_label_value(value1) << "\","
+                   << label2 << "=\"" << server_prometheus_label_value(value2) << "\","
+                   << label3 << "=\"" << server_prometheus_label_value(value3) << "\"} "
+                   << sample << "\n";
+    };
 
     const json branch_lookup_namespaces = cache_stats.contains("branch_lookup_namespaces") ?
         cache_stats["branch_lookup_namespaces"] : json::object();
@@ -256,6 +278,39 @@ std::string server_cache_stage31_prometheus_rows_for_tests(const json & cache_st
         "Branch roots across namespaces.", "scope", "all", roots);
     one_label("gauge", "llamacpp:cache_namespace_metadata_bytes",
         "Branch metadata bytes across namespaces.", "scope", "all", metadata_bytes);
+    two_labels("counter", "llamacpp:cache_metadata_only_retentions_total",
+        "Nodes retained after payload eviction.", "scope", "all", "reason", "evicted",
+        json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
+    two_labels("counter", "llamacpp:cache_node_rematerializations_total",
+        "Re-materialization attempts and outcomes.", "scope", "all", "result", "success",
+        json_value(cache_stats, "cache_node_rematerializations_total", 0));
+    one_label("counter", "llamacpp:cache_node_rematerialization_bytes_total",
+        "Payload bytes recreated for metadata-only nodes.", "scope", "all",
+        json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
+    two_labels("counter", "llamacpp:cache_validation_mismatches_total",
+        "Token or checksum validation mismatches.", "scope", "all", "method", "token_span",
+        json_value(cache_stats, "cache_validation_mismatches_total", 0));
+    two_labels("counter", "llamacpp:cache_mismatch_parent_selections_total",
+        "New-branch parent selections after mismatch.", "scope", "all", "source", "metadata_validation",
+        json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
+    two_labels("counter", "llamacpp:cache_equivalent_branch_deduplications_total",
+        "Equivalent branch reuse or canonicalization.", "scope", "all", "action", "reuse_or_rematerialize",
+        json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+    three_labels("counter", "llamacpp:cache_branch_pruning_total",
+        "Branch metadata pruning attempts and outcomes.", "scope", "all", "result", "success", "reason", "metadata_budget",
+        json_value(cache_stats, "cache_branch_pruning_total", 0));
+    one_label("counter", "llamacpp:cache_branch_pruned_metadata_bytes_total",
+        "Metadata bytes freed by pruning.", "scope", "all",
+        json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
+    two_labels("counter", "llamacpp:cache_cold_cleanup_total",
+        "Cold cleanup attempts after eviction or pruning.", "scope", "all", "result", "success",
+        json_value(cache_stats, "cache_cold_cleanup_total", 0));
+    two_labels("counter", "llamacpp:cache_cold_cleanup_startup_orphan_total",
+        "Orphan .cold files deleted at startup by reconcile pass.", "scope", "all", "result", "success",
+        json_value(cache_stats, "cache_cold_cleanup_startup_orphan_total", 0));
+    two_labels("counter", "llamacpp:cache_branch_metadata_admission_rejections_total",
+        "Metadata admissions refused because safe pruning could not satisfy budget.", "scope", "all", "reason", "metadata_budget",
+        json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
     return prometheus.str();
 }
 #endif
@@ -4745,17 +4800,17 @@ void server_routes::init_routes() {
                         json_value(row, "value", 0));
                 }
             }
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "namespace", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
-            write_cache_metric_with_label("counter", "llamacpp:cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "namespace", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_validation_mismatches_total", "Token or checksum validation mismatches.", "namespace", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "namespace", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "namespace", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
-            write_cache_metric_with_three_labels("counter", "llamacpp:cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "namespace", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
-            write_cache_metric_with_label("counter", "llamacpp:cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "namespace", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_startup_orphan_total", "Orphan .cold files deleted at startup by reconcile pass.", "namespace", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_startup_orphan_total", 0));
-            write_cache_metric_with_two_labels("counter", "llamacpp:cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "namespace", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_metadata_only_retentions_total", "Nodes retained after payload eviction.", "scope", "all", "reason", "evicted", json_value(cache_stats, "cache_metadata_only_retentions_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_node_rematerializations_total", "Re-materialization attempts and outcomes.", "scope", "all", "result", "success", json_value(cache_stats, "cache_node_rematerializations_total", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_node_rematerialization_bytes_total", "Payload bytes recreated for metadata-only nodes.", "scope", "all", json_value(cache_stats, "cache_node_rematerialization_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_validation_mismatches_total", "Token or checksum validation mismatches.", "scope", "all", "method", "token_span", json_value(cache_stats, "cache_validation_mismatches_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_mismatch_parent_selections_total", "New-branch parent selections after mismatch.", "scope", "all", "source", "metadata_validation", json_value(cache_stats, "cache_mismatch_parent_selections_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_equivalent_branch_deduplications_total", "Equivalent branch reuse or canonicalization.", "scope", "all", "action", "reuse_or_rematerialize", json_value(cache_stats, "cache_equivalent_branch_deduplications_total", 0));
+            write_cache_metric_with_three_labels("counter", "llamacpp:cache_branch_pruning_total", "Branch metadata pruning attempts and outcomes.", "scope", "all", "result", "success", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_pruning_total", 0));
+            write_cache_metric_with_label("counter", "llamacpp:cache_branch_pruned_metadata_bytes_total", "Metadata bytes freed by pruning.", "scope", "all", json_value(cache_stats, "cache_branch_pruned_metadata_bytes_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_total", "Cold cleanup attempts after eviction or pruning.", "scope", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_cold_cleanup_startup_orphan_total", "Orphan .cold files deleted at startup by reconcile pass.", "scope", "all", "result", "success", json_value(cache_stats, "cache_cold_cleanup_startup_orphan_total", 0));
+            write_cache_metric_with_two_labels("counter", "llamacpp:cache_branch_metadata_admission_rejections_total", "Metadata admissions refused because safe pruning could not satisfy budget.", "scope", "all", "reason", "metadata_budget", json_value(cache_stats, "cache_branch_metadata_admission_rejections_total", 0));
             const auto write_checkpoint_hits = [&]() {
                 const json rows = cache_stats.contains("cache_checkpoint_hits_by_shape") ?
                     cache_stats["cache_checkpoint_hits_by_shape"] : json::array();

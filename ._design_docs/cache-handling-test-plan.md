@@ -1,8 +1,8 @@
 # Cache handling test plan
 
 Status: Active
-Last updated: 2026-06-29
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 31
+Last updated: 2026-06-30
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 32
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -179,7 +179,7 @@ Implemented behavior that must be covered:
 - No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
 - Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
 - Stage 13 keeps endpoint cache behavior selected by server flags and internal metadata. Public request and response schemas, `/slots`, and fork-only marker behavior must remain stable. Embedding routes are metadata-excluded unless a future implementation adds a real embedding cache save/restore path.
-- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`.
+- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`. Stage 32 reruns the Stage 29/30 legacy-vs-hybrid comparison after the Stage 31 namespace and metric-shape fixes, with clean Release CUDA build proof, focused controller evidence, stale-binary proof, dry-run/preflight, full comparison artifacts under `_test_output/stage32-cache-modes-YYYYMMDD-NN/`, and a durable Stage 32 report under `.test_reports/`.
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -208,6 +208,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 25: Stage 15 full test suite validation, bug-fix loop, and benchmark report](./cache-handling-test-plan/part-25-stage15-full-test-suite-validation.md)
 - [Part 29: Stage 24 chat S02/S03 comparison](./cache-handling-test-plan/part-29-stage24-chat-s02-s03-comparison.md)
 - [Part 35: Stage 31 hybrid cache misbehavior](./cache-handling-test-plan/part-35-stage31-hybrid-cache-misbehavior.md)
+- [Part 36: Stage 32 live comparison rerun](./cache-handling-test-plan/part-36-stage32-live-comparison-rerun.md)
 
 ## T114 split (Stage 11 onward)
 

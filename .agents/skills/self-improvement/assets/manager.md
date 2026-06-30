@@ -157,3 +157,18 @@ Action:
 - Do consider reducing `Cycles` to 2 (1 cold + 1 warm) for sub-90-min runs, accepting that PR-03 (per-request cache_n) and AG-02 (p50/p99 latency) will remain PARTIAL
 - Do document the per-leg timing observation in the test report's "Wall-clock budget analysis" section so future readers can plan their runs
 - Don't claim PARTIAL wall-clock-limited rows as BLOCKED-structural; the cause is timing, not architecture
+
+## Improvement: respect Manager role boundary when subagents are available
+
+Condition:
+- User explicitly says the current agent is Manager and must delegate work to
+  subagents according to process; subagent tools are available
+
+Action:
+- Do delegate Developer, Architect, and QA duties to the matching subagents,
+  even if prior context included a subagent credit-limit workaround
+- Do limit local Manager work to sequencing, gate decisions, closure records,
+  index updates, and user status
+- Don't implement code fixes, run QA evidence, or perform Developer review as
+  Manager when the user has explicitly disallowed that role crossing and
+  subagent delegation is available

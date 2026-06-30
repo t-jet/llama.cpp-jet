@@ -58,7 +58,7 @@ Condition:
 
 Action:
 
-- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Do distinguish historical quoted findings from current contradictions. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
+- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
 
 ## Improvement: Contingency-branch stale wording hides after status-line fix
 
@@ -2875,6 +2875,16 @@ Action:
 
 - Do put the VERDICT line as the first line of the file before any heading; do suppress Markdown linter MD041 (first-line-heading) on this row by user override. Do still ensure trailing newline (MD047), LF-only (no CR), no BOM, no trailing whitespace, and under 300 lines. Do run git diff --check on the review file. Do convert Windows tool-inserted CRLF to LF by stripping all 0x0D bytes and writing back via [System.IO.File]::WriteAllBytes. Do not pad a separate blank line after the VERDICT row if the user wants the verdict on the first line of the file.
 
+## Improvement: Parser fix must close every evidence channel
+
+Condition:
+
+- Reviewing a fix loop where Developer reclassifies a live product failure as a driver, extractor, or parser bug, but the failed report also cites independent evidence channels such as metric deltas, server logs, counters, or filesystem state
+
+Action:
+
+- Do trace each cited evidence channel back to its producer before approving the reclassification. Do require the fix report to explain why each binding channel was false or to provide new focused evidence that closes it. Don't let a request-row parser fix close metric-delta or server-log failures unless those channels share the same bug or have fresh proof.
+
 
 
 
@@ -2932,6 +2942,33 @@ Action:
 
 - Do read raw bytes after `create_file` to confirm CR=0 and non-ASCII=0. Do strip CR bytes via `[System.IO.File]::ReadAllBytes` + `Where-Object { $_ -ne 0x0D }` + `WriteAllBytes`. Do scan for any byte > 0x7F and identify whether the sequence is UTF-8 multi-byte (e.g., 0xE2 0x80 0x94 = em dash, 0xC3 0x97 = multiplication sign). Do replace em dash with `--`, multiplication with `x`, right-arrow with `->`, and other punctuation with ASCII equivalents before byte-level check. Do verify last byte is 0x0A after the CR strip. Don't trust `create_file` to honor the "ASCII only" constraint even when the author thinks they wrote ASCII. Don't use `ReadAllText` then `WriteAllText` for the CR strip; the round-trip preserves CR. Do use `WriteAllBytes` from the byte array.
 
+## Post-task review 2026-06-30 (Stage 32 fix re-review)
+
+Task completed:
+
+- Yes
+
+Effectiveness assessment:
+
+- Re-reviewed Stage 32 fix evidence, wrote PASS part 05, updated the implementation entry, index, and active fix report, and verified line count plus byte hygiene. Existing gate-wording memory prevented stale "pending re-review" handoff from staying in the fix report.
+
+Improvement outcome candidate:
+
+- Condition:
+  - When a re-review PASS closes an earlier REWORK and opens QA
+- Action:
+  - Do update the new review part, implementation entry, active fix report, and index in one sweep; then grep for stale pending/rework handoff phrases.
+
+Similar memory check:
+
+- Similar improvement found: Yes
+- Existing improvement: Gate wording with open findings
+- Decision: No update; existing rule already covers entry docs, active fix reports, index summaries, and stale-status grep after gate advances.
+
+Memory update:
+
+- No new improvement; existing gate-wording rule was applied.
+
 ## Improvement: MD041 verdict-first vs MD056 column-count defect
 
 Condition:
@@ -2969,3 +3006,23 @@ Condition:
 Action:
 
 - Do decide pass or rework from the approved evidence contract and code-level coverage. Do record the missing live rerun as an advisory or Manager/QA gate decision when focused tests prove the root behavior and no design requirement mandates the live rerun. Don't hide the gap inside a PASS verdict, and don't block solely because a full rerun would be stronger evidence.
+
+## Improvement: Near-cap design docs need line-count-aware linking
+
+Condition:
+
+- Authoring or updating a single-file stage design or review doc under the 300-line document-index cap, especially when adding review links/status to a parent doc already near the cap
+
+Action:
+
+- Do check `(Get-Content path).Count` before and after the first patch and before final hygiene checks. If the parent is close to 300 lines, add the review link/status by replacing or extending an existing status line instead of creating a new section. If the file is over 300 lines by only a small amount, condense duplicated checklist or handoff text instead of splitting. Do not proceed to final verification until the entry doc is 300 lines or fewer.
+
+## Improvement: Prose-only evidence extraction blocks QA handoff
+
+Condition:
+
+- Reviewing an implementation or test-execution plan where the approved design requires QA to extract metrics, classify results, or prove hygiene from run artifacts
+
+Action:
+
+- Do require executable extraction commands or a named evidence-only extractor with fixed output paths and accepted regex/schema rules. Don't accept prose bullets such as "grep for labels" or "report p50/p99" when QA would have to choose patterns, files, thresholds, or destination paths. Do flag as BLOCKING when stale-binary proof names a timestamp rule but omits the source-file baseline to compare against.

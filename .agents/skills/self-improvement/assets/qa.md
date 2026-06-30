@@ -80,6 +80,14 @@ Condition:
 Action:
 - Inspect generated report before accepting run. Use markdown fences PowerShell will not escape inside expandable strings, such as tildes or doubled backticks. If the runner writes a minimal or preliminary durable report and QA later replaces it with the final Markdown, rerun leak and hygiene checks against the final file, not only the runner-written version.
 
+## Improvement: materialize zero-result diagnostic artifacts
+
+Condition:
+- QA report cites diagnostic files for empty result sets, such as no forbidden log hits, no HELP/TYPE duplicates, or no metric-label findings
+
+Action:
+- Do explicitly create those files as zero-byte or valid empty JSON artifacts and verify `Test-Path` plus file length before citing them. PowerShell pipelines over empty arrays may skip `Set-Content`, leaving no file even though the summary count is zero. If the report says "empty", make the artifact truly empty or change the wording to cite the summary count instead.
+
 ## Improvement: keep report suffixes chronological
 
 Condition:
@@ -150,7 +158,7 @@ Condition:
 - Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
 
 Action:
-- Check initial line counts before editing near-limit QA docs, and draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index; for files under `._design_docs/cache-handling-test-plan/`, sibling design docs usually resolve as `../cache-handling-*.md`, not `../../cache-handling-*.md`. Rerun line-count, ASCII-byte, LF/no-CR, BOM, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including fresh untracked reports and part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
+- Check initial physical line counts before editing near-limit QA docs, using `@(Get-Content <path>).Count` rather than `Measure-Object -Line`, because the latter can undercount blank records on PowerShell. Draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index; for files under `._design_docs/cache-handling-test-plan/`, sibling design docs usually resolve as `../cache-handling-*.md`, not `../../cache-handling-*.md`. Rerun line-count, ASCII-byte, LF/no-CR, BOM, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including fresh untracked reports and part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
 
 ## Improvement: separate own QA edits from dirty sources
 
@@ -158,7 +166,7 @@ Condition:
 - QA review task uses or indexes documents that are already modified or untracked in working tree
 
 Action:
-- Check `git status --short` for reviewed and edited paths before editing. If final `git diff` includes older dirty changes in the same files, separate them from the review-owned patch by comparing against the pre-edit status and the specific lines added during the session. Report only review-owned edits as own handoff changes, and note pre-existing dirty files only as context.
+- Check `git status --short` for reviewed and edited paths before editing. If final `git diff` includes older dirty changes in the same files, separate them from the review-owned patch by comparing against the pre-edit status and the specific lines added during the session. When an index already contains uncommitted same-stage rows or linked part files, report only the row/file added in the current session as your change. Note pre-existing dirty files only as context.
 
 ## Improvement: blank line between single-line label and following list
 
@@ -1050,3 +1058,11 @@ Action:
 - Do run the actual driver end-to-end after every Developer fix, not just the dry-run gate. Capture stdout and inspect the first emitted line as raw bytes ([System.IO.File]::ReadAllBytes + hex dump) to confirm the bug is gone, not just moved.
 - When the fix is insufficient, classify it as PARTIAL-fix-ineffective in the QA report and explicitly enumerate what was verified working (e.g. Edit 1 of 2) vs what did not resolve the bug (e.g. Edit 2 of 2). This lets the next Developer iterate on a known-scope sub-bug rather than restart the investigation.
 - Do cite the byte-identical reproduction (same hex bytes at same offset) to prove the bug is the same one across sessions, not a new variant. The driver line number where the fatal exit happens is a strong corroborator.
+
+## Improvement: avoid self-matching process cleanup during budget stops
+
+Condition:
+- QA must stop a long-running driver or server after a wall-clock budget, and cleanup uses `Get-CimInstance Win32_Process` or command-line substring filters that include the run id, script name, or command text
+
+Action:
+- Do first stop the concrete server process by name or known PID, then enumerate candidate driver processes with full command lines and exclude the current PowerShell process id and any wrapper whose command line contains the cleanup query itself. Kill only the exact driver PID whose command line starts with `pwsh -NoProfile -File <driver.ps1>` and contains the target run id. Re-query after cleanup with an exact driver-script predicate, and treat self-matching query wrappers as noise rather than failed cleanup.

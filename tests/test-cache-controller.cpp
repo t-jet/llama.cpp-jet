@@ -1641,6 +1641,17 @@ void test_stage31_metric_shape_bounded_labels() {
                 }},
             }},
         }},
+        {"cache_metadata_only_retentions_total", 7},
+        {"cache_node_rematerializations_total", 2},
+        {"cache_node_rematerialization_bytes_total", 128},
+        {"cache_validation_mismatches_total", 3},
+        {"cache_mismatch_parent_selections_total", 4},
+        {"cache_equivalent_branch_deduplications_total", 5},
+        {"cache_branch_pruning_total", 6},
+        {"cache_branch_pruned_metadata_bytes_total", 64},
+        {"cache_cold_cleanup_total", 8},
+        {"cache_cold_cleanup_startup_orphan_total", 9},
+        {"cache_branch_metadata_admission_rejections_total", 10},
     };
 
     const std::string rows = server_cache_stage31_prometheus_rows_for_tests(stats);
@@ -1658,6 +1669,16 @@ void test_stage31_metric_shape_bounded_labels() {
         "TP31-05 checksum lookup total not aggregated");
     require_or_abort(rows.find("scope=\"all\"} 10") != std::string::npos,
         "TP31-05 namespace node total not aggregated");
+    require_or_abort(rows.find("namespace=\"all\"") == std::string::npos,
+        "TP31-05 aggregate namespace label leaked");
+    require_or_abort(rows.find("scope=\"all\",reason=\"evicted\"} 7") != std::string::npos,
+        "TP31-05 metadata-only retention aggregate label not bounded");
+    require_or_abort(rows.find("scope=\"all\",result=\"success\"} 2") != std::string::npos,
+        "TP31-05 rematerialization aggregate label not bounded");
+    require_or_abort(rows.find("scope=\"all\",method=\"token_span\"} 3") != std::string::npos,
+        "TP31-05 validation mismatch aggregate label not bounded");
+    require_or_abort(rows.find("scope=\"all\",reason=\"metadata_budget\"} 10") != std::string::npos,
+        "TP31-05 metadata admission aggregate label not bounded");
 
     printf("  PASSED\n");
 }

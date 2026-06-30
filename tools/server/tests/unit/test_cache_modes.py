@@ -49,16 +49,16 @@ def assert_cache_stats_shape(stats, expected_type):
 
 
 def assert_cache_metrics_shape(body, expected_type):
-    assert f'llamacpp_cache_entries{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_bytes{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_tokens{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_payload_evictions_total{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_protected_root_decisions_total{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_descriptor_validation_failures_total{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_pairing_violations_total{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_fallback_restores_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_entries{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_bytes{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_tokens{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_payload_evictions_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_protected_root_decisions_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_descriptor_validation_failures_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_pairing_violations_total{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_fallback_restores_total{{mode="{expected_type}"}}' in body
     assert f'cache_branch_nodes_created_total{{mode="{expected_type}"}}' in body
-    assert f'cache_branch_lookups_total{{mode="{expected_type}",namespace=' in body
+    assert f'cache_branch_lookups_total{{mode="{expected_type}",method=' in body
     assert 'method="token_span"' in body
     assert 'method="checksum_span"' in body
     assert f'cache_branch_lookup_hits_total{{mode="{expected_type}"}}' in body
@@ -67,23 +67,23 @@ def assert_cache_metrics_shape(body, expected_type):
     assert 'operation="descendants"' in body
     assert 'operation="children"' in body
     assert f'cache_namespace_count{{mode="{expected_type}"}}' in body
-    assert f'cache_namespace_nodes{{mode="{expected_type}",namespace=' in body
-    assert f'cache_namespace_roots{{mode="{expected_type}",namespace=' in body
-    assert f'cache_namespace_metadata_bytes{{mode="{expected_type}",namespace=' in body
+    assert f'cache_namespace_nodes{{mode="{expected_type}",scope="all"}}' in body
+    assert f'cache_namespace_roots{{mode="{expected_type}",scope="all"}}' in body
+    assert f'cache_namespace_metadata_bytes{{mode="{expected_type}",scope="all"}}' in body
     assert f'cache_budget_branch_metadata_bytes{{mode="{expected_type}"}}' in body
     assert f'cache_budget_branch_metadata_soft_max_bytes{{mode="{expected_type}"}}' in body
     assert f'cache_budget_branch_metadata_ratio{{mode="{expected_type}"}}' in body
     assert f'cache_budget_branch_metadata_over_limit{{mode="{expected_type}"}}' in body
-    assert f'cache_metadata_only_retentions_total{{mode="{expected_type}",namespace="all",reason="evicted"}}' in body
-    assert f'cache_node_rematerializations_total{{mode="{expected_type}",namespace="all",result="success"}}' in body
-    assert f'cache_node_rematerialization_bytes_total{{mode="{expected_type}",namespace="all"}}' in body
-    assert f'cache_validation_mismatches_total{{mode="{expected_type}",namespace="all",method="token_span"}}' in body
-    assert f'cache_mismatch_parent_selections_total{{mode="{expected_type}",namespace="all",source="metadata_validation"}}' in body
-    assert f'cache_equivalent_branch_deduplications_total{{mode="{expected_type}",namespace="all",action="reuse_or_rematerialize"}}' in body
-    assert f'cache_branch_pruning_total{{mode="{expected_type}",namespace="all",result="success",reason="metadata_budget"}}' in body
-    assert f'cache_branch_pruned_metadata_bytes_total{{mode="{expected_type}",namespace="all"}}' in body
-    assert f'cache_cold_cleanup_total{{mode="{expected_type}",namespace="all",result="success"}}' in body
-    assert f'cache_branch_metadata_admission_rejections_total{{mode="{expected_type}",namespace="all",reason="metadata_budget"}}' in body
+    assert f'cache_metadata_only_retentions_total{{mode="{expected_type}",scope="all",reason="evicted"}}' in body
+    assert f'cache_node_rematerializations_total{{mode="{expected_type}",scope="all",result="success"}}' in body
+    assert f'cache_node_rematerialization_bytes_total{{mode="{expected_type}",scope="all"}}' in body
+    assert f'cache_validation_mismatches_total{{mode="{expected_type}",scope="all",method="token_span"}}' in body
+    assert f'cache_mismatch_parent_selections_total{{mode="{expected_type}",scope="all",source="metadata_validation"}}' in body
+    assert f'cache_equivalent_branch_deduplications_total{{mode="{expected_type}",scope="all",action="reuse_or_rematerialize"}}' in body
+    assert f'cache_branch_pruning_total{{mode="{expected_type}",scope="all",result="success",reason="metadata_budget"}}' in body
+    assert f'cache_branch_pruned_metadata_bytes_total{{mode="{expected_type}",scope="all"}}' in body
+    assert f'cache_cold_cleanup_total{{mode="{expected_type}",scope="all",result="success"}}' in body
+    assert f'cache_branch_metadata_admission_rejections_total{{mode="{expected_type}",scope="all",reason="metadata_budget"}}' in body
     assert f'cache_eviction_payloads_total{{mode="{expected_type}",action=' in body
     assert f'cache_eviction_payload_bytes_total{{mode="{expected_type}",action=' in body
     assert f'cache_eviction_payload_blocked_refs_total{{mode="{expected_type}"}}' in body
@@ -96,8 +96,8 @@ def assert_cache_metrics_shape(body, expected_type):
     assert f'cache_forest_lock_retries_total{{mode="{expected_type}"}}' in body
     assert f'cache_namespace_validations_total{{mode="{expected_type}",result=' in body
     assert f'cache_slot_ref_concurrent_peak{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_hot_payload_descriptors{{mode="{expected_type}"}}' in body
-    assert f'llamacpp_cache_evicted_payload_descriptors{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_hot_payload_descriptors{{mode="{expected_type}"}}' in body
+    assert f'llamacpp:cache_evicted_payload_descriptors{{mode="{expected_type}"}}' in body
 
 
 def server_binary_path():
@@ -160,9 +160,9 @@ def test_hybrid_cache_metrics_and_repeated_restore():
     metrics = server.make_request("GET", "/metrics")
     assert metrics.status_code == 200
     assert_cache_metrics_shape(metrics.body, "hybrid")
-    assert 'llamacpp_cache_hits_total{mode="hybrid"} 0' in metrics.body
-    assert 'llamacpp_cache_misses_total{mode="hybrid"} 0' in metrics.body
-    assert 'llamacpp_cache_restore_failures_total{mode="hybrid"} 0' in metrics.body
+    assert 'llamacpp:cache_hits_total{mode="hybrid"} 0' in metrics.body
+    assert 'llamacpp:cache_misses_total{mode="hybrid"} 0' in metrics.body
+    assert 'llamacpp:cache_restore_failures_total{mode="hybrid"} 0' in metrics.body
 
     first = server.make_request("POST", "/completion", data={
         "prompt": LONG_PROMPT,
@@ -181,7 +181,7 @@ def test_hybrid_cache_metrics_and_repeated_restore():
 
     after_save = server.make_request("GET", "/metrics")
     assert after_save.status_code == 200
-    assert 'llamacpp_cache_entries{mode="hybrid"} 0' not in after_save.body
+    assert 'llamacpp:cache_entries{mode="hybrid"} 0' not in after_save.body
 
     erase_before_restore = server.make_request("POST", "/slots/0?action=erase")
     assert erase_before_restore.status_code == 200
@@ -196,7 +196,7 @@ def test_hybrid_cache_metrics_and_repeated_restore():
 
     after_first_restore = server.make_request("GET", "/metrics")
     assert after_first_restore.status_code == 200
-    assert 'llamacpp_cache_hits_total{mode="hybrid"} 0' not in after_first_restore.body
+    assert 'llamacpp:cache_hits_total{mode="hybrid"} 0' not in after_first_restore.body
 
     erase = server.make_request("POST", "/slots/0?action=erase")
     assert erase.status_code == 200
@@ -211,7 +211,7 @@ def test_hybrid_cache_metrics_and_repeated_restore():
 
     after_second_restore = server.make_request("GET", "/metrics")
     assert after_second_restore.status_code == 200
-    assert 'llamacpp_cache_entries{mode="hybrid"} 0' not in after_second_restore.body
+    assert 'llamacpp:cache_entries{mode="hybrid"} 0' not in after_second_restore.body
 
 
 def test_hybrid_cache_restore_without_request_cache_prompt_reports_cache_n():
@@ -235,4 +235,4 @@ def test_hybrid_cache_restore_without_request_cache_prompt_reports_cache_n():
 
     metrics = server.make_request("GET", "/metrics")
     assert metrics.status_code == 200
-    assert 'llamacpp_cache_hits_total{mode="hybrid"} 0' not in metrics.body
+    assert 'llamacpp:cache_hits_total{mode="hybrid"} 0' not in metrics.body
