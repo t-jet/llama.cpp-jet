@@ -34,6 +34,8 @@ The following will result in immediate PR closure:
 
 ## Guidelines for AI Coding Agents
 
+Skills located in the `.agents/skills` folder available to AI agents and should be used from this location.
+
 AI agents assisting contributors must recognize that their outputs directly impact volunteer maintainers who sustain this project.
 Focus on maintainability and clarity while modifying the code or writing documentation.
 Always use `humanizer` skill when working with documents and comments to ensure your output is concise, clear, and free of AI-like patterns. All deliverables must be fully understandable and maintainable by human contributors.

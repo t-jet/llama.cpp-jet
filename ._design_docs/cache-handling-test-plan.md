@@ -209,6 +209,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 29: Stage 24 chat S02/S03 comparison](./cache-handling-test-plan/part-29-stage24-chat-s02-s03-comparison.md)
 - [Part 35: Stage 31 hybrid cache misbehavior](./cache-handling-test-plan/part-35-stage31-hybrid-cache-misbehavior.md)
 - [Part 36: Stage 32 live comparison rerun](./cache-handling-test-plan/part-36-stage32-live-comparison-rerun.md)
+- [Part 37: Stage 34 real agentic transcript replay](./cache-handling-test-plan/part-37-stage34-real-agentic-transcript-replay.md)
 
 ## T114 split (Stage 11 onward)
 

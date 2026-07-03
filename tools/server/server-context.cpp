@@ -1299,7 +1299,12 @@ private:
                 
                 // Try to load a matching entry for the new task
                 if (cache_ctrl->try_restore_from_cache(*ret, task)) {
-                    SRV_INF("%s", " - hybrid cache: restored from cache for new task\n");
+                    // TP-34-OB-03 part-37 scan anchor: "restore-apply" substring
+                    // emitted on every successful hybrid cache restore so the
+                    // part-37 server log scan can correlate cache_n>0 responses
+                    // with a corresponding log line.
+                    SRV_INF(" - hybrid cache: restore-apply slot=%d restored_tokens=%d\n",
+                            ret->id, ret->n_prompt_tokens_cache);
                 } else {
                     // No match found, clear the slot for the new task if needed
                     // Only clear if the slot has old content from a different task

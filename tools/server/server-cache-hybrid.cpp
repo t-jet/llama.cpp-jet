@@ -5358,6 +5358,32 @@ hybrid_cache_controller::cache_response hybrid_cache_controller::debug_run_resto
     return tx_restore(slot, task);
 }
 
+hybrid_cache_controller::cache_response hybrid_cache_controller::debug_capture_first_payload_for_tests(bool runtime_has_draft) {
+    cache_response response;
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    if (entries.empty()) {
+        return response;
+    }
+    const hot_payload_record * payload = nullptr;
+    std::string failure;
+    if (!validate_payload_for_restore(entries.front(), runtime_has_draft, &failure, &payload) || payload == nullptr) {
+        response.miss_reason = cache_restore_miss_reason::payload_unavailable;
+        return response;
+    }
+    response.found = true;
+    response.entry_id = entries.front().entry_id;
+    response.selected_payload_kind = payload_kind::exact_blob;
+    response.target_bytes = payload->target;
+    response.draft_bytes = payload->draft;
+    response.runtime_has_draft = runtime_has_draft;
+    response.pair_state = runtime_pair_state_from_draft(runtime_has_draft);
+    response.lookup_namespace_id = entries.front().namespace_id;
+    response.entry_tokens = entries.front().tokens.clone();
+    response.entry_checkpoints = entries.front().checkpoints;
+    response.entry_metadata = entries.front().metadata;
+    return response;
+}
+
 void hybrid_cache_controller::debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok) {
     tx_apply_restore(slot, plan, apply_ok);
 }

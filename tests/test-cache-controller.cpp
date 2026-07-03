@@ -1683,6 +1683,73 @@ void test_stage31_metric_shape_bounded_labels() {
     printf("  PASSED\n");
 }
 
+void test_stage34_namespace_excludes_replay_identity() {
+    printf("test-cache-controller: Stage 34 replay identity stays out of namespace...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const std::vector<int> prompt = { 9101, 9102, 9103, 9104 };
+
+    prepared_prompt_metadata base =
+        stage31_meta("stage34-render-a", prompt, int(prompt.size()), "row=1;session=a;branch=main");
+    prepared_prompt_metadata replay_variant =
+        stage31_meta("stage34-render-b", prompt, int(prompt.size()), "row=9;session=b;branch=child");
+    replay_variant.preparation_id = "different-request-id";
+    replay_variant.degraded_reason = "different transcript row";
+    replay_variant.diagnostic_source = "stage34 session b";
+
+    prepared_prompt_metadata incompatible = base;
+    incompatible.compatibility_key = "server-prepared-prompt-v2";
+
+    const std::string ns_base = ctrl.debug_compute_namespace_id_for_tests(base);
+    const std::string ns_variant = ctrl.debug_compute_namespace_id_for_tests(replay_variant);
+    const std::string ns_incompatible = ctrl.debug_compute_namespace_id_for_tests(incompatible);
+
+    require_or_abort(ns_base == ns_variant, "Stage 34 replay identity changed compatibility namespace");
+    require_or_abort(ns_base != ns_incompatible, "Stage 34 real compatibility key did not split namespace");
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prompt), base);
+    require_or_abort(
+        ctrl.debug_find_match_tokens_for_tests(create_tokens(prompt), replay_variant) == int(prompt.size()),
+        "Stage 34 replay identity blocked exact validation in shared namespace");
+
+    printf("  PASSED\n");
+}
+
+void test_stage34_restore_plan_deep_copy_survives_payload_eviction() {
+    printf("test-cache-controller: Stage 34 restore plan deep copy survives payload eviction...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const std::vector<int> prompt = { 9201, 9202, 9203, 9204 };
+    const prepared_prompt_metadata meta =
+        stage31_meta("stage34-deep-copy", prompt, int(prompt.size()), "deep-copy");
+
+    require_or_abort(
+        ctrl.debug_try_admit_entry_for_tests(create_tokens(prompt), meta, 64, 32),
+        "Stage 34 failed to admit target+draft payload for deep-copy regression");
+
+    server_slot slot;
+    auto plan = ctrl.debug_capture_first_payload_for_tests(true);
+    require_or_abort(plan.found, "Stage 34 restore plan not found");
+    require_or_abort(plan.target_bytes.size() == 64, "Stage 34 restore plan target bytes not captured");
+    require_or_abort(plan.draft_bytes.size() == 32, "Stage 34 restore plan draft bytes not captured");
+    require_or_abort(plan.target_bytes.front() == 0x11, "Stage 34 target byte pattern unexpected");
+    require_or_abort(plan.draft_bytes.front() == 0x22, "Stage 34 draft byte pattern unexpected");
+
+    require_or_abort(ctrl.debug_evict_first_payload_for_tests(), "Stage 34 source payload eviction failed");
+    require_or_abort(!ctrl.debug_validate_first_payload_for_tests(true), "Stage 34 source payload still validates after eviction");
+    require_or_abort(plan.target_bytes.size() == 64, "Stage 34 target bytes lost after source eviction");
+    require_or_abort(plan.draft_bytes.size() == 32, "Stage 34 draft bytes lost after source eviction");
+    require_or_abort(plan.target_bytes.front() == 0x11, "Stage 34 target bytes mutated after source eviction");
+    require_or_abort(plan.draft_bytes.front() == 0x22, "Stage 34 draft bytes mutated after source eviction");
+
+    ctrl.debug_apply_restore_transaction_for_tests(slot, plan, true);
+    require_or_abort(ctrl.debug_get_apply_restore_syncs_for_tests() > 0, "Stage 34 apply restore did not finalize captured plan");
+
+    printf("  PASSED\n");
+}
+
 // Test 29: Namespace isolation - comprehensive validation
 void test_namespace_isolation_validation() {
     printf("test-cache-controller: namespace isolation - comprehensive validation...\n");
@@ -5579,6 +5646,8 @@ int main() {
     test_stage31_namespace_cardinality_bounded_for_prompt_variants();
     test_stage31_workload_token_fixture();
     test_stage31_metric_shape_bounded_labels();
+    test_stage34_namespace_excludes_replay_identity();
+    test_stage34_restore_plan_deep_copy_survives_payload_eviction();
     test_namespace_isolation_validation();
 
     // Phase 3: Part 14 comprehensive field tests
@@ -5700,7 +5769,7 @@ int main() {
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 142 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix)\n");
+    printf("Total: 144 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions)\n");
     printf("==================================================\n");
 
     return 0;

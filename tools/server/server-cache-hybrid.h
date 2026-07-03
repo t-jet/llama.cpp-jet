@@ -521,6 +521,7 @@ public:
     // bounded diagnostic counters.
     bool debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     hybrid_cache_controller::cache_response debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task);
+    hybrid_cache_controller::cache_response debug_capture_first_payload_for_tests(bool runtime_has_draft);
     void debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok);
     size_t debug_get_transaction_depth_for_tests() const { return server_context_tx_depth_; }
     size_t debug_get_reentrancy_depth_limit_for_tests() const { return reentrancy_depth_limit_; }
@@ -628,6 +629,7 @@ private:
     // compile out cleanly in production builds.
     bool debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     hybrid_cache_controller::cache_response debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task);
+    hybrid_cache_controller::cache_response debug_capture_first_payload_for_tests(bool runtime_has_draft);
     void debug_apply_restore_transaction_for_tests(server_slot & slot, const hybrid_cache_controller::cache_response & plan, bool apply_ok);
     size_t debug_get_transaction_depth_for_tests() const { return server_context_tx_depth_; }
     size_t debug_get_reentrancy_depth_limit_for_tests() const { return reentrancy_depth_limit_; }
