@@ -63,7 +63,7 @@ Condition:
 
 Action:
 
-- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, and linked gate-status part files before and after patching. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
+- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, parts lists, and linked gate-status part files before and after patching. When adding a new review or re-review part, link it from the parent entry and update any index summary whose handoff wording would otherwise stay on the old gate. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
 
 
 ## Improvement: Contingency-branch stale wording hides after status-line fix
@@ -96,7 +96,7 @@ Condition:
 
 Action:
 
-- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. For new untracked durable docs, run a separate whitespace check such as `git diff --check --no-index` against an empty temp file and interpret no output as clean even though no-index exits 1 for content differences. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
+- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. If user requires `git diff --check`, still run it, but remember it ignores untracked files unless they are staged; pair it with a direct whitespace/byte check for the edited untracked doc. For new untracked durable docs, run a separate whitespace check such as `git diff --check --no-index` against an empty temp file and interpret no output as clean even though no-index exits 1 for content differences. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
 
 
 ## Improvement: CRLF and trailing whitespace on Windows tool-inserted content
@@ -1562,6 +1562,16 @@ Action:
 
 - Do run Select-String or Get-Content with line offsets to confirm the cited lines contain the claimed code. Do not propagate the Developer's line numbers verbatim if they are off; cite the actual lines and note the discrepancy in a non-blocking observation. Do treat line-number drift as a useful signal: if a line-number is off by tens of lines, the Developer's analysis may be pointing at the wrong code path. Don't accept any cited line number without byte-level verification, even when the broader claim is correct.
 
+## Improvement: Hyphenated globs can miss root peer files
+
+Condition:
+
+- Reviewing stage-specific file-glob filters for upstream merge triage or commit-set selection
+
+Action:
+
+- Do verify wildcard patterns against the actual repo file list before approving them. Check whether patterns like `src/llama-*.cpp` intentionally exclude root peers such as `src/llama.cpp`; flag a blocker when the excluded peer can carry the same runtime contract and Developer would have to invent an extra filter during triage. On re-review, confirm the correction covers every relevant filter row, not only one occurrence, and cite the actual file-list check before passing.
+
 ## Improvement: Verify invariant claims beyond the cited line
 
 Condition:
@@ -1581,3 +1591,33 @@ Condition:
 Action:
 
 - Do verify the test still enters the real production transaction method, reaches the hook between the same lock/unlock boundaries as the live slow read, and resumes into the real commit or dedupe branch. Do record the forced bytes as a non-blocking test-fixture limitation when they are fully guarded by `LLAMA_SERVER_CACHE_TESTS`. Don't reject the test solely because the byte source is synthetic if the concurrency window and branch ownership are production code.
+
+## Improvement: Manager-approved merge rework routing parts need complete per-track gates
+
+Condition:
+
+- Authoring upstream-merge rework routing parts after Manager groups REWORK-REQUIRED pre-merge rows by track
+
+Action:
+
+- Do copy every SHA, subject, decision, and affected surface from the accepted pre-merge analysis into the relevant track part. Do give each part the same gate-critical sections: affected contract owners, risk, required analysis before merge, allowed integration conditions, regression evidence, durable prior-stage or architecture doc updates if behavior changes, and blocked handoff. Do update the parent stage design status and handoff so merge execution remains blocked until all rework parts pass review and Manager gate.
+
+## Improvement: Provisional upstream refs need Manager confirmation in merge-cycle designs
+
+Condition:
+
+- Authoring an upstream merge-cycle design from Manager intake that names an initial upstream reference candidate but says final reference policy is not closed
+
+Action:
+
+- Do keep the candidate ref provisional in the design, require Manager design-gate confirmation before Developer opens the commit range, and require fresh staleness checks both before pre-merge analysis and at regression time. Don't write the candidate as final policy just because the ref exists locally.
+
+## Improvement: Review-time upstream staleness must be rechecked
+
+Condition:
+
+- Reviewing a merge-cycle pre-merge analysis that includes an upstream staleness verdict, commit range, and filtered triage table
+
+Action:
+
+- Do rerun a non-mutating upstream tip check such as `git ls-remote` during the review, without fetching, and compare it to the reported source ref before accepting the range. Do block the gate when the actual upstream tip moved after the Developer report, even if the report's local counts and table math are internally consistent.

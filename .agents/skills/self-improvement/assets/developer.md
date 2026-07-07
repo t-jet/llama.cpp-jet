@@ -74,15 +74,21 @@ Action:
 - Do verify whether the crash reproduces without the current change before blaming the fix. Use a clean rebuild and a baseline run when feasible. If the baseline is already broken, report current-fix evidence separately and hand off the pre-existing crash as its own defect. Do not claim full pack PASS when the baseline cannot reproduce the expected count.
 
 
-## Improvement: Test report totals must match per-row sums
+## Improvement: Durable report totals must match per-row sums
 
 Condition:
 
-- When reviewing a test report that has both a prose summary line and per-row verdict tables
+- When writing or reviewing a durable report that has both an aggregate summary
+  line/table and per-row verdict, decision, or triage tables
 
 Action:
 
-- Sum the per-row verdicts yourself across all tier tables and compare them to the prose summary. If they disagree, treat the row table as authoritative, cite the computed total in your review, and file the prose mismatch as a non-blocking report correction unless the active gate says otherwise.
+- Sum the per-row values yourself across all row tables and compare them to the
+  aggregate summary before handoff. If they disagree, treat the row table as
+  authoritative, correct the aggregate summary, and rerun the count check before
+  declaring the document ready. In review-only contexts where you cannot edit,
+  cite the computed total and file the mismatch as a report correction unless
+  the active gate says otherwise.
 
 
 ## Improvement: Dirty worktree handoff
@@ -1342,3 +1348,13 @@ Condition:
 Action:
 
 - Do add the narrowest test-only hook at the live production branch boundary and assert a branch-specific signal from that path. Drive the public transaction method in the test, prove the competing operation runs while the hook is paused, and assert the production second-pass or post-relock counter when the review finding names that branch. Do not count helper-shaped setup code as evidence for production transaction coverage.
+
+## Improvement: Verify refreshed remote-tracking refs before evidence edits
+
+Condition:
+
+- When a task states that a remote-tracking source ref has already been refreshed and asks for corrected staleness or range evidence
+
+Action:
+
+- Do run the required `rev-parse`, `log -1`, `merge-base`, `rev-list --count`, `remote -v`, and `ls-remote` checks before editing durable docs. If the named ref still points at the old SHA but the new upstream object exists locally, either move the ref with a guarded `git update-ref <ref> <new> <old>` when that matches the user's stated refreshed state, or stop and report the mismatch. Don't write refreshed evidence from `ls-remote` alone while `rev-parse <ref>` still disagrees.

@@ -654,3 +654,11 @@ Condition:
 
 Action:
 - Do treat the dedicated Manager closure part, latest Developer review, and latest Architect review as binding over stale tracker narrative text. Explicitly call out the stale tracker text as documentation debt, not as an open gate, unless the closure part itself is missing, contradictory, or fails the closure checklist.
+
+## Improvement: read-only stage-opening validation
+
+Condition:
+- User asks Manager to validate opening a new stage or cycle but explicitly forbids file edits.
+
+Action:
+- Do separate "intake validation PASS" from "stage opened on disk". Report required durable artifacts and next owner/gate, but do not treat missing new-stage files as a blocker to the read-only validation unless the source docs fail prerequisites.
