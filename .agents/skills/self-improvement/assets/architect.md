@@ -184,7 +184,7 @@ Condition:
 
 Action:
 
-- Do verify production save, restore, eviction, metrics, or lifecycle path actually invokes behavior. Don't accept debug-only coverage as proof. Do flag blocker when tests only exercise debug hooks or standalone APIs for contract approved design assigns to production flow.
+- Do verify production save, restore, eviction, metrics, or lifecycle path actually invokes behavior. Don't accept debug-only coverage, mirrored helper commit paths, or synthetic sleep windows as proof of a production branch. Do flag blocker when tests only exercise debug hooks, standalone APIs, or helper-owned critical sections for a contract the approved design assigns to the production flow. Do name the exact production branch that remains unexercised and require a hook that pauses or observes that real branch.
 
 
 ## Improvement: Skill path fallback
@@ -196,6 +196,16 @@ Condition:
 Action:
 
 - Do check repo-local `.agents/skills/<skill>/SKILL.md` path before falling back to ad hoc behavior. Do record path issue only briefly.
+
+## Improvement: Doc-only gate-alignment task with pre-existing dirty working tree
+
+Condition:
+
+- Doc-only edit task where instructions quote expected "current" Status/Date/row strings; same header file already carries pre-existing modifications from earlier sessions; long markdown tracker rows exceed 2000 chars and display-truncate; `git diff --stat` lumps pre-existing dirty paths with task-local edits
+
+Action:
+
+- Do run `git status --short` before editing to separate pre-existing dirty paths from task-local edits. Do read the live file content first; do not assume the instruction's "currently reads" string still matches when the path shows prior modifications. Do extract the exact long row with `Get-Content | Where-Object { $_ -like '| 34 |*' }` substring before crafting oldString. Do prefer narrow targeted `replace_string_in_file` calls (one per status cell, one per appended link) over pasting the full long row. Do report task-local path list separately in the report when `git diff --stat` mixes pre-existing edits with task edits.
 
 
 ## Improvement: Scoped traceability for deferred requirements
@@ -484,6 +494,16 @@ Action:
 - Do add short note in implementation-notes section naming cross-cutting concern, pointing to new stage number, explaining why it can revisit or invalidate prior stages. Don't invent new entry-doc files for cross-cutting stages when they fit naturally in same planning part file. Do verify file stays under 300-line split rule after addition.
 
 
+## Improvement: Plan drops test named in approved design Testability section
+
+Condition:
+
+- Reviewing implementation plan whose approved design's Testability section enumerates test cases T-...-N..M, and plan's regression-test step lists a subset of those names without recording deferral rationale
+
+Action:
+
+- Do diff the plan's regression-test list against the design's Testability section test names. Do flag any design-named test missing from the plan's regression set as NON-BLOCKING finding with required action: add the test or record explicit deferral. Do not assume plan author deliberately dropped a single test; on a multi-test design list one omission is a common miss. Don't block PASS when the missing test covers a code path also covered by another test in the set; block only when the missing test is the sole proof of a new code path.
+
 ## Improvement: Plan-level risk additions match design risk table style
 
 Condition:
@@ -692,6 +712,16 @@ Action:
 
 - Do scan source file's raw bytes for named UTF-8 pattern plus adjacent patterns (em dash, en dash, BOM, emoji) before editing, and report actual character set in return summary. Do count with `[System.IO.File]::ReadAllBytes` and byte triplet loop, or use regex against decoded string with explicit char codes. Do apply new section as plain ASCII regardless of which UTF-8 form present in existing file.
 
+
+## Improvement: Bind-facts numbered list spanning prose headers trips MD029
+
+Condition:
+
+- Authoring bind-facts section with sequential numbered list 1..N where prose headers like "Code facts, file:" interleave between groups of items; markdownlint sees each prose header as list terminator and reports MD029 (ordered-list prefix expected 1/2/3, not 7/8/9)
+
+Action:
+
+- Do convert bind-facts to bullet list (- ) when items are independent reference rows; bullets are unaffected by MD029. Do keep global numeric ids like "F1" or "Bind-N" inline at the start of each bullet if a stable identifier is needed for cross-reference. Don't use a single bloated numbered list with prose interrupts that visually read separate. Do run markdownlint after the conversion to confirm no MD029 remains.
 
 ## Improvement: Brief R-item wording imprecision vs actual code behavior in bug-fix review
 
@@ -1531,3 +1561,23 @@ Condition:
 Action:
 
 - Do run Select-String or Get-Content with line offsets to confirm the cited lines contain the claimed code. Do not propagate the Developer's line numbers verbatim if they are off; cite the actual lines and note the discrepancy in a non-blocking observation. Do treat line-number drift as a useful signal: if a line-number is off by tens of lines, the Developer's analysis may be pointing at the wrong code path. Don't accept any cited line number without byte-level verification, even when the broader claim is correct.
+
+## Improvement: Verify invariant claims beyond the cited line
+
+Condition:
+
+- Reviewing a design or fix report that names an invariant tied to a code site (e.g., "idempotent save returns true at L4825") where the invariant claim depends on a wider code path than the single cited line
+
+Action:
+
+- Do trace the claim through every branch that satisfies the predicate's premise (e.g., predicate residency hot vs cold, with-entry vs no-entry). Do read helper bodies called from the cited branch (`materialize_entry_payload`, `admit_entry_with_payload`, `refresh_existing_entry`) to confirm the asserted effect (e.g., `use_count++` via `mark_used`) occurs on every reachable branch, not only the cited one. Do widen the invariant wording as a NON-BLOCKING finding if the live code is stronger than the invariant asserts. Don't accept an invariant audit that verified only one branch.
+
+## Improvement: Test-only forced reads in production-path reviews
+
+Condition:
+
+- Reviewing a controller-only test that must prove a production slow-read or commit window but uses a test-only forced payload/read hook because no live model context exists
+
+Action:
+
+- Do verify the test still enters the real production transaction method, reaches the hook between the same lock/unlock boundaries as the live slow read, and resumes into the real commit or dedupe branch. Do record the forced bytes as a non-blocking test-fixture limitation when they are fully guarded by `LLAMA_SERVER_CACHE_TESTS`. Don't reject the test solely because the byte source is synthetic if the concurrency window and branch ownership are production code.

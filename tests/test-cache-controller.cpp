@@ -20,6 +20,7 @@
 #include <unordered_set>
 #include <filesystem>
 #include <thread>
+#include <atomic>
 
 #undef NDEBUG
 
@@ -5593,6 +5594,214 @@ void test_stage26_cold_payload_files_count_matches_disk() {
     printf("  PASSED\n");
 }
 
+static server_slot stage34_make_slot(int id, const server_tokens & tokens) {
+    server_slot slot;
+    slot.id = id;
+    slot.prompt.tokens = tokens.clone();
+    auto task = std::make_unique<server_task>();
+    task->tokens = tokens.clone();
+    slot.task = std::move(task);
+    return slot;
+}
+
+static size_t stage34_first_use_count(hybrid_cache_controller & ctrl) {
+    require_or_abort(!stage22_entries(ctrl).empty(), "Stage 34 expected at least one entry");
+    return stage22_entries(ctrl).front().use_count;
+}
+
+// T-34-IDEM-01: repeated save for equivalent prompt refreshes one entry.
+void test_stage34_idempotent_save_hot_dedupe_use_count() {
+    printf("test-cache-controller: Stage 34 idempotent save hot dedupe use_count...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const auto tokens = create_tokens({3401, 3402, 3403});
+    const auto meta = stage22_metadata_for_range(3401, 3, "stage34-idem-01");
+
+    server_slot slot_a = stage34_make_slot(3401, tokens);
+    require_or_abort(ctrl.debug_stage34_commit_saved_payload_for_tests(slot_a, tokens.clone(), meta, 128, 0),
+        "T-34-IDEM-01 first save failed");
+    const size_t use_count_after_first = stage34_first_use_count(ctrl);
+
+    server_slot slot_b = stage34_make_slot(3402, tokens);
+    require_or_abort(ctrl.debug_stage34_commit_saved_payload_for_tests(slot_b, tokens.clone(), meta, 128, 0),
+        "T-34-IDEM-01 second save failed");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1, "T-34-IDEM-01 duplicate entry admitted");
+    require_or_abort(stage34_first_use_count(ctrl) == use_count_after_first + 1,
+        "T-34-IDEM-01 use_count did not increment once");
+    printf("  PASSED\n");
+}
+
+// T-34-IDEM-02: first-pass hot dedupe returns before any tx_save slow read.
+void test_stage34_idempotent_save_skips_slow_read_on_hot_hit() {
+    printf("test-cache-controller: Stage 34 idempotent save skips slow read on hot hit...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const auto tokens = create_tokens({3411, 3412, 3413});
+    const auto meta = stage22_metadata_for_range(3411, 3, "stage34-idem-02");
+    require_or_abort(stage22_attach_exact_payload(ctrl, tokens.clone(), meta, ctrl.debug_compute_namespace_id_for_tests(meta), 128),
+        "T-34-IDEM-02 fixture attach failed");
+    const size_t use_count_before = stage34_first_use_count(ctrl);
+
+    server_slot slot = stage34_make_slot(3412, tokens);
+    ctrl.debug_reset_tx_save_slow_reads_for_tests();
+    require_or_abort(ctrl.debug_run_save_transaction_for_tests(slot, meta),
+        "T-34-IDEM-02 tx_save did not dedupe");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1, "T-34-IDEM-02 duplicate entry admitted");
+    require_or_abort(stage34_first_use_count(ctrl) == use_count_before + 1,
+        "T-34-IDEM-02 use_count did not increment");
+    require_or_abort(ctrl.debug_get_tx_save_slow_reads_for_tests(slot.id) == 0,
+        "T-34-IDEM-02 slow read ran on hot dedupe");
+    printf("  PASSED\n");
+}
+
+// T-34-IDEM-03: equivalent cold residency re-materializes in place.
+void test_stage34_idempotent_save_cold_rematerializes_in_place() {
+    printf("test-cache-controller: Stage 34 idempotent save cold rematerializes in place...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const auto tokens = create_tokens({3421, 3422, 3423});
+    const auto meta = stage22_metadata_for_range(3421, 3, "stage34-idem-03");
+    require_or_abort(stage22_attach_exact_payload(ctrl, tokens.clone(), meta, ctrl.debug_compute_namespace_id_for_tests(meta), 128),
+        "T-34-IDEM-03 fixture attach failed");
+    const size_t use_count_before = stage34_first_use_count(ctrl);
+    require_or_abort(ctrl.debug_evict_first_payload_for_tests(), "T-34-IDEM-03 payload eviction failed");
+    require_or_abort(!ctrl.debug_first_entry_has_payload_for_tests(), "T-34-IDEM-03 entry still hot after eviction");
+
+    server_slot slot = stage34_make_slot(3422, tokens);
+    require_or_abort(ctrl.debug_stage34_commit_saved_payload_for_tests(slot, tokens.clone(), meta, 96, 0),
+        "T-34-IDEM-03 rematerialize failed");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1, "T-34-IDEM-03 duplicate entry admitted");
+    require_or_abort(ctrl.debug_first_entry_has_payload_for_tests(), "T-34-IDEM-03 entry not re-materialized");
+    require_or_abort(stage34_first_use_count(ctrl) == use_count_before + 1,
+        "T-34-IDEM-03 use_count did not increment once");
+    printf("  PASSED\n");
+}
+
+// T-34-PATHB-01: a restore transaction can run while save is in its slow-read window.
+void test_stage34_pathb_restore_runs_during_save_read_window() {
+    printf("test-cache-controller: Stage 34 Path B restore runs during save read window...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const auto restore_tokens = create_tokens({3431, 3432});
+    const auto restore_meta = stage22_metadata_for_range(3431, 2, "stage34-pathb-01");
+    require_or_abort(stage22_attach_exact_payload(ctrl, restore_tokens.clone(), restore_meta, ctrl.debug_compute_namespace_id_for_tests(restore_meta), 64),
+        "T-34-PATHB-01 fixture attach failed");
+
+    std::atomic<bool> slow_window_open{false};
+    std::atomic<bool> release_save{false};
+    std::atomic<bool> save_done{false};
+    std::atomic<bool> restore_done{false};
+    std::atomic<long long> restore_elapsed_ms{0};
+    const auto save_tokens = create_tokens({3435, 3436, 3437});
+    const auto save_meta = stage22_metadata_for_range(3435, 3, "stage34-pathb-01-save");
+    server_slot save_slot = stage34_make_slot(3434, save_tokens);
+
+    ctrl.debug_set_tx_save_forced_target_bytes_for_tests(128);
+    ctrl.debug_set_tx_save_slow_read_hook_for_tests([&](int slot_id, bool draft) {
+        if (slot_id == save_slot.id && !draft) {
+            slow_window_open.store(true);
+            while (!release_save.load()) {
+                std::this_thread::yield();
+            }
+        }
+    });
+
+    std::thread save_reader([&]() {
+        require_or_abort(ctrl.debug_run_save_transaction_for_tests(save_slot, save_meta),
+            "T-34-PATHB-01 tx_save failed");
+        save_done.store(true);
+    });
+
+    std::thread restore_thread([&]() {
+        while (!slow_window_open.load()) {
+            std::this_thread::yield();
+        }
+        server_slot slot = stage34_make_slot(3433, restore_tokens);
+        server_task task;
+        task.tokens = restore_tokens.clone();
+        task.prompt_metadata = restore_meta;
+        const auto start = std::chrono::steady_clock::now();
+        auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+        const auto end = std::chrono::steady_clock::now();
+        restore_elapsed_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+        require_or_abort(plan.found, "T-34-PATHB-01 restore plan not found");
+        require_or_abort(!release_save.load(), "T-34-PATHB-01 restore did not run during save read window");
+        restore_done.store(true);
+    });
+
+    restore_thread.join();
+    require_or_abort(restore_done.load(), "T-34-PATHB-01 restore thread did not complete");
+    require_or_abort(!save_done.load(), "T-34-PATHB-01 save completed before release");
+    release_save.store(true);
+    save_reader.join();
+    ctrl.debug_set_tx_save_slow_read_hook_for_tests(nullptr);
+    ctrl.debug_set_tx_save_forced_target_bytes_for_tests(0);
+    require_or_abort(save_done.load(), "T-34-PATHB-01 save did not complete");
+    require_or_abort(restore_elapsed_ms.load() < 60, "T-34-PATHB-01 restore blocked for slow window");
+    require_or_abort(ctrl.debug_get_tx_save_slow_reads_for_tests(save_slot.id) > 0,
+        "T-34-PATHB-01 tx_save slow-read hook did not run");
+    printf("  PASSED\n");
+}
+
+// T-34-PATHB-02: second-pass dedupe absorbs a parallel save that won admission.
+void test_stage34_pathb_second_pass_dedupe_same_prompt() {
+    printf("test-cache-controller: Stage 34 Path B second-pass dedupe same prompt...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const auto tokens = create_tokens({3441, 3442, 3443});
+    const auto meta = stage22_metadata_for_range(3441, 3, "stage34-pathb-02");
+
+    server_slot slot_a = stage34_make_slot(3441, tokens);
+    server_slot slot_b = stage34_make_slot(3442, tokens);
+    std::atomic<bool> slot_a_read_window_open{false};
+    std::atomic<bool> release_slot_a{false};
+    std::atomic<bool> slot_a_done{false};
+    std::atomic<bool> slot_b_done{false};
+
+    ctrl.debug_set_tx_save_forced_target_bytes_for_tests(128);
+    ctrl.debug_reset_tx_save_second_pass_dedupes_for_tests();
+    ctrl.debug_set_tx_save_slow_read_hook_for_tests([&](int slot_id, bool draft) {
+        if (slot_id == slot_a.id && !draft) {
+            slot_a_read_window_open.store(true);
+            while (!release_slot_a.load()) {
+                std::this_thread::yield();
+            }
+        }
+    });
+
+    std::thread save_a([&]() {
+        require_or_abort(ctrl.debug_run_save_transaction_for_tests(slot_a, meta),
+            "T-34-PATHB-02 tx_save A failed");
+        slot_a_done.store(true);
+    });
+
+    while (!slot_a_read_window_open.load()) {
+        std::this_thread::yield();
+    }
+
+    std::thread save_b([&]() {
+        require_or_abort(ctrl.debug_run_save_transaction_for_tests(slot_b, meta),
+            "T-34-PATHB-02 tx_save B failed");
+        slot_b_done.store(true);
+    });
+    save_b.join();
+    require_or_abort(slot_b_done.load(), "T-34-PATHB-02 save B did not complete");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1, "T-34-PATHB-02 save B did not admit one entry");
+    const size_t use_count_after_b = stage34_first_use_count(ctrl);
+
+    release_slot_a.store(true);
+    save_a.join();
+    ctrl.debug_set_tx_save_slow_read_hook_for_tests(nullptr);
+    ctrl.debug_set_tx_save_forced_target_bytes_for_tests(0);
+    require_or_abort(slot_a_done.load(), "T-34-PATHB-02 save A did not complete");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1, "T-34-PATHB-02 duplicate entry admitted");
+    require_or_abort(ctrl.debug_get_tx_save_second_pass_dedupes_for_tests() == 1,
+        "T-34-PATHB-02 did not take second-pass dedupe");
+    require_or_abort(stage34_first_use_count(ctrl) == use_count_after_b + 1,
+        "T-34-PATHB-02 use_count did not reflect both saves");
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -5648,6 +5857,11 @@ int main() {
     test_stage31_metric_shape_bounded_labels();
     test_stage34_namespace_excludes_replay_identity();
     test_stage34_restore_plan_deep_copy_survives_payload_eviction();
+    test_stage34_idempotent_save_hot_dedupe_use_count();
+    test_stage34_idempotent_save_skips_slow_read_on_hot_hit();
+    test_stage34_idempotent_save_cold_rematerializes_in_place();
+    test_stage34_pathb_restore_runs_during_save_read_window();
+    test_stage34_pathb_second_pass_dedupe_same_prompt();
     test_namespace_isolation_validation();
 
     // Phase 3: Part 14 comprehensive field tests
@@ -5769,7 +5983,7 @@ int main() {
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 144 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions)\n");
+    printf("Total: 149 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions + 5 Stage 34 reopened regressions)\n");
     printf("==================================================\n");
 
     return 0;

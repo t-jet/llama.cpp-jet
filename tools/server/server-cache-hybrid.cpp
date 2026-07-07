@@ -4752,84 +4752,121 @@ void hybrid_cache_controller::tx_update() {
 }
 
 bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_metadata & metadata) {
-    // Stage 25: acquire the cache-state mutex once for the duration of
-    // the save. The recursive mutex allows nesting via tx_evict_entry
-    // and tx_demote_payload called from mark_payload_kind_evicted and
-    // admit_entry_with_payload.
-    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
-    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
-    if (!tx_guard.active) {
-        return false;
-    }
+    size_t state_size_tgt = 0;
+    size_t state_size_dft = 0;
+    size_t total_size = 0;
+    bool protected_root = false;
+    bool runtime_has_draft = false;
+    int slot_id = -1;
+    llama_context * ctx_tgt_snapshot = nullptr;
+    llama_context * ctx_dft_snapshot = nullptr;
+    llama_context * slot_ctx_dft_snapshot = nullptr;
+    std::string namespace_id;
+    server_tokens entry_tokens;
+    prepared_prompt_metadata metadata_snapshot;
+    std::list<common_prompt_checkpoint> checkpoints_snapshot;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    bool debug_forced_target_read = false;
+#endif
 
-    if (slot.prompt.tokens.empty()) {
-        SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
-        return false;
-    }
-
-    const size_t state_size_tgt = ctx_tgt ? llama_state_seq_get_size_ext(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    const size_t state_size_dft = (ctx_dft && slot.ctx_dft) ? llama_state_seq_get_size_ext(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
-    const size_t total_size = state_size_tgt + state_size_dft;
-    const bool protected_root = !metadata.degraded() &&
-        (metadata.protect_system || metadata.protect_messages ||
-         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
-             return boundary.protect;
-         }));
-    const std::string namespace_id = compute_namespace_id(metadata);
-
-    SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
-            slot.id,
-            slot.prompt.tokens.size(),
-            total_size / (1024.0 * 1024.0),
-            state_size_tgt / (1024.0 * 1024.0),
-            state_size_dft / (1024.0 * 1024.0));
-
-    const bool runtime_has_draft = ctx_dft != nullptr && slot.ctx_dft != nullptr;
-
-    if (ctx_tgt && state_size_tgt == 0) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
-        return false;
-    }
-
-    if (runtime_has_draft && state_size_dft == 0) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
-        n_pairing_violations++;
-        return false;
-    }
-
-    if (hot_payload_budget_enabled() && total_size > limit_size) {
-        if (protected_root) {
-            n_protected_root_decisions++;
-            n_protected_root_admission_rejections++;
+    {
+        std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+        stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+        if (!tx_guard.active) {
+            return false;
         }
-        SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
-                namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
-        return false;
-    }
 
-    // Stage 21 fix: save only the prompt tokens, not the full slot (prompt + generated)
-    // slot.task->tokens contains the original prompt tokens submitted by the user
-    // slot.prompt.tokens has accumulated all tokens including those generated during completion
-    if (!slot.task) {
-        SRV_WRN("%s", " - hybrid cache: save rejected because task is null\n");
-        return false;
-    }
-    server_tokens entry_tokens = slot.task->tokens.clone();
+        if (slot.prompt.tokens.empty()) {
+            SRV_WRN("%s", " - hybrid cache: cannot save slot with no tokens\n");
+            return false;
+        }
 
-    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
-    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
-        n_cache_equivalent_branch_deduplications++;
-        refresh_existing_entry(existing, protected_root);
-        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
-        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
-                entry_tokens.size(), namespace_id.c_str());
-        return true;
+        slot_id = slot.id;
+        ctx_tgt_snapshot = ctx_tgt;
+        ctx_dft_snapshot = ctx_dft;
+        slot_ctx_dft_snapshot = slot.ctx_dft;
+        state_size_tgt = ctx_tgt_snapshot ? llama_state_seq_get_size_ext(ctx_tgt_snapshot, slot_id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+        state_size_dft = (ctx_dft_snapshot && slot_ctx_dft_snapshot) ? llama_state_seq_get_size_ext(ctx_dft_snapshot, slot_id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        {
+            std::lock_guard<std::mutex> debug_lock(debug_tx_save_mutex_);
+            if (!ctx_tgt_snapshot && debug_tx_save_forced_target_bytes_ > 0) {
+                state_size_tgt = debug_tx_save_forced_target_bytes_;
+                debug_forced_target_read = true;
+            }
+        }
+#endif
+        total_size = state_size_tgt + state_size_dft;
+        metadata_snapshot = metadata;
+        protected_root = !metadata_snapshot.degraded() &&
+            (metadata_snapshot.protect_system || metadata_snapshot.protect_messages ||
+             std::any_of(metadata_snapshot.boundaries.begin(), metadata_snapshot.boundaries.end(), [](const auto & boundary) {
+                 return boundary.protect;
+             }));
+        namespace_id = compute_namespace_id(metadata_snapshot);
+
+        SRV_INF(" - hybrid cache: saving slot %d with %zu tokens, state size = %.3f MiB (tgt: %.3f, dft: %.3f)\n",
+                slot_id,
+                slot.prompt.tokens.size(),
+                total_size / (1024.0 * 1024.0),
+                state_size_tgt / (1024.0 * 1024.0),
+                state_size_dft / (1024.0 * 1024.0));
+
+        runtime_has_draft = ctx_dft_snapshot != nullptr && slot_ctx_dft_snapshot != nullptr;
+
+        if (ctx_tgt_snapshot && state_size_tgt == 0) {
+            SRV_WRN("%s", " - hybrid cache: save rejected because target payload is empty\n");
+            return false;
+        }
+
+        if (runtime_has_draft && state_size_dft == 0) {
+            SRV_WRN("%s", " - hybrid cache: save rejected because draft payload is empty for draft runtime\n");
+            n_pairing_violations++;
+            return false;
+        }
+
+        if (hot_payload_budget_enabled() && total_size > limit_size) {
+            if (protected_root) {
+                n_protected_root_decisions++;
+                n_protected_root_admission_rejections++;
+            }
+            SRV_WRN(" - hybrid cache: save rejected because payload bytes exceed hot budget (namespace: %s, tokens: %zu, payload bytes: %zu, budget bytes: %zu, protected: %d)\n",
+                    namespace_id.c_str(), slot.prompt.tokens.size(), total_size, limit_size, protected_root ? 1 : 0);
+            return false;
+        }
+
+        // Stage 21 fix: save only the prompt tokens, not the full slot (prompt + generated)
+        // slot.task->tokens contains the original prompt tokens submitted by the user
+        // slot.prompt.tokens has accumulated all tokens including those generated during completion
+        if (!slot.task) {
+            SRV_WRN("%s", " - hybrid cache: save rejected because task is null\n");
+            return false;
+        }
+        entry_tokens = slot.task->tokens.clone();
+        checkpoints_snapshot = slot.prompt.checkpoints;
+
+        auto existing = find_equivalent_entry(entry_tokens, namespace_id);
+        if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+            // I-34-01: equivalent hot entries are refreshed, not duplicated.
+            n_cache_equivalent_branch_deduplications++;
+            refresh_existing_entry(existing, protected_root);
+            acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+            SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens (namespace: %s)\n",
+                    entry_tokens.size(), namespace_id.c_str());
+            return true;
+        }
     }
 
     std::vector<uint8_t> target_payload;
     std::vector<uint8_t> draft_payload;
 
-    if (ctx_tgt && state_size_tgt > 0) {
+    if (
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        (debug_forced_target_read || ctx_tgt_snapshot) &&
+#else
+        ctx_tgt_snapshot &&
+#endif
+        state_size_tgt > 0) {
         try {
             target_payload.resize(state_size_tgt);
         } catch (const std::bad_alloc & e) {
@@ -4837,14 +4874,26 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
             return false;
         }
 
-        const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, target_payload.data(), state_size_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        debug_note_tx_save_slow_read_for_tests(slot_id, false);
+#endif
+        size_t n_tgt = 0;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        if (debug_forced_target_read) {
+            std::fill(target_payload.begin(), target_payload.end(), 0x34);
+            n_tgt = state_size_tgt;
+        } else
+#endif
+        {
+            n_tgt = llama_state_seq_get_data_ext(ctx_tgt_snapshot, target_payload.data(), state_size_tgt, slot_id, LLAMA_STATE_SEQ_FLAGS_NONE);
+        }
         if (n_tgt != state_size_tgt) {
             SRV_ERR(" - hybrid cache: failed to save target state: expected %zu bytes, got %zu\n", state_size_tgt, n_tgt);
             return false;
         }
     }
 
-    if (ctx_dft && slot.ctx_dft && state_size_dft > 0) {
+    if (ctx_dft_snapshot && slot_ctx_dft_snapshot && state_size_dft > 0) {
         try {
             draft_payload.resize(state_size_dft);
         } catch (const std::bad_alloc & e) {
@@ -4852,15 +4901,38 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
             return false;
         }
 
-        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, draft_payload.data(), state_size_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_NONE);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        debug_note_tx_save_slow_read_for_tests(slot_id, true);
+#endif
+        const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft_snapshot, draft_payload.data(), state_size_dft, slot_id, LLAMA_STATE_SEQ_FLAGS_NONE);
         if (n_dft != state_size_dft) {
             SRV_ERR(" - hybrid cache: failed to save draft state: expected %zu bytes, got %zu\n", state_size_dft, n_dft);
             return false;
         }
     }
 
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active) {
+        return false;
+    }
+
+    auto existing = find_equivalent_entry(entry_tokens, namespace_id);
+    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+        n_cache_equivalent_branch_deduplications++;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+        debug_note_tx_save_second_pass_dedupe_for_tests();
+#endif
+        refresh_existing_entry(existing, protected_root);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        SRV_DBG(" - hybrid cache: reused existing payload-bearing entry with %zu tokens after save read (namespace: %s)\n",
+                entry_tokens.size(), namespace_id.c_str());
+        return true;
+    }
+
     std::string descriptor_failure;
     if (existing != entries.end()) {
+        // I-34-01: an equivalent cold entry is re-materialized in place.
         n_cache_equivalent_branch_deduplications++;
         if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
             SRV_WRN(" - hybrid cache: metadata-only re-materialization rejected (%s)\n", descriptor_failure.c_str());
@@ -4868,10 +4940,10 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
         }
         existing->protected_root = existing->protected_root || protected_root;
         existing->checkpoints.clear();
-        existing->metadata = metadata;
-        if (!slot.prompt.checkpoints.empty()) {
+        existing->metadata = metadata_snapshot;
+        if (!checkpoints_snapshot.empty()) {
             std::string checkpoint_failure;
-            if (!admit_latest_checkpoint_and_store_metadata(*existing, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
+            if (!admit_latest_checkpoint_and_store_metadata(*existing, checkpoints_snapshot, runtime_has_draft, &checkpoint_failure)) {
                 SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
             }
         }
@@ -4885,7 +4957,7 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
     const uint64_t parent_node_id = select_mismatch_parent_for_admission(entry_tokens, namespace_id);
     auto it_new = admit_entry_with_payload(
         std::move(entry_tokens),
-        metadata,
+        metadata_snapshot,
         namespace_id,
         protected_root,
         std::move(target_payload),
@@ -4898,9 +4970,9 @@ bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_
         return false;
     }
     it_new->checkpoints.clear();
-    if (!slot.prompt.checkpoints.empty()) {
+    if (!checkpoints_snapshot.empty()) {
         std::string checkpoint_failure;
-        if (!admit_latest_checkpoint_and_store_metadata(*it_new, slot.prompt.checkpoints, runtime_has_draft, &checkpoint_failure)) {
+        if (!admit_latest_checkpoint_and_store_metadata(*it_new, checkpoints_snapshot, runtime_has_draft, &checkpoint_failure)) {
             SRV_WRN(" - hybrid cache: checkpoint admission skipped (%s)\n", checkpoint_failure.c_str());
         }
     }
@@ -5352,6 +5424,138 @@ void hybrid_cache_controller::tx_apply_restore(server_slot & slot, const cache_r
 
 bool hybrid_cache_controller::debug_run_save_transaction_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata) {
     return tx_save(slot, metadata);
+}
+
+bool hybrid_cache_controller::debug_stage34_commit_saved_payload_for_tests(
+        server_slot & slot,
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        size_t target_bytes,
+        size_t draft_bytes) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
+    if (!tx_guard.active || tokens.empty() || target_bytes == 0) {
+        return false;
+    }
+
+    const bool runtime_has_draft = draft_bytes > 0;
+    const bool protected_root = !metadata.degraded() &&
+        (metadata.protect_system || metadata.protect_messages ||
+         std::any_of(metadata.boundaries.begin(), metadata.boundaries.end(), [](const auto & boundary) {
+             return boundary.protect;
+         }));
+    const std::string namespace_id = compute_namespace_id(metadata);
+    std::vector<uint8_t> target_payload(target_bytes, 0x11);
+    std::vector<uint8_t> draft_payload(draft_bytes, 0x22);
+
+    auto existing = find_equivalent_entry(tokens, namespace_id);
+    if (existing != entries.end() && entry_has_payload_for_restore(*existing)) {
+        n_cache_equivalent_branch_deduplications++;
+        refresh_existing_entry(existing, protected_root);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        return true;
+    }
+
+    std::string descriptor_failure;
+    if (existing != entries.end()) {
+        n_cache_equivalent_branch_deduplications++;
+        if (!materialize_entry_payload(existing, std::move(target_payload), std::move(draft_payload), runtime_has_draft, &descriptor_failure)) {
+            return false;
+        }
+        existing->protected_root = existing->protected_root || protected_root;
+        existing->metadata = metadata;
+        sync_branch_node_from_entry(*existing);
+        acquire_branch_node_ref_for_slot(slot, existing->branch_node_id);
+        return true;
+    }
+
+    const uint64_t parent_node_id = select_mismatch_parent_for_admission(tokens, namespace_id);
+    auto it_new = admit_entry_with_payload(
+        std::move(tokens),
+        metadata,
+        namespace_id,
+        protected_root,
+        std::move(target_payload),
+        std::move(draft_payload),
+        runtime_has_draft,
+        parent_node_id,
+        &descriptor_failure);
+    if (it_new == entries.end()) {
+        return false;
+    }
+    acquire_branch_node_ref_for_slot(slot, it_new->branch_node_id);
+    return true;
+}
+
+#ifdef LLAMA_SERVER_CACHE_TESTS
+void hybrid_cache_controller::debug_note_tx_save_slow_read_for_tests(int slot_id, bool draft) {
+    std::function<void(int, bool)> hook;
+    {
+        std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+        debug_tx_save_slow_reads_by_slot_[slot_id]++;
+        hook = debug_tx_save_slow_read_hook_;
+    }
+    if (hook) {
+        hook(slot_id, draft);
+    }
+}
+
+void hybrid_cache_controller::debug_note_tx_save_second_pass_dedupe_for_tests() {
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    debug_tx_save_second_pass_dedupes_++;
+}
+#endif
+
+size_t hybrid_cache_controller::debug_get_tx_save_slow_reads_for_tests(int slot_id) const {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    auto it = debug_tx_save_slow_reads_by_slot_.find(slot_id);
+    return it == debug_tx_save_slow_reads_by_slot_.end() ? 0 : it->second;
+#else
+    GGML_UNUSED(slot_id);
+    return 0;
+#endif
+}
+
+void hybrid_cache_controller::debug_reset_tx_save_slow_reads_for_tests() {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    debug_tx_save_slow_reads_by_slot_.clear();
+#endif
+}
+
+void hybrid_cache_controller::debug_set_tx_save_forced_target_bytes_for_tests(size_t bytes) {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    debug_tx_save_forced_target_bytes_ = bytes;
+#else
+    GGML_UNUSED(bytes);
+#endif
+}
+
+void hybrid_cache_controller::debug_set_tx_save_slow_read_hook_for_tests(std::function<void(int, bool)> hook) {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    debug_tx_save_slow_read_hook_ = std::move(hook);
+#else
+    GGML_UNUSED(hook);
+#endif
+}
+
+size_t hybrid_cache_controller::debug_get_tx_save_second_pass_dedupes_for_tests() const {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    return debug_tx_save_second_pass_dedupes_;
+#else
+    return 0;
+#endif
+}
+
+void hybrid_cache_controller::debug_reset_tx_save_second_pass_dedupes_for_tests() {
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    std::lock_guard<std::mutex> lock(debug_tx_save_mutex_);
+    debug_tx_save_second_pass_dedupes_ = 0;
+#endif
 }
 
 hybrid_cache_controller::cache_response hybrid_cache_controller::debug_run_restore_transaction_for_tests(server_slot & slot, const server_task & task) {

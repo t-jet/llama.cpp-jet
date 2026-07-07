@@ -531,6 +531,18 @@ public:
     bool debug_force_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     bool debug_force_deep_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     bool debug_force_locked_sleep_for_tests(int sleep_ms);
+    bool debug_stage34_commit_saved_payload_for_tests(
+        server_slot & slot,
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        size_t target_bytes,
+        size_t draft_bytes);
+    size_t debug_get_tx_save_slow_reads_for_tests(int slot_id) const;
+    void debug_reset_tx_save_slow_reads_for_tests();
+    void debug_set_tx_save_forced_target_bytes_for_tests(size_t bytes);
+    void debug_set_tx_save_slow_read_hook_for_tests(std::function<void(int, bool)> hook);
+    size_t debug_get_tx_save_second_pass_dedupes_for_tests() const;
+    void debug_reset_tx_save_second_pass_dedupes_for_tests();
 
     // Step 8: Test accessors for cold_store and io_worker
     server_cache_store_cold & debug_cold_store_for_tests() { return cold_store; }
@@ -639,6 +651,18 @@ private:
     bool debug_force_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     bool debug_force_deep_reentrant_call_for_tests(server_slot & slot, const prepared_prompt_metadata & metadata);
     bool debug_force_locked_sleep_for_tests(int sleep_ms);
+    bool debug_stage34_commit_saved_payload_for_tests(
+        server_slot & slot,
+        server_tokens tokens,
+        const prepared_prompt_metadata & metadata,
+        size_t target_bytes,
+        size_t draft_bytes);
+    size_t debug_get_tx_save_slow_reads_for_tests(int slot_id) const;
+    void debug_reset_tx_save_slow_reads_for_tests();
+    void debug_set_tx_save_forced_target_bytes_for_tests(size_t bytes);
+    void debug_set_tx_save_slow_read_hook_for_tests(std::function<void(int, bool)> hook);
+    size_t debug_get_tx_save_second_pass_dedupes_for_tests() const;
+    void debug_reset_tx_save_second_pass_dedupes_for_tests();
     std::recursive_mutex & debug_get_cache_state_mutex_for_tests() { return cache_state_mutex_; }
 #endif
 
@@ -692,6 +716,8 @@ private:
     // lives). The counter is incremented at lock_guard entry and
     // decremented at lock_guard exit. OQ-25-06 chose slot context member
     // (not thread_local) so the counter persists across thread joins.
+    // I-34-01: tx_save dedupes equivalent entries by token span and namespace.
+    // I-34-02: tx_save slow context reads run outside this mutex.
     size_t server_context_tx_depth_ = 0;
     size_t reentrancy_depth_limit_ = 4;
 
@@ -706,6 +732,11 @@ private:
     // Phase 6 Step 11: Per-payload promotion failure injection set
 #ifdef LLAMA_SERVER_CACHE_TESTS
     std::unordered_set<uint64_t> debug_promotion_failure_payload_ids_;
+    mutable std::mutex debug_tx_save_mutex_;
+    std::unordered_map<int, size_t> debug_tx_save_slow_reads_by_slot_;
+    size_t debug_tx_save_forced_target_bytes_ = 0;
+    std::function<void(int, bool)> debug_tx_save_slow_read_hook_;
+    size_t debug_tx_save_second_pass_dedupes_ = 0;
 #endif
 
     // Configuration
@@ -837,6 +868,10 @@ private:
     // holds cache_state_mutex_. Uses try_lock + immediate unlock so the
     // helper compiles to a no-op in release builds that define NDEBUG.
     void tx_assert_mutex_held() const;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    void debug_note_tx_save_slow_read_for_tests(int slot_id, bool draft);
+    void debug_note_tx_save_second_pass_dedupe_for_tests();
+#endif
     // Stage 25: developer-time guard for unexpected reentrance. Called from
     // helper entry points that must NOT run inside a transaction except via
     // the documented inner-call set. Release build is a no-op.

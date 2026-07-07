@@ -1,5 +1,25 @@
 # Developer improvement memory
 
+## Improvement: Dot-prefixed design-docs paths and dot-dir PowerShell probes
+
+Condition:
+
+- When a brief or task refers to paths under `._design_docs` (dot-prefixed) but the shell command uses the spellings `_design_docs`, `.\_design_docs`, or strips the leading dot, OR when a recursive `Get-ChildItem` on `.\_design_docs` returns empty silently (no error) on a path that should exist
+
+Action:
+
+- Do use the exact dot-prefixed path (for example `.\._design_docs\...`, with the leading dot on the directory) in PowerShell `Get-Content`, `Get-ChildItem`, and `Select-String -Path`. Plain `.\_design_docs` returns empty results without an error because the directory is `._design_docs`. Treat a no-hit recursive search on a path you expect to exist as a dot-prefix typo before treating the file as missing; confirm with `Get-ChildItem -Force` because dot-prefixed entries may not appear in the default listing. The same applies to other repo dot-prefixed dirs like `._test_models`, `._design_docs`, `._test_output`.
+
+## Improvement: create_file writes CRLF on Windows; durable docs need explicit LF pass
+
+Condition:
+
+- When using the `create_file` tool to create a durable markdown file on Windows where the project convention is LF-only
+
+Action:
+
+- Do follow create_file with an explicit LF conversion pass: read the file with `[System.IO.File]::ReadAllText`, replace `\`r\`n` with `\`n`, then write back with the UTF8-no-BOM overload of `[System.IO.File]::WriteAllText` so no BOM is added and CRLF is gone. Verify with a byte-level CR=0, LF=line count, and BOM first-3-bytes check, because the durable-doc convention for this repo is LF-only no-BOM and create_file alone leaves CRLF on Windows. Do not rely on `git diff --check` alone for untracked new files; pair it with the byte-level check before declaring the file ready.
+
 ## Improvement: Concurrent cache reuse differential is product bug, not Stage 33 pattern
 
 Condition:
@@ -1302,3 +1322,23 @@ Condition:
 Action:
 
 - Compute whether the workload can retain an entry long enough for a duplicate request before classifying the result as product failure. Estimate hot-cache entry capacity, admission rate, predicted retention time, and measured duplicate interval. If duplicates arrive after predicted eviction, classify as workload or budget mismatch rather than a cache restore regression.
+
+## Improvement: Incomplete build trees need explicit fallback evidence
+
+Condition:
+
+- When a requested or preferred CMake build directory exists but build invocation fails because generator files such as `build.ninja`, `.sln`, or project files are missing
+
+Action:
+
+- Do inspect the build directory before retrying. If another generated build tree already exists and matches the requested evidence scope closely enough, use that tree for focused compile/test evidence and record the failed preferred build command as a blocker. Do not claim the preferred build passed, and do not spend time reconfiguring it unless the task specifically requires that exact preset.
+
+## Improvement: Review-blocked concurrency tests must hit production branches
+
+Condition:
+
+- When fixing an implementation review finding that says a concurrency or race test used a synthetic sleep, helper commit, or helper-owned critical section instead of the production branch under review
+
+Action:
+
+- Do add the narrowest test-only hook at the live production branch boundary and assert a branch-specific signal from that path. Drive the public transaction method in the test, prove the competing operation runs while the hook is paused, and assert the production second-pass or post-relock counter when the review finding names that branch. Do not count helper-shaped setup code as evidence for production transaction coverage.

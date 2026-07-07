@@ -1,7 +1,7 @@
 # Stage 34 implementation plan: real agentic transcript replay
 
-Status: rework complete; implementation re-review ready
-Date: 2026-06-30
+Status: CLOSED 2026-07-07 (D-CLOSURE-34-REOPEN-01)
+Date: 2026-07-07
 Stage: 34
 Owner: Developer
 Branch: work-branch
@@ -235,19 +235,40 @@ Implementation review REWORK is recorded in
 Rework evidence for F34-IMPL-01 through F34-IMPL-03 is recorded in
 `._design_docs/cache-handling-phase34-implementation/part-05-rework-evidence-20260630.md`.
 
-Next owner: Architect for implementation re-review.
-
-No QA execution gate opens until implementation re-review passes.
+Historical 2026-06-30 handoff: Architect implementation re-review was next;
+that path later closed and was superseded by the 2026-07-01 reopen.
 
 ## Manager closure
 
 Closed by [part-09-manager-closure-20260630.md](cache-handling-phase34-implementation/part-09-manager-closure-20260630.md) on 2026-06-30 per D-CLOSURE-34-01.
 That closure is superseded by [part-10-manager-reopen-20260701.md](cache-handling-phase34-implementation/part-10-manager-reopen-20260701.md).
-Stage 34 is reopened for live execution because smaller local model fallback was
+Stage 34 was reopened for live execution because smaller local model fallback was
 not exhausted before accepting timeout-limited rows.
 Developer reopened-gate tooling fixes are recorded in
 [part-11-reopened-live-tooling-fixes-20260701.md](cache-handling-phase34-implementation/part-11-reopened-live-tooling-fixes-20260701.md).
-This note does not close Stage 34.
+This note was superseded by the 2026-07-05 reopen cycle.
+
+Reopened implementation for D34-REOPEN-06 and D34-REOPEN-07 is recorded in
+[part-15-implementation-evidence-20260705.md](cache-handling-phase34-implementation/part-15-implementation-evidence-20260705.md).
+It covers the idempotent-save invariant comments, tx_save SPLIT restructure,
+five focused C++ regressions, focused build/test evidence, and remaining QA
+handoff items.
+
+Independent implementation review is recorded in
+[part-16-implementation-review-20260705.md](cache-handling-phase34-implementation/part-16-implementation-review-20260705.md).
+Verdict: REWORK. The production `tx_save` SPLIT is largely conformant, but
+T-34-PATHB-01 and T-34-PATHB-02 do not exercise the required production
+slow-read and second-pass dedupe branches.
+
+Focused rework evidence is recorded in
+[part-17-implementation-rework-evidence-20260705.md](cache-handling-phase34-implementation/part-17-implementation-rework-evidence-20260705.md).
+Historical pre-review state: REWORK EVIDENCE READY for Architect
+implementation re-review. Superseded by part 18 PASS below.
+
+Independent implementation re-review is recorded in
+[part-18-implementation-re-review-20260705.md](cache-handling-phase34-implementation/part-18-implementation-re-review-20260705.md).
+Verdict: PASS. The part 16 blocking findings are fixed; Manager
+implementation gate is next, then QA test-plan update if Manager accepts.
 
 ### Final row counts
 
@@ -270,3 +291,8 @@ This note does not close Stage 34.
 Production C++ (`tools/server/server-cache-hybrid.{cpp,h}`, `tools/server/server-context.cpp`, `tools/server/server-task.{cpp,h}`) carries the uncommitted Stage 27/28/30/31/32 fixes. Stage 34-specific renderer change in `cache-handling-test-scripts/lib/stage34-request-renderer.ps1` is untracked (`??`). Per AGENTS.md, all code UNCOMMITTED; user approval required for commit.
 
 Next owner: user.
+
+Final reopen-cycle closure is recorded in
+[part-21-manager-closure-20260707.md](cache-handling-phase34-implementation/part-21-manager-closure-20260707.md).
+D-CLOSURE-34-REOPEN-01 closes Stage 34 with 5 PASS, 0 FAIL, 0 BLOCKED, 0 SKIP,
+and 1 N/A-not-an-execution-row (TP-34-CC expected behavior).

@@ -171,13 +171,13 @@ Action:
 - Check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after. If assertions are silently disabled, Release-only crash may mask real product bug or test infrastructure bug. Run Debug build as cross-check. Classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking test step as PASS.
 
 
-## Improvement: verify markdown constraints after QA doc edits
+## Improvement: verify markdown constraints after QA doc edits and fresh part files
 
 Condition:
-- Editing reusable QA markdown that must stay under repo line-count, ASCII, and whitespace rules
+- Editing reusable QA markdown OR creating a fresh QA part file that must stay under repo line-count, ASCII, LF, and whitespace rules
 
 Action:
-- Check initial physical line counts before editing near-limit QA docs, using `@(Get-Content <path>).Count` rather than `Measure-Object -Line`, because the latter can undercount blank records on PowerShell. Draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass. If a new file exceeds the cap, compact it immediately instead of splitting unless the remaining content truly needs a part file. Resolve every local markdown link from the edited file's own directory, not from the repo root or parent index; for files under `._design_docs/cache-handling-test-plan/`, sibling design docs usually resolve as `../cache-handling-*.md`, not `../../cache-handling-*.md`. Rerun line-count, ASCII-byte, LF/no-CR, BOM, whitespace, link, and diff-shape checks on every touched markdown file before final handoff, including fresh untracked reports and part files that `git diff --check` will not inspect. Preserve existing line endings where practical; if tool changes them, normalize deliberately and rerun `git diff --check`.
+- Do draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass, targeting well under 300 with buffer. Measure the physical line count with `@(Get-Content <path>).Count`, not `Measure-Object -Line`; the latter undercounts blank lines on PowerShell and can report dozens of lines below reality (observed 189 reported vs 231 actual on a part-38 file). If a new file exceeds the cap, compact in place rather than splitting unless content truly needs another part. Verify byte-level hygiene on EVERY new file immediately after creation AND after any line-ending normalization: count CR bytes (target 0), bytes above 127 (target 0), BOM (target absent), trailing-whitespace lines (target 0), and resolve every local relative link from the edited file's own directory. The `create_file` tool writes CRLF endings on Windows even when the source content uses LF, and `git diff --check` does NOT inspect untracked files; a freshly created part file can ship CRLF with no warning. Normalize deliberately with `[System.IO.File]::WriteAllText($path, $content.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))` and re-verify CR=0 before the final report. For files under `._design_docs/cache-handling-test-plan/`, sibling design docs resolve as `../cache-handling-phase34-*.md` and test reports as `../.test_reports/*.md`, never `../../cache-handling-*.md`.
 
 
 ## Improvement: separate own QA edits from dirty sources
