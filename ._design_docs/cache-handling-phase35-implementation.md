@@ -1,6 +1,6 @@
 # Stage 35 implementation: upstream merge pre-merge analysis
 
-Status: Refreshed pre-merge analysis approved; clean-tree gate pending
+Status: Clean-tree gate PASS; ready for Developer merge execution
 Date opened: 2026-07-07
 Stage: 35 (Upstream merge cycle)
 Owner: Developer
@@ -45,6 +45,7 @@ Binding sources:
 - [Part 16: refreshed pre-merge analysis after abort 2026-07-07](cache-handling-phase35-implementation/part-16-refreshed-pre-merge-analysis-20260707.md) - reviewed by part 17; abort closed the open no-commit merge, `origin/upstream_master` now matches actual upstream `master` at `bec4772f6a25`, refreshed range is 317 commits with 94 filtered rows: 13 NO-OP, 69 INTEGRATE, 12 REWORK-REQUIRED, 0 DEFER, 0 REVERT. Merge execution remains blocked.
 - [Part 17: refreshed pre-merge analysis review 2026-07-07](cache-handling-phase35-implementation/part-17-refreshed-pre-merge-analysis-review-20260707.md) - PASS; source ref, absent `MERGE_HEAD`, 317-count range, 5-commit delta, filtered triage, and aggregate counts verified. Next gate is Manager refreshed pre-merge approval.
 - [Part 18: Manager refreshed pre-merge approval 2026-07-07](cache-handling-phase35-implementation/part-18-manager-refreshed-premerge-approval-20260707.md) - PASS for part 16 and part 17; approves counts `13/69/12/0/0`, routes `f5525f7e7a7e` and `c198af4dc24f` into MTP/KV/speculative rework, keeps `5eca4e3cabad` INTEGRATE, and blocks merge execution on clean-tree gate.
+- [Part 19: Manager clean-tree gate 2026-07-08](cache-handling-phase35-implementation/part-19-manager-clean-tree-gate-20260708.md) - PASS; cleanup commit `e2a3be8553ca` preserves Stage 35 docs, `MERGE_HEAD` is absent, source ref matches actual upstream `master` at `bec4772f6a25`, and Developer merge execution is authorized under the approved no-push/no-PR constraints.
 
 ## Progress log
 
@@ -73,6 +74,7 @@ Binding sources:
 | Redo refreshed pre-merge analysis | Done | Part 16 records 317 commits, 94 filtered rows, and counts `13/69/12/0/0`; part 17 review passed. |
 | Refreshed pre-merge analysis review | Done | Part 17 records Architect PASS with 0 findings; Manager approval remains required before merge execution. |
 | Manager refreshed pre-merge approval | Done | Part 18 accepts part 16 and part 17 and opens the clean-tree gate before merge execution. |
+| Manager clean-tree gate | Done | Part 19 records cleanup commit `e2a3be8553ca`, clean status, absent `MERGE_HEAD`, and current source ref `bec4772f6a25`. |
 
 ## Current handoff
 
@@ -89,8 +91,9 @@ authorizes aborting the open no-commit merge first. Part 16 provides the new
 refreshed analysis, part 17 passes Architect review, and part 18 approves the
 latest source-ref, counts, and routing.
 
-Next owner: Manager.
+Next owner: Developer.
 
-Next gate: clean-tree gate before Developer merge execution.
+Next gate: merge/rework implementation execution.
 
-Merge execution remains blocked until the clean-tree gate is resolved.
+Merge execution is authorized under the Stage 35 plan. Commits, pushes, PRs,
+and reviewer responses remain blocked unless separately requested.
