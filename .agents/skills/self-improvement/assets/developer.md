@@ -1350,26 +1350,36 @@ Action:
 
 - Do add the narrowest test-only hook at the live production branch boundary and assert a branch-specific signal from that path. Drive the public transaction method in the test, prove the competing operation runs while the hook is paused, and assert the production second-pass or post-relock counter when the review finding names that branch. Do not count helper-shaped setup code as evidence for production transaction coverage.
 
-## Improvement: Verify refreshed remote-tracking refs before evidence edits
+## Improvement: Verify refreshed remote-tracking refs before and during merge evidence
 
 Condition:
 
 - When a task states that a remote-tracking source ref has already been
   refreshed, or when a merge/rework implementation gate starts after a cleanup
-  commit and depends on a previously approved upstream source tip
+  commit and depends on a previously approved upstream source tip, or when a
+  no-commit merge remains open long enough for the source ref or actual
+  upstream tip to change during evidence gathering
 
 Action:
 
 - Do run the required `git status --short`, `rev-parse`, `log -1`,
   `merge-base`, `rev-list --count`, `remote -v`, and `ls-remote` checks before
-  merge commands or durable evidence edits. Compare live ref SHA, approved
-  source SHA, range count, merge base, and actual upstream remote tip as
-  separate gates. If the named ref still points at the old SHA, the approved
-  object exists only as a loose/local object, or actual upstream has advanced
-  beyond the local object store, stop before merge and record a source-ref
-  blocker unless Manager has already approved a pinned known-gap path. Don't
-  treat a clean worktree or prior cleanup commit as authorization to merge a
-  stale or mismatched source ref.
+  merge commands or durable evidence edits, and repeat the SHA checks before
+  claiming implementation-gate closure. Compare live ref SHA, approved source
+  SHA, range count, merge base, and actual upstream remote tip as separate
+  gates. If the named ref still points at the old SHA, the approved object
+  exists only as a loose/local object, or actual upstream has advanced beyond
+  the local object store, stop before merge and record a source-ref blocker
+  unless Manager has already approved a pinned known-gap path. If drift is
+  discovered after a no-commit merge is already open, do only bounded
+  documentation and hygiene needed to preserve the partial state, then stop for
+  Manager direction; don't run more code/test evidence or close the gate on the
+  stale merge. If Manager authorizes abort-and-redo, verify untracked paths
+  first, run only `git merge --abort` (not `reset`), confirm `MERGE_HEAD` is
+  gone, refresh the selected source ref to actual upstream, then redo the
+  pre-merge analysis against the latest source tip. Don't treat a clean
+  worktree or prior cleanup commit as authorization to merge or finish a stale
+  or mismatched source ref.
 
 ## Improvement: Quote git revision ranges in PowerShell variables
 

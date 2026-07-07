@@ -1,6 +1,6 @@
 # Stage 35 implementation: upstream merge pre-merge analysis
 
-Status: Refreshed pre-merge analysis approved; merge blocked on clean-tree gate
+Status: Refreshed pre-merge analysis approved; clean-tree gate pending
 Date opened: 2026-07-07
 Stage: 35 (Upstream merge cycle)
 Owner: Developer
@@ -40,6 +40,11 @@ Binding sources:
 - [Part 11: refreshed pre-merge analysis 2026-07-07](cache-handling-phase35-implementation/part-11-refreshed-pre-merge-analysis-20260707.md) - refreshed `origin/upstream_master` to actual upstream `master` at `6c487e2f79de`; refreshed range is 312 commits with 91 filtered rows: 13 NO-OP, 68 INTEGRATE, 10 REWORK-REQUIRED, 0 DEFER, 0 REVERT. Merge execution still blocked.
 - [Part 12: refreshed pre-merge analysis review 2026-07-07](cache-handling-phase35-implementation/part-12-refreshed-pre-merge-analysis-review-20260707.md) - PASS; source ref and actual upstream `master` match `6c487e2f79de`, refreshed counts verified, `024c46ae4e37` can join MTP/KV/speculative rework, and `6c487e2f79de` can remain INTEGRATE with focused scans.
 - [Part 13: Manager refreshed pre-merge approval 2026-07-07](cache-handling-phase35-implementation/part-13-manager-refreshed-premerge-approval-20260707.md) - PASS for refreshed counts and routing; merge blocked on next clean-tree gate.
+- [Part 14: merge/rework implementation blocked 2026-07-07](cache-handling-phase35-implementation/part-14-merge-rework-implementation-blocked-20260707.md) - PARTIAL/BLOCKED; no-commit merge opened at `MERGE_HEAD=6c487e2f79de`, conflicts resolved and staged, semantic scans run, but `origin/upstream_master` and actual upstream `master` advanced before implementation-gate closure.
+- [Part 15: Manager source-ref and partial-merge decision 2026-07-07](cache-handling-phase35-implementation/part-15-manager-source-ref-and-partial-merge-decision-20260707.md) - REFRESH AND REDO from actual upstream `master` at `bec4772f6a25`; reject pinned known-gap path, abort the open no-commit merge first, and send Developer back to refreshed pre-merge analysis before any merge execution.
+- [Part 16: refreshed pre-merge analysis after abort 2026-07-07](cache-handling-phase35-implementation/part-16-refreshed-pre-merge-analysis-20260707.md) - reviewed by part 17; abort closed the open no-commit merge, `origin/upstream_master` now matches actual upstream `master` at `bec4772f6a25`, refreshed range is 317 commits with 94 filtered rows: 13 NO-OP, 69 INTEGRATE, 12 REWORK-REQUIRED, 0 DEFER, 0 REVERT. Merge execution remains blocked.
+- [Part 17: refreshed pre-merge analysis review 2026-07-07](cache-handling-phase35-implementation/part-17-refreshed-pre-merge-analysis-review-20260707.md) - PASS; source ref, absent `MERGE_HEAD`, 317-count range, 5-commit delta, filtered triage, and aggregate counts verified. Next gate is Manager refreshed pre-merge approval.
+- [Part 18: Manager refreshed pre-merge approval 2026-07-07](cache-handling-phase35-implementation/part-18-manager-refreshed-premerge-approval-20260707.md) - PASS for part 16 and part 17; approves counts `13/69/12/0/0`, routes `f5525f7e7a7e` and `c198af4dc24f` into MTP/KV/speculative rework, keeps `5eca4e3cabad` INTEGRATE, and blocks merge execution on clean-tree gate.
 
 ## Progress log
 
@@ -59,40 +64,33 @@ Binding sources:
 | Refreshed pre-merge analysis | Done | Part 11 records the authorized fetch, source-ref checks, prefix proof, refreshed counts, and two new filtered rows. |
 | Refreshed pre-merge analysis review | Done | Part 12 records Architect PASS with 0 findings; Manager approval remains required before merge execution. |
 | Manager refreshed pre-merge approval | Done | Part 13 accepts counts `13/68/10/0/0`, routes `024c46ae4e37` into MTP/KV/speculative rework, and keeps `6c487e2f79de` INTEGRATE. |
-| Run merge | Not done | Out of scope and not authorized. |
-| Run regression | Not done | Out of scope until implementation-plan review, Manager approval, merge/rework closure, and dirty-worktree gate pass. |
+| Run merge | Partial | Part 14 records no-commit merge preparation against `MERGE_HEAD=6c487e2f79de`; six textual conflicts were resolved and staged. |
+| Semantic conflict scans | Partial | Part 14 records clean scoped conflict-marker, stale-symbol, metric-label, and anchor scans. |
+| Run regression | Blocked | Focused build attempts timed out, then source ref became stale before implementation-gate closure. |
+| Manager source-ref and partial-merge decision | Done | Part 15 rejects the pinned known-gap path and authorizes aborting the open no-commit merge so Developer can redo refreshed pre-merge analysis against actual upstream `master` at `bec4772f6a25`. |
+| Abort stale no-commit merge | Done | Part 16 records untracked-file safety checks and `git merge --abort` exit `0`; `MERGE_HEAD` no longer exists. |
+| Refresh source ref to actual upstream | Done | Part 16 records direct fetch from `https://github.com/ggml-org/llama.cpp.git` to `refs/remotes/origin/upstream_master`; source ref and actual upstream both equal `bec4772f6a25`. |
+| Redo refreshed pre-merge analysis | Done | Part 16 records 317 commits, 94 filtered rows, and counts `13/69/12/0/0`; part 17 review passed. |
+| Refreshed pre-merge analysis review | Done | Part 17 records Architect PASS with 0 findings; Manager approval remains required before merge execution. |
+| Manager refreshed pre-merge approval | Done | Part 18 accepts part 16 and part 17 and opens the clean-tree gate before merge execution. |
 
 ## Current handoff
 
-Staleness verdict: resolved for analysis. Part 11 refreshed
-`origin/upstream_master` to actual upstream `master` at `6c487e2f79de`.
+Staleness verdict: closed for the current analysis. Part 16 refreshed
+`origin/upstream_master` to actual upstream `master` at `bec4772f6a25`.
 
-Triage status: refreshed range has 312 commits. Part 11 proves the prior
-308-commit range is a prefix, keeps the prior 89 rows unchanged, and adds two
-filtered delta rows. Refreshed counts: 13 NO-OP, 68 INTEGRATE, 10
-REWORK-REQUIRED, 0 DEFER, 0 REVERT.
+Merge state: no open merge. `git merge --abort` succeeded and `MERGE_HEAD` no
+longer exists. No merge commit exists.
 
-Manager decisions requested:
+Manager approval history: refreshed pre-merge approval passed in part 13, but
+part 14 blocks implementation-gate closure on stale source state. Part 15
+chooses refresh-and-redo against actual upstream `master` at `bec4772f6a25` and
+authorizes aborting the open no-commit merge first. Part 16 provides the new
+refreshed analysis, part 17 passes Architect review, and part 18 approves the
+latest source-ref, counts, and routing.
 
-- Confirm the pre-existing dirty worktree is acceptable for this planning-only
-  artifact, or require cleanup before any merge execution.
-- Confirm whether the 10 REWORK-REQUIRED candidates should open rework parts
-  before merge execution.
-- Confirm whether broad server-router and SSE changes are one combined route
-  rework or normal INTEGRATE items with focused route regression.
+Next owner: Manager.
 
-Manager approval: PASS for pre-merge analysis in part 05.
+Next gate: clean-tree gate before Developer merge execution.
 
-Architect rework design review: PASS in Stage 35 design part 07.
-Manager rework gate: PASS in Stage 35 design part 08.
-
-Implementation plan review: PASS in part 07.
-
-Manager implementation-plan gate: PASS in part 08.
-
-Current preflight gate: refreshed analysis approved by Manager. Merge execution
-still needs a clean-tree gate.
-
-Next gate: clean-tree gate before Developer merge execution. Current planning
-docs are dirty again; explicit approval for a cleanup commit or another
-clean-tree path is required before merge execution.
+Merge execution remains blocked until the clean-tree gate is resolved.
