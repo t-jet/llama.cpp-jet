@@ -1,6 +1,6 @@
 # Stage 35 implementation: upstream merge pre-merge analysis
 
-Status: Clean-tree gate PASS; ready for Developer merge execution
+Status: Wrong-source merge aborted; upstream_master source restored
 Date opened: 2026-07-07
 Stage: 35 (Upstream merge cycle)
 Owner: Developer
@@ -46,6 +46,8 @@ Binding sources:
 - [Part 17: refreshed pre-merge analysis review 2026-07-07](cache-handling-phase35-implementation/part-17-refreshed-pre-merge-analysis-review-20260707.md) - PASS; source ref, absent `MERGE_HEAD`, 317-count range, 5-commit delta, filtered triage, and aggregate counts verified. Next gate is Manager refreshed pre-merge approval.
 - [Part 18: Manager refreshed pre-merge approval 2026-07-07](cache-handling-phase35-implementation/part-18-manager-refreshed-premerge-approval-20260707.md) - PASS for part 16 and part 17; approves counts `13/69/12/0/0`, routes `f5525f7e7a7e` and `c198af4dc24f` into MTP/KV/speculative rework, keeps `5eca4e3cabad` INTEGRATE, and blocks merge execution on clean-tree gate.
 - [Part 19: Manager clean-tree gate 2026-07-08](cache-handling-phase35-implementation/part-19-manager-clean-tree-gate-20260708.md) - PASS; cleanup commit `e2a3be8553ca` preserves Stage 35 docs, `MERGE_HEAD` is absent, source ref matches actual upstream `master` at `bec4772f6a25`, and Developer merge execution is authorized under the approved no-push/no-PR constraints.
+- [Part 20: merge/rework implementation evidence 2026-07-08](cache-handling-phase35-implementation/part-20-merge-rework-implementation-evidence-20260708.md) - PARTIAL/BLOCKED; no-commit merge opened against `MERGE_HEAD=bec4772f6a25`, six textual conflicts resolved and staged, semantic scans passed, focused build attempts timed out with process cleanup, then `origin/upstream_master` resolved to stale `47e1de77aa0f` while actual upstream remained `bec4772f6a25`.
+- [Part 21: Manager source-ref correction 2026-07-08](cache-handling-phase35-implementation/part-21-manager-source-ref-restore-decision-20260708.md) - PASS; user corrected the source branch to `upstream_master`, wrong GitHub-`master` merge was aborted, `origin/upstream_master` was force-refreshed to `47e1de77aa0f`, and Developer must restart merge execution against that source.
 
 ## Progress log
 
@@ -75,25 +77,36 @@ Binding sources:
 | Refreshed pre-merge analysis review | Done | Part 17 records Architect PASS with 0 findings; Manager approval remains required before merge execution. |
 | Manager refreshed pre-merge approval | Done | Part 18 accepts part 16 and part 17 and opens the clean-tree gate before merge execution. |
 | Manager clean-tree gate | Done | Part 19 records cleanup commit `e2a3be8553ca`, clean status, absent `MERGE_HEAD`, and current source ref `bec4772f6a25`. |
+| Run merge after clean-tree gate | Partial | Part 20 records `git merge --no-ff --no-commit origin/upstream_master`; merge opened with `MERGE_HEAD=bec4772f6a25` and six textual conflicts. |
+| Resolve conflicts after clean-tree gate | Partial | Part 20 records resolutions for `common/common.cpp`, `common/fit.h`, `tools/server/CMakeLists.txt`, `tools/server/server-common.h`, `tools/server/server-context.cpp`, and `tools/server/server-task.cpp`. |
+| Semantic conflict scans after clean-tree gate | Partial | Part 20 records clean scoped conflict-marker and public metric-label scans plus cache transaction, target/draft, checkpoint, route/session/stream, and speculative-helper anchor scans. |
+| Focused build/test after clean-tree gate | Blocked | Part 20 records `llama-server test-cache-controller` build timeout after 604 seconds, `test-cache-controller` timeout after 304 seconds, and build-process cleanup. |
+| Source-ref recheck after clean-tree gate | Blocked | Part 20 records `origin/upstream_master=47e1de77aa0f`, actual upstream `master=bec4772f6a25`, open `MERGE_HEAD=bec4772f6a25`; implementation-gate closure stopped. |
+| Manager source-ref correction | Done | Part 21 records the user correction that `upstream_master` is the source branch, aborts the wrong GitHub-`master` merge, and restores `origin/upstream_master` to `47e1de77aa0f`. |
 
 ## Current handoff
 
-Staleness verdict: closed for the current analysis. Part 16 refreshed
-`origin/upstream_master` to actual upstream `master` at `bec4772f6a25`.
+Source-ref verdict: corrected by user. Part 21 records that Stage 35 upstream
+source is the `upstream_master` branch, not GitHub `master`.
 
-Merge state: no open merge. `git merge --abort` succeeded and `MERGE_HEAD` no
-longer exists. No merge commit exists.
+Merge state: no open merge. The wrong-source no-commit merge against
+`MERGE_HEAD=bec4772f6a25` was aborted. No merge commit exists.
 
 Manager approval history: refreshed pre-merge approval passed in part 13, but
 part 14 blocks implementation-gate closure on stale source state. Part 15
 chooses refresh-and-redo against actual upstream `master` at `bec4772f6a25` and
 authorizes aborting the open no-commit merge first. Part 16 provides the new
 refreshed analysis, part 17 passes Architect review, and part 18 approves the
-latest source-ref, counts, and routing.
+latest source-ref, counts, and routing. Part 19 passes the clean-tree gate.
+Part 20 records partial evidence from the wrong-source merge attempt. Part 21
+supersedes that merge path and restores `origin/upstream_master` to
+`47e1de77aa0f`.
 
 Next owner: Developer.
 
-Next gate: merge/rework implementation execution.
+Next gate: restart merge/rework implementation execution against
+`origin/upstream_master=47e1de77aa0f`.
 
-Merge execution is authorized under the Stage 35 plan. Commits, pushes, PRs,
-and reviewer responses remain blocked unless separately requested.
+Developer must re-check the clean worktree and source ref before opening the
+new merge. Merge commit, push, PR, and reviewer response remain blocked unless
+separately requested.

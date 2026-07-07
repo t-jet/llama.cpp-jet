@@ -1366,20 +1366,21 @@ Action:
   `merge-base`, `rev-list --count`, `remote -v`, and `ls-remote` checks before
   merge commands or durable evidence edits, and repeat the SHA checks before
   claiming implementation-gate closure. Compare live ref SHA, approved source
-  SHA, range count, merge base, and actual upstream remote tip as separate
-  gates. If the named ref still points at the old SHA, the approved object
-  exists only as a loose/local object, or actual upstream has advanced beyond
-  the local object store, stop before merge and record a source-ref blocker
-  unless Manager has already approved a pinned known-gap path. If drift is
-  discovered after a no-commit merge is already open, do only bounded
-  documentation and hygiene needed to preserve the partial state, then stop for
-  Manager direction; don't run more code/test evidence or close the gate on the
-  stale merge. If Manager authorizes abort-and-redo, verify untracked paths
-  first, run only `git merge --abort` (not `reset`), confirm `MERGE_HEAD` is
-  gone, refresh the selected source ref to actual upstream, then redo the
-  pre-merge analysis against the latest source tip. Don't treat a clean
-  worktree or prior cleanup commit as authorization to merge or finish a stale
-  or mismatched source ref.
+  SHA, range count, merge base, actual upstream remote tip, and `MERGE_HEAD`
+  as separate gates. If the named ref still points at the old SHA, moves
+  backward after the merge opens, the approved object exists only as a
+  loose/local object, or actual upstream has advanced beyond the local object
+  store, stop before merge and record a source-ref blocker unless Manager has
+  already approved a pinned known-gap path. If drift is discovered after a
+  no-commit merge is already open, do only bounded documentation and hygiene
+  needed to preserve the partial state, then stop for Manager direction; don't
+  run more code/test evidence or close the gate on the stale merge, even when
+  `MERGE_HEAD` still names the approved source tip. If Manager authorizes
+  abort-and-redo, verify untracked paths first, run only `git merge --abort`
+  (not `reset`), confirm `MERGE_HEAD` is gone, refresh the selected source ref
+  to actual upstream, then redo the pre-merge analysis against the latest
+  source tip. Don't treat a clean worktree or prior cleanup commit as
+  authorization to merge or finish a stale or mismatched source ref.
 
 ## Improvement: Quote git revision ranges in PowerShell variables
 
