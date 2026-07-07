@@ -1620,7 +1620,7 @@ Condition:
 
 Action:
 
-- Do rerun a non-mutating upstream tip check such as `git ls-remote` during the review, without fetching, and compare it to the reported source ref before accepting the range. Do block the gate when the actual upstream tip moved after the Developer report, even if the report's local counts and table math are internally consistent.
+- Do rerun a non-mutating upstream tip check such as `git ls-remote` during the review, without fetching, using the upstream URL or ref policy named by the design/report rather than assuming `origin master` is upstream. Compare that actual upstream tip to the reported source ref before accepting the range. Do block the gate when the actual upstream tip moved after the Developer report, even if the report's local counts and table math are internally consistent.
 
 ## Improvement: Verify delegated manager gate state locally
 
@@ -1640,4 +1640,4 @@ Condition:
 
 Action:
 
-- Do reconstruct the stage from durable docs, advance only the earliest open gate allowed by the current role/session, and write the handoff for the next owner. If the next implementation step requires a clean tree but planning docs or agent memory are dirty, record a Manager blocker and stop for explicit user approval of a clean-tree path; don't commit, stash, revert, or spawn merge implementation without that approval. Don't skip fresh-session review, correction, Manager gate, QA, or test-results review requirements just because the user asked for completion.
+- Do reconstruct the stage from durable docs, advance only the earliest open gate allowed by the current role/session, and write the handoff for the next owner. If a merge-cycle source ref fails staleness/count checks, record a Manager refresh-or-pin decision and redo pre-merge analysis plus review before any merge execution. If the next implementation step requires a clean tree but planning docs or agent memory are dirty, record a Manager blocker and stop for explicit user approval of a clean-tree path; don't commit, stash, revert, or spawn merge implementation without that approval. Don't skip fresh-session review, correction, Manager gate, QA, or test-results review requirements just because the user asked for completion.

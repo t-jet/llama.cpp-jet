@@ -4,7 +4,7 @@ Source: [../cache-handling-phase35-design.md](../cache-handling-phase35-design.m
 
 ## Status
 
-Status: REWORK DESIGN READY FOR REVIEW, 2026-07-07
+Status: REWORK DESIGN APPROVED WITH REFRESHED DSV4 ROW, 2026-07-07
 Owner: Architect
 Track: MTP/KV/speculative
 Gate: merge execution blocked until this part passes independent review and
@@ -22,9 +22,15 @@ merge execution or production code changes.
 | `d789527482d9` | `spec : Support Step3.5/3.7 flash mtp3 (#24340)` | REWORK-REQUIRED | `common/speculative.cpp`, `include/llama.h`, `src/llama-context.*`, `src/models/step35.cpp` |
 | `d1b34251bc57` | `spec : add DFlash support (#22105)` | REWORK-REQUIRED | `common/speculative.cpp`, `common/common.h`, `src/llama-context.cpp`, `src/llama-graph.cpp`, `src/models/dflash.cpp` |
 | `8c146a836630` | `DeepSeek V4 (#24162)` | REWORK-REQUIRED | `models/templates/deepseek-ai-DeepSeek-V4.jinja`, `src/llama-kv-cache-dsv4.*`, `src/llama-kv-cache-iswa.*`, `src/llama-kv-cache.*`, `src/models/deepseek4.cpp` |
+| `024c46ae4e37` | `llama: fix quantized kv-cache for dsv4 (#25202)` | REWORK-REQUIRED | `src/llama-graph.cpp`, `src/llama-impl.h`, `src/llama-kv-cache.cpp`, `src/models/deepseek4.cpp` |
 
-Source tip for the accepted pre-merge analysis:
-`origin/upstream_master` at `108f186d1701d56133a0239dd6754c8814374cbf`.
+Source tip for the refreshed pre-merge analysis:
+`origin/upstream_master` at `6c487e2f79dea747d70325250121e750ed364b2b`.
+
+Review history: the original four-row track passed rework design review in
+part 07 and Manager rework gate in part 08. The refreshed DSV4 row passed
+refreshed pre-merge analysis review in implementation part 12 and was routed
+here by Manager refreshed pre-merge approval in implementation part 13.
 
 ## Affected contract owners
 
@@ -118,5 +124,6 @@ execution:
 
 Next owner: independent Architect review, then Manager gate.
 
-Handoff state: RE-REVIEW REQUIRED. Merge execution, regression runs, commits,
-pushes, PRs, and reviewer responses remain unauthorized.
+Handoff state: APPROVED FOR MERGE IMPLEMENTATION AFTER CLEAN-TREE GATE. Merge
+execution, regression runs, commits, pushes, PRs, and reviewer responses remain
+unauthorized until the Stage 35 implementation clean-tree gate passes.

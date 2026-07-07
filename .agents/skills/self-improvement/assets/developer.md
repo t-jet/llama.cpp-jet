@@ -1354,8 +1354,34 @@ Action:
 
 Condition:
 
-- When a task states that a remote-tracking source ref has already been refreshed and asks for corrected staleness or range evidence
+- When a task states that a remote-tracking source ref has already been
+  refreshed, or when a merge/rework implementation gate starts after a cleanup
+  commit and depends on a previously approved upstream source tip
 
 Action:
 
-- Do run the required `rev-parse`, `log -1`, `merge-base`, `rev-list --count`, `remote -v`, and `ls-remote` checks before editing durable docs. If the named ref still points at the old SHA but the new upstream object exists locally, either move the ref with a guarded `git update-ref <ref> <new> <old>` when that matches the user's stated refreshed state, or stop and report the mismatch. Don't write refreshed evidence from `ls-remote` alone while `rev-parse <ref>` still disagrees.
+- Do run the required `git status --short`, `rev-parse`, `log -1`,
+  `merge-base`, `rev-list --count`, `remote -v`, and `ls-remote` checks before
+  merge commands or durable evidence edits. Compare live ref SHA, approved
+  source SHA, range count, merge base, and actual upstream remote tip as
+  separate gates. If the named ref still points at the old SHA, the approved
+  object exists only as a loose/local object, or actual upstream has advanced
+  beyond the local object store, stop before merge and record a source-ref
+  blocker unless Manager has already approved a pinned known-gap path. Don't
+  treat a clean worktree or prior cleanup commit as authorization to merge a
+  stale or mismatched source ref.
+
+## Improvement: Quote git revision ranges in PowerShell variables
+
+Condition:
+
+- When building a git revision range from PowerShell variables, such as
+  `$old..$new`, for `git rev-list`, `git log`, or `git diff`
+
+Action:
+
+- Do quote or concatenate the full revision range string before passing it to
+  git, for example `"$old..$new"`. Unquoted `$old..$new` can be parsed by
+  PowerShell as a range expression or otherwise passed incorrectly, producing
+  misleading counts. Verify suspicious counts with the quoted form before
+  recording them in durable docs.

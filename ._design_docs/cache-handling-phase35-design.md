@@ -4,7 +4,7 @@ Status: Design gate PASS; Manager rework gate PASS, 2026-07-07
 Date: 2026-07-07
 Stage: 35 (Upstream merge cycle)
 Owner: Architect
-Current gate: Implementation preflight blocked on dirty-worktree cleanup approval
+Current gate: Refreshed pre-merge approved; merge blocked on clean-tree gate
 Branch: work-branch
 
 ## Scope
@@ -30,6 +30,7 @@ changes, test execution, commits, pushes, PRs, or reviewer responses.
 - [Checkpoint placement rework design 2026-07-07](cache-handling-phase35-design/part-06-rework-checkpoint-placement-20260707.md): reviewed in part 07; merge execution blocked.
 - [Rework design review 2026-07-07](cache-handling-phase35-design/part-07-rework-design-review-20260707.md): PASS, 0 findings; merge execution blocked pending Manager rework gate.
 - [Manager rework gate 2026-07-07](cache-handling-phase35-design/part-08-manager-rework-gate-20260707.md): PASS; implementation planning opened, merge execution still blocked.
+- Refreshed source analysis added `024c46ae4e37` to the MTP/KV/speculative track by implementation parts 11-13; merge execution remains blocked pending clean-tree gate.
 
 ## Prerequisites
 
@@ -226,10 +227,10 @@ Stage 35 design can pass review when:
 
 Next owner: user / Manager.
 
-Next gate: implementation preflight after explicit clean-tree approval.
+Next gate: clean-tree gate before Developer merge execution.
 
 Allowed next work: approve or provide a clean-tree path, then delegate
-Developer implementation in a fresh session.
+Developer merge execution in a fresh session.
 
 Merge execution, regression reruns, commits, pushes, PRs, and reviewer
 responses remain unauthorized until dirty worktree policy is satisfied and
