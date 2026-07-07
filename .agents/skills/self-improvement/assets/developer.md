@@ -112,6 +112,7 @@ Action:
 
 - Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. If the hygiene note itself is edited after measurement, rerun the line-count and whitespace checks and record the final values, not the earlier draft values.
 - Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Use `(Get-Content -LiteralPath $path).Count` for the logical line count and compare it to the LF byte count on LF-only markdown. If a combined PowerShell byte/line probe prints an impossible value such as `lines=0` with nonzero LF bytes, rerun the line count directly before reporting evidence.
 -.
 
 

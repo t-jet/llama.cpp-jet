@@ -1,10 +1,10 @@
 # Stage 35 design: upstream merge cycle after Stage 34 closure
 
-Status: Design gate PASS; pre-merge rework design authored for review, 2026-07-07
+Status: Design gate PASS; Manager rework gate PASS, 2026-07-07
 Date: 2026-07-07
 Stage: 35 (Upstream merge cycle)
 Owner: Architect
-Current gate: Rework design review / Manager rework gate
+Current gate: Implementation preflight blocked on dirty-worktree cleanup approval
 Branch: work-branch
 
 ## Scope
@@ -25,9 +25,11 @@ changes, test execution, commits, pushes, PRs, or reviewer responses.
 - [Design review 2026-07-07](cache-handling-phase35-design/part-01-design-review-20260707.md): REWORK, F35-DESIGN-01.
 - [Design re-review 2026-07-07](cache-handling-phase35-design/part-02-design-re-review-20260707.md): PASS, 0 findings.
 - [Manager design gate 2026-07-07](cache-handling-phase35-design/part-03-manager-design-gate-20260707.md): PASS.
-- [MTP/KV/speculative rework design 2026-07-07](cache-handling-phase35-design/part-04-rework-mtp-kv-speculative-20260707.md): ready for review; merge execution blocked.
-- [Route/session lifecycle rework design 2026-07-07](cache-handling-phase35-design/part-05-rework-route-session-lifecycle-20260707.md): ready for review; merge execution blocked.
-- [Checkpoint placement rework design 2026-07-07](cache-handling-phase35-design/part-06-rework-checkpoint-placement-20260707.md): ready for review; merge execution blocked.
+- [MTP/KV/speculative rework design 2026-07-07](cache-handling-phase35-design/part-04-rework-mtp-kv-speculative-20260707.md): reviewed in part 07; merge execution blocked.
+- [Route/session lifecycle rework design 2026-07-07](cache-handling-phase35-design/part-05-rework-route-session-lifecycle-20260707.md): reviewed in part 07; merge execution blocked.
+- [Checkpoint placement rework design 2026-07-07](cache-handling-phase35-design/part-06-rework-checkpoint-placement-20260707.md): reviewed in part 07; merge execution blocked.
+- [Rework design review 2026-07-07](cache-handling-phase35-design/part-07-rework-design-review-20260707.md): PASS, 0 findings; merge execution blocked pending Manager rework gate.
+- [Manager rework gate 2026-07-07](cache-handling-phase35-design/part-08-manager-rework-gate-20260707.md): PASS; implementation planning opened, merge execution still blocked.
 
 ## Prerequisites
 
@@ -222,12 +224,13 @@ Stage 35 design can pass review when:
 
 ## Handoff
 
-Next owner: independent Architect review for parts 04-06, then Manager gate.
+Next owner: user / Manager.
 
-Next gate: rework design review / Manager rework gate.
+Next gate: implementation preflight after explicit clean-tree approval.
 
-Allowed next work: review and gate the three rework design parts.
+Allowed next work: approve or provide a clean-tree path, then delegate
+Developer implementation in a fresh session.
 
 Merge execution, regression reruns, commits, pushes, PRs, and reviewer
-responses remain unauthorized until all three rework parts pass review and
-Manager gate.
+responses remain unauthorized until dirty worktree policy is satisfied and
+Developer implementation is explicitly opened.

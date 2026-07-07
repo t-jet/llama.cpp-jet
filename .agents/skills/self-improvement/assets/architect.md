@@ -107,7 +107,7 @@ Condition:
 
 Action:
 
-- Do convert to LF-only by reading raw bytes, filtering out `0x0D`, and writing with `[System.IO.File]::WriteAllBytes` (or `[System.IO.File]::WriteAllText` with explicit UTF8-no-BOM but only AFTER a byte-level CR strip). Do NOT trust `ReadAllText` + `WriteAllText` alone; on Windows the read preserves CR and the write preserves CR. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't trust `Measure-Object -Line` for line count; it counts only non-empty lines and can return a number much smaller than actual line count (e.g. 60 for an 86-line file). Do use `(Get-Content path).Count` or LF byte count for true line count. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
+- Do convert to LF-only by reading raw bytes, filtering out `0x0D`, and writing with `[System.IO.File]::WriteAllBytes` (or `[System.IO.File]::WriteAllText` with explicit UTF8-no-BOM but only AFTER a byte-level CR strip). Do NOT trust `ReadAllText` + `WriteAllText` alone; on Windows the read preserves CR and the write preserves CR. Do verify with raw byte inspection: no `0x0D` anywhere, no UTF-8 BOM, no trailing whitespace on any line. Do run `git diff --check` after conversion. Don't trust tool's default line endings. Don't use `Set-Content -NoNewline`; collapses file to single line. Don't trust `Measure-Object -Line` for line count; it counts only non-empty lines and can return a number much smaller than actual line count (e.g. 60 for an 86-line file). Don't trust ad hoc `-split "\n", -1` PowerShell counts either; `-1` can produce a bogus zero count. Do use `(Get-Content path).Count` or LF byte count for true line count. Don't claim EXITCODE alone proves cleanliness; report separately for new untracked, own entry-doc edits, pre-existing trailing whitespace user's edits didn't introduce. Don't use padded table-column style on new files if linter flags MD060; compact single-space padding satisfies rule.
 
 
 ## Improvement: Batch normalize LF and verify across multi-file durable design authoring
@@ -1621,3 +1621,23 @@ Condition:
 Action:
 
 - Do rerun a non-mutating upstream tip check such as `git ls-remote` during the review, without fetching, and compare it to the reported source ref before accepting the range. Do block the gate when the actual upstream tip moved after the Developer report, even if the report's local counts and table math are internally consistent.
+
+## Improvement: Verify delegated manager gate state locally
+
+Condition:
+
+- User explicitly delegates a stage-management continuation to Manager subagent and Manager reports that durable docs already existed or were changed outside the subagent
+
+Action:
+
+- Do verify the named gate docs, parent entry handoff, line counts, byte hygiene, `git diff --check`, and dirty status locally before final. Do close the completed subagent before stopping. Don't rely only on the subagent summary when repo state may have changed concurrently.
+
+## Improvement: Stage completion requests still advance one gate at a time
+
+Condition:
+
+- User asks to continue or manage a staged workflow "to completion" while the documented workflow has an earliest open review, correction, or Manager gate
+
+Action:
+
+- Do reconstruct the stage from durable docs, advance only the earliest open gate allowed by the current role/session, and write the handoff for the next owner. If the next implementation step requires a clean tree but planning docs or agent memory are dirty, record a Manager blocker and stop for explicit user approval of a clean-tree path; don't commit, stash, revert, or spawn merge implementation without that approval. Don't skip fresh-session review, correction, Manager gate, QA, or test-results review requirements just because the user asked for completion.

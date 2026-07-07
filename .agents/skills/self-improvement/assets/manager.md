@@ -662,3 +662,11 @@ Condition:
 
 Action:
 - Do separate "intake validation PASS" from "stage opened on disk". Report required durable artifacts and next owner/gate, but do not treat missing new-stage files as a blocker to the read-only validation unless the source docs fail prerequisites.
+
+## Improvement: accept existing durable manager gate records
+
+Condition:
+- Resuming Manager workflow and requested gate decision or routing already exists in linked durable docs, with parent entry docs and document-index updated.
+
+Action:
+- Do verify the existing artifacts on disk, line caps, links, and consistency before deciding. Treat verified existing gate records as the current Manager decision instead of recreating or duplicating them. Report no task-doc edits when no edit was needed.
