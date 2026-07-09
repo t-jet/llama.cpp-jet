@@ -7,6 +7,7 @@
 #include "server-cache-controller.h"
 #include "server-cache-hybrid.h"
 #include "server-cache-legacy.h"
+#include "server-schema.h"
 
 #include "build-info.h"
 #include "common.h"
@@ -330,12 +331,6 @@ static uint32_t server_n_outputs_max(const common_params & params) {
     return std::max<uint32_t>(1, std::min<uint64_t>(n_batch, n_outputs));
 }
 
-// state diagram: https://github.com/ggml-org/llama.cpp/pull/9283
-enum server_state {
-    SERVER_STATE_LOADING_MODEL,  // Server is starting up, model not fully loaded yet
-    SERVER_STATE_READY,          // Server is ready and model is loaded
-};
-
 // server_slot is defined in server-slot.h (included via server-context.h ->
 // server-cache-hybrid.h) so the hybrid cache transaction methods in
 // server-cache-hybrid.cpp can access slot members directly. The full struct
@@ -495,6 +490,7 @@ private:
 
     json json_ui_settings = json::object();    // Primary: new name
     json json_webui_settings = json::object();    // Deprecated: use json_ui_settings instead (kept for compat)
+    server_state_callback_t callback_state = [](server_state, json) -> void {};
 
     // Necessary similarity of prompt for slot selection
     float slot_prompt_similarity = 0.0f;
@@ -546,6 +542,26 @@ private:
         sleeping = new_state;
     }
 
+    void install_sleeping_state_handler() {
+        queue_tasks.on_sleeping_state([this](bool sleeping) {
+            try {
+                handle_sleeping_state(sleeping);
+                if (sleeping && callback_state) {
+                    callback_state(SERVER_STATE_SLEEPING, {});
+                }
+            } catch (const std::bad_alloc & e) {
+                SRV_ERR("Host memory allocation failed during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (const std::exception & e) {
+                SRV_ERR("Unhandled server exception during sleeping state transition: %s\n", e.what());
+                queue_tasks.terminate();
+            } catch (...) {
+                SRV_ERR("%s", "Unhandled non-standard server exception during sleeping state transition\n");
+                queue_tasks.terminate();
+            }
+        });
+    }
+
     // load the model and initialize llama_context
     // this may also be called to resume from sleeping state
     bool load_model(common_params & params) {
@@ -555,6 +571,9 @@ private:
 
         params_base = params;
         params_base.n_outputs_max = server_n_outputs_max(params_base);
+        if (callback_state) {
+            callback_state(SERVER_STATE_LOADING, {});
+        }
 
         std::string & mmproj_path = params_base.mmproj.path;
         bool has_mmproj = !mmproj_path.empty();
@@ -659,9 +678,9 @@ private:
 
                     for (size_t j = 0; j < devs.size(); ++j) {
                         const size_t bytes =
-                            (measure_model_bytes ? dmd[j].mb.model : 0) +
-                            dmd[j].mb.context +
-                            dmd[j].mb.compute;
+                            (measure_model_bytes ? dmd[j].model : 0) +
+                            dmd[j].context +
+                            dmd[j].compute;
                         total += bytes;
                         for (size_t i = 0; i < tgt_devices.size(); i++) {
                             if (tgt_devices[i] == devs[j]) {
@@ -825,6 +844,10 @@ private:
         }
 
         if (has_mmproj) {
+            if (callback_state) {
+                callback_state(SERVER_STATE_LOADING, {{"stage", "mmproj_model"}});
+            }
+
             if (!is_resume) {
                 mtmd_helper_log_set(common_log_default_callback, nullptr);
             }
@@ -1026,8 +1049,8 @@ private:
         if (!params_base.model_alias.empty()) {
             // backward compat: use first alias as model name
             model_name = *params_base.model_alias.begin();
-        } else if (!params_base.model.name.empty()) {
-            model_name = params_base.model.name;
+        } else if (!params_base.model.get_name().empty()) {
+            model_name = params_base.model.get_name();
         } else {
             // fallback: derive model name from file name
             auto model_path = std::filesystem::path(params_base.model.path);
@@ -1040,11 +1063,12 @@ private:
         // propagate new defaults back to caller
         params = params_base;
 
-        if (!is_resume) {
-            return init();
+        const bool ok = !is_resume ? init() : true;
+        if (ok && callback_state) {
+            callback_state(SERVER_STATE_READY, {});
         }
 
-        return true;
+        return ok;
     }
 
     // unlike load_model(), this is only called once during initialization
@@ -1091,20 +1115,7 @@ private:
                 fail_processing_slots(error);
             }
         });
-        queue_tasks.on_sleeping_state([this](bool sleeping) {
-            try {
-                handle_sleeping_state(sleeping);
-            } catch (const std::bad_alloc & e) {
-                SRV_ERR("Host memory allocation failed during sleeping state transition: %s\n", e.what());
-                queue_tasks.terminate();
-            } catch (const std::exception & e) {
-                SRV_ERR("Unhandled server exception during sleeping state transition: %s\n", e.what());
-                queue_tasks.terminate();
-            } catch (...) {
-                SRV_ERR("%s", "Unhandled non-standard server exception during sleeping state transition\n");
-                queue_tasks.terminate();
-            }
-        });
+        install_sleeping_state_handler();
 
         metrics.init();
 
@@ -1124,16 +1135,13 @@ private:
             }
         }
 
-        // populate UI settings (from either new ui_config_json or deprecated webui_config_json)
+        // populate UI settings
         {
-            const std::string & cfg = !params_base.ui_config_json.empty()
-                ? params_base.ui_config_json
-                : params_base.webui_config_json;
+            const std::string & cfg = params_base.ui_config_json;
             if (!cfg.empty()) {
                 try {
                     json json_settings = json::parse(cfg);
                     json_ui_settings = json_settings;
-                    json_webui_settings = json_settings; // deprecated: keep in sync
                 } catch (const std::exception & e) {
                     SRV_ERR("%s: failed to parse UI config: %s\n", __func__, e.what());
                     return false;
@@ -1683,7 +1691,7 @@ private:
             }
         } else {
             // TODO: optimize this with min-p optimization
-            std::vector<llama_token_data> cur = get_token_probabilities(ctx_tgt, idx);
+            std::vector<llama_token_data> cur = get_token_probabilities(ctx_tgt, idx, n_probs_request);
             const size_t max_probs = cur.size();
             const size_t n_probs = std::min(max_probs, n_probs_request);
 
@@ -3113,8 +3121,9 @@ private:
                         has_mtmd = true;
                     }
 
-                    const int32_t n_before_user = slot.task->params.n_before_user;
-                    const bool n_before_user_known = n_before_user > 0;
+                    const auto & spans = slot.task->params.message_spans;
+                    const auto last_user_pos = spans.last_user_message_pos();
+                    const bool last_user_pos_known = last_user_pos >= 0;
 
                     // add prompt tokens for processing in the current batch
                     while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.n_tokens < n_batch_prompt) {
@@ -3146,8 +3155,8 @@ private:
 
                         // stop the prompt batch exactly before the latest user input, so a checkpoint
                         // can be created after the previous messages
-                        if (n_before_user_known &&
-                            slot.prompt.n_tokens() == n_before_user) {
+                        if (last_user_pos_known &&
+                            slot.prompt.n_tokens() == last_user_pos) {
                             break;
                         }
 
@@ -3194,7 +3203,7 @@ private:
                         slot.init_sampler();
                     } else {
                         // skip ordinary mid-prompt checkpoints
-                        if (!n_before_user_known && !near_prompt_end) {
+                        if (!last_user_pos_known && !near_prompt_end) {
                             do_checkpoint = false;
                         }
                     }
@@ -3208,15 +3217,15 @@ private:
 
                     {
                         const bool is_on_user =
-                            n_before_user_known &&
-                            n_tokens_start == n_before_user;
+                            last_user_pos_known &&
+                            n_tokens_start == last_user_pos;
 
                         const bool is_after_user =
-                            n_before_user_known &&
-                            n_tokens_start > n_before_user;
+                            last_user_pos_known &&
+                            n_tokens_start > last_user_pos;
 
                         const bool is_allowed =
-                            !n_before_user_known ||
+                            !last_user_pos_known ||
                             is_on_user ||
                             (is_after_user && near_prompt_end);
 
@@ -3719,7 +3728,6 @@ server_context_meta server_context::get_meta() const {
         /* has_inp_audio          */ impl->chat_params.allow_audio,
         /* has_inp_video          */ impl->chat_params.allow_video,
         /* json_ui_settings       */ impl->json_ui_settings,
-        /* json_webui_settings    */ impl->json_webui_settings,  // Deprecated
         /* slot_n_ctx             */ impl->get_slot_n_ctx(),
         /* pooling_type           */ llama_pooling_type(impl->ctx_tgt),
 
@@ -3770,57 +3778,23 @@ struct server_res_generator : server_http_res {
     }
 };
 
-void server_context::on_sleeping_changed(std::function<void(bool)> callback) {
-    impl->queue_tasks.on_sleeping_state(std::move(callback));
+void server_context::set_state_callback(server_state_callback_t callback) {
+    impl->callback_state = std::move(callback);
 }
 
-// compute the number of tokens before the last user message in the prompt
-static int32_t prompt_get_n_before_user(
-        const json & message_spans,
-        const std::string & prompt,
-        const std::vector<raw_buffer> & files,
-        const llama_vocab * vocab,
-        mtmd_context * mctx) {
-    int32_t result = -1;
-    int32_t byte_pos = -1;
-
-    for (const auto & span : message_spans) {
-        const std::string role = json_value(span, "role", std::string());
-
-        if (role == "user") {
-            byte_pos = json_value(span, "pos", -1);
-        }
-    }
-
-    if (byte_pos >= 0) {
-        GGML_ASSERT((size_t) byte_pos <= prompt.size());
-
-        const std::string prefix = prompt.substr(0, (size_t) byte_pos);
-
-        const std::string marker = get_media_marker();
-        size_t n_prefix_media = 0;
-        for (size_t pos = 0; (pos = prefix.find(marker, pos)) != std::string::npos; pos += marker.size()) {
-            n_prefix_media++;
-        }
-
-        GGML_ASSERT(n_prefix_media <= files.size());
-
-        if (mctx != nullptr && n_prefix_media > 0) {
-            // TODO: this makes a copy - avoid it
-            std::vector<raw_buffer> prefix_files(files.begin(), files.begin() + n_prefix_media);
-
-            result = (int32_t) process_mtmd_prompt(mctx, prefix, prefix_files).size();
-        } else {
-            result = (int32_t) tokenize_input_prompts(vocab, nullptr, prefix, true, true)[0].size();
-        }
-
-        SRV_TRC("message_spans: last user message: byte_pos=%d, media=%zu, n_before_user=%d\n",
-                byte_pos, n_prefix_media, result);
-    }
-
-    return result;
+#ifdef LLAMA_SERVER_CACHE_TESTS
+void server_context::debug_install_sleeping_state_handler_for_tests() {
+    impl->install_sleeping_state_handler();
 }
 
+void server_context::debug_invoke_sleeping_state_for_tests(bool sleeping) {
+    impl->queue_tasks.debug_invoke_sleeping_state_for_tests(sleeping);
+}
+
+bool server_context::debug_is_sleeping_for_tests() const {
+    return impl->sleeping;
+}
+#endif
 
 //
 // server_routes
@@ -4068,6 +4042,8 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
     auto & rd = res->rd;
     auto & params = this->params;
 
+    int32_t sse_ping_interval = params.sse_ping_interval;
+
     try {
         std::vector<server_task> tasks;
 
@@ -4098,6 +4074,9 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
 
         // tasks.reserve(inputs.size()); // TODO: this is inaccurate due to child tasks
 
+        auto delimiters = common_chat_msg_delimiters_parse(json_value(data, "message_delimiters", json::array()));
+        delimiters.tokenize(ctx_server.vocab);
+
         for (size_t i = 0; i < inputs.size(); i++) {
             server_task task = server_task(type);
 
@@ -4111,25 +4090,17 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
                 chat_messages,
                 cache_diagnostic_source,
             });
-            task.params = server_task::params_from_json_cmpl(
+            task.params = server_schema::eval_llama_cmpl_schema(
                     ctx_server.vocab,
                     params,
                     meta->slot_n_ctx,
                     meta->logit_bias_eog,
                     data);
 
-            const auto message_spans = json_value(data, "message_spans", json::array());
-            if (prompt.is_string() && message_spans.is_array()) {
-                task.params.n_before_user =
-                    prompt_get_n_before_user(
-                        message_spans,
-                        prompt.get<std::string>(),
-                        files,
-                        ctx_server.vocab,
-                        ctx_server.mctx);
-            }
+            task.params.message_spans = task.tokens.find_message_spans(delimiters);
 
             task.id_slot = json_value(data, "id_slot", -1);
+            sse_ping_interval = task.params.sse_ping_interval;
 
             // OAI-compat
             task.params.res_type          = res_type;
@@ -5000,15 +4971,15 @@ void server_routes::init_routes() {
             { "ui",                           params.ui },
             { "ui_settings",                  meta->json_ui_settings },
             // Deprecated: use ui/ui_settings instead (kept for backward compat)
-            { "webui",                        params.webui },
-            { "webui_settings",               meta->json_webui_settings },
+            { "webui",                        params.ui },
+            { "webui_settings",               meta->json_ui_settings },
             { "chat_template",               tmpl_default },
             { "chat_template_caps",          meta->chat_template_caps },
             { "bos_token",                   meta->bos_token_str },
             { "eos_token",                   meta->eos_token_str },
             { "build_info",                  meta->build_info },
             { "is_sleeping",                 queue_tasks.is_sleeping() },
-            { "cors_proxy_enabled",          params.ui_mcp_proxy || params.webui_mcp_proxy },
+            { "cors_proxy_enabled",          params.ui_mcp_proxy },
         };
         if (params.use_jinja) {
             if (!tmpl_tools.empty()) {

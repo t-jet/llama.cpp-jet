@@ -111,7 +111,7 @@ Condition:
 Action:
 
 - Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. If the hygiene note itself is edited after measurement, rerun the line-count and whitespace checks and record the final values, not the earlier draft values.
-- Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. When the user explicitly requires `git diff --check` on a new untracked file, run `git add -N <path>` first so the diff check includes the file without staging its content. Don't rely on plain `git diff`, because it does not show untracked file content.
 - Use `(Get-Content -LiteralPath $path).Count` for the logical line count and compare it to the LF byte count on LF-only markdown. If a combined PowerShell byte/line probe prints an impossible value such as `lines=0` with nonzero LF bytes, rerun the line count directly before reporting evidence.
 -.
 
@@ -312,7 +312,7 @@ Condition:
 
 Action:
 
-- Do inspect the resulting diff and newline counts for unnecessary line-ending churn; if a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff. On Windows, `replace_string_in_file` can save the whole file as CRLF even when HEAD is LF, and `[System.IO.File]::WriteAllText` with `UTF8` adds a UTthe finding BOM by default; use `New-Object System.Text.UTF8Encoding($false)` and strip the BOM with `if ($content[0] -eq [char]0xFEFF) { $content = $content.Substring(1) }` before saving, then convert CRLF to LF with `-replace "\`r\`n", "\`n"` so the worktree matches HEAD's blob format; verify with `git diff --check` and a `git diff -w --stat` showing only the intended insertions.
+- Do inspect the resulting diff, `git diff --stat`, and byte-level CR/LF counts before and after any newline cleanup. If a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff. Do not normalize a whole source file to LF or CRLF just to appease `git diff --check` unless that matches the file's intended repository style; compare the scoped diff size after cleanup and stop if the stat balloons. On Windows, use `New-Object System.Text.UTF8Encoding($false)` or `[System.Text.UTF8Encoding]::new($false)` for writes, strip any BOM, and verify with `git diff --check` plus a diff/stat that shows only the intended content changes.
 
 
 ## Improvement: CRLF script diffs need byte-level whitespace verification
@@ -1319,6 +1319,22 @@ Condition:
 Action:
 - Do run or preserve a focused live probe that closes each independent channel before marking the fix ready for review. For the stage-style cache reuse, collect both parsed request rows with non-zero `cache_n` and a positive `llamacpp:cache_hits_total{mode="hybrid"}` delta from the same duplicate-request run.
 
+## Improvement: Coverage target drift can be wider than first compile error
+
+Condition:
+- When a coverage build fails because one focused test target calls a removed API, and the coverage script builds or runs a list of sibling focused targets from the same old stage
+
+Action:
+- Do scan every target in the coverage list for the removed API family before declaring the first target fixed. If several sibling targets still depend on retired behavior, either update all still-valid tests to the current API or remove obsolete behavior-only targets from the coverage mapping, then build the corrected target set. Do not stop after the first target compiles if the coverage package still names other stale targets.
+
+## Improvement: Coverage floor rework needs early lift math
+
+Condition:
+- When asked to raise a focused coverage row to fixed percentage floors after a measurable coverage report already names current product-only and combined rates
+
+Action:
+- Do calculate the exact additional covered product lines needed before editing tests, then choose test work that can plausibly cover that many product lines. If the gap is hundreds of product lines and current null-context tests only cover helpers, identify the likely live-context or fixture-bound paths before spending time on marginal target additions. After each coverage run, compare the gained product lines to the remaining floor gap and stop with a clear blocker if the chosen test-only path cannot close it.
+
 
 ## Improvement: Cache A/B zero-hit results need retention math before product-bug classification
 
@@ -1349,6 +1365,16 @@ Condition:
 Action:
 
 - Do add the narrowest test-only hook at the live production branch boundary and assert a branch-specific signal from that path. Drive the public transaction method in the test, prove the competing operation runs while the hook is paused, and assert the production second-pass or post-relock counter when the review finding names that branch. Do not count helper-shaped setup code as evidence for production transaction coverage.
+
+## Improvement: Callback composition findings need public-path evidence
+
+Condition:
+
+- When an implementation review finding says a callback registration overwrites an existing lifecycle handler, but live lower-level registration code may already compose callbacks
+
+Action:
+
+- Do inspect both the public setter and the lower-level callback storage before patching. Make the production path explicit at the owner boundary, then add a focused hook that drives the public setter and the actual lifecycle callback, asserting both local lifecycle state and external notification order. Do not rely on a helper-only callback composition test when the finding names a public setter.
 
 ## Improvement: Verify refreshed remote-tracking refs before and during merge evidence
 
@@ -1396,3 +1422,56 @@ Action:
   PowerShell as a range expression or otherwise passed incorrectly, producing
   misleading counts. Verify suspicious counts with the quoted form before
   recording them in durable docs.
+
+## Improvement: Escape markdown-link brackets in PowerShell row matching
+
+Condition:
+
+- When replacing a markdown table row in PowerShell by matching a literal link
+  prefix such as `| [cache-handling-phase35-implementation.md]`
+
+Action:
+
+- Do use an escaped regex match like `-match '^\| \[cache-handling-phase35-implementation\.md\]'` or exact string comparison after extracting the cell. Do not use `-like '| [cache-handling-phase35-implementation.md]*'`, because PowerShell treats `[...]` as a wildcard character set and can match the first ordinary table row, corrupting the wrong line.
+
+## Improvement: Parenthesize PowerShell range expressions for Select-Object
+
+Condition:
+
+- When using `Select-Object -Index` with a numeric range in PowerShell, such as
+  reading a file slice around lines 70 through 130
+
+Action:
+
+- Do pass the range as an expression with parentheses, for example
+  `Select-Object -Index (70..130)`. Do not pass `-Index 70..130`, because
+  PowerShell treats it as a string and fails before producing the file slice.
+
+## Improvement: Clean Windows build workers after non-timeout failures
+
+Condition:
+
+- When a Windows `cmake --build` or MSBuild invocation exits non-zero before
+  the outer timeout, especially before a fallback build in the same build tree
+
+Action:
+
+- Do run the same leftover-process check used for timeout cleanup for `cmake`,
+  `MSBuild`, `cl`, `link`, `ninja`, and `devenv`, then stop any remaining build
+  workers before the fallback or handoff. Do not limit cleanup verification to
+  timeout paths; MSBuild can remain alive after ordinary link failures such as
+  `LNK1136` and contaminate the next focused build attempt.
+
+## Improvement: Resolve report artifact path drift against accepted plan
+
+Condition:
+
+- When a task gives a raw artifact path, but the accepted test plan and QA
+  report use a different durable/non-durable artifact root spelling
+
+Action:
+
+- Do treat the accepted plan and QA report as authoritative after the first
+  direct path read fails. Check both dot-prefixed and non-dot project-root
+  variants before declaring the artifact missing, and record the path actually
+  read in the review evidence.

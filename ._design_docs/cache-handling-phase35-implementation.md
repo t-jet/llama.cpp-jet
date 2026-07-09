@@ -1,9 +1,9 @@
 # Stage 35 implementation: upstream merge pre-merge analysis
 
-Status: Wrong-source merge aborted; upstream_master source restored
+Status: Closed PASS; corrected upstream_master no-commit merge remains open and uncommitted
 Date opened: 2026-07-07
 Stage: 35 (Upstream merge cycle)
-Owner: Developer
+Owner: Human maintainer
 Reviewer: Architect
 Manager approver: Manager
 Branch: `work-branch`
@@ -11,9 +11,9 @@ Source ref: `origin/upstream_master`
 
 ## Scope
 
-This implementation log records the Stage 35 pre-merge analysis artifact only.
-No merge, conflict resolution, production code change, regression run, commit,
-push, PR, or reviewer response was performed.
+This implementation log records the Stage 35 pre-merge analysis, merge
+execution, retry, source-fix, and focused evidence trail. The current merge is
+open and uncommitted. No push, PR, or reviewer response was performed.
 
 Binding sources:
 
@@ -48,6 +48,28 @@ Binding sources:
 - [Part 19: Manager clean-tree gate 2026-07-08](cache-handling-phase35-implementation/part-19-manager-clean-tree-gate-20260708.md) - PASS; cleanup commit `e2a3be8553ca` preserves Stage 35 docs, `MERGE_HEAD` is absent, source ref matches actual upstream `master` at `bec4772f6a25`, and Developer merge execution is authorized under the approved no-push/no-PR constraints.
 - [Part 20: merge/rework implementation evidence 2026-07-08](cache-handling-phase35-implementation/part-20-merge-rework-implementation-evidence-20260708.md) - PARTIAL/BLOCKED; no-commit merge opened against `MERGE_HEAD=bec4772f6a25`, six textual conflicts resolved and staged, semantic scans passed, focused build attempts timed out with process cleanup, then `origin/upstream_master` resolved to stale `47e1de77aa0f` while actual upstream remained `bec4772f6a25`.
 - [Part 21: Manager source-ref correction 2026-07-08](cache-handling-phase35-implementation/part-21-manager-source-ref-restore-decision-20260708.md) - PASS; user corrected the source branch to `upstream_master`, wrong GitHub-`master` merge was aborted, `origin/upstream_master` was force-refreshed to `47e1de77aa0f`, and Developer must restart merge execution against that source.
+- [Part 22: merge/rework implementation evidence upstream_master 2026-07-08](cache-handling-phase35-implementation/part-22-merge-rework-implementation-evidence-upstream-master-20260708.md) - PARTIAL/BLOCKED; no-commit merge opened against corrected `MERGE_HEAD=47e1de77aa0f`, five textual conflicts resolved and staged, semantic scans passed, source-ref recheck stayed matched to remote `upstream_master`, and focused build timed out after 608 seconds with process cleanup.
+- [Part 23: Manager build retry decision 2026-07-08](cache-handling-phase35-implementation/part-23-manager-build-retry-decision-20260708.md) - PASS; authorizes one longer focused build/test retry on the current open no-commit merge before Architect implementation review.
+- [Part 24: focused build retry 2026-07-08](cache-handling-phase35-implementation/part-24-focused-build-retry-20260708.md) - BLOCKED; source refs and unresolved-path checks passed, combined and fallback focused builds failed with `LNK1136` on corrupt `ggml-cuda.dir\Release\argsort.obj`, cleanup passed, and no tests ran.
+- [Part 25: clean object-pruned build retry 2026-07-08](cache-handling-phase35-implementation/part-25-clean-build-retry-20260708.md) - BLOCKED; pruned the whole `ggml-cuda.dir` directory, CUDA objects recompiled cleanly (Part 24 `LNK1136` corrupt-object blocker resolved), but the clean build exposed 27 real source-level merge compile errors (`server_state` enum redefinition plus struct field mismatches) in `server-context.cpp` and `server-cache-hybrid.cpp`; `test-cache-controller` not reached, no tests ran.
+- [Part 26: Manager source-fix routing 2026-07-08](cache-handling-phase35-implementation/part-26-manager-source-fix-routing-20260708.md) - PASS; routes the open no-commit merge back to Developer for focused merge-resolution source fixes before Architect implementation review.
+- [Part 27: source merge fix evidence 2026-07-08](cache-handling-phase35-implementation/part-27-source-merge-fix-evidence-20260708.md) - PASS; source-level merge fixes compile, `llama-server test-cache-controller` builds, direct `test-cache-controller` passes 149 tests, `ctest -C Release -R cache` passes 1/1, and `test_router_props` passes with the built server binary.
+- [Part 28: implementation review 2026-07-08](cache-handling-phase35-implementation/part-28-implementation-review-20260708.md) - REWORK; F35-IMPL-01 finds that `set_state_callback` replaces the queue sleep handler instead of composing with `handle_sleeping_state`, so router child sleep/resume lifecycle is not preserved.
+- [Part 29: F35-IMPL-01 rework evidence 2026-07-08](cache-handling-phase35-implementation/part-29-f35-impl-01-rework-evidence-20260708.md) - PASS; `set_state_callback` now only stores the router callback, the existing local sleep handler emits router sleeping state after successful local sleep entry, direct `test-cache-controller` passes 150 tests, and `ctest -C Release -R cache` passes 1/1.
+- [Part 30: F35-IMPL-01 implementation re-review 2026-07-08](cache-handling-phase35-implementation/part-30-f35-impl-01-implementation-re-review-20260708.md) - PASS; Architect verified the callback composition source, guarded test hooks, Stage 25/34 invariants, focused build, direct cache controller, and `ctest -R cache`.
+- [Part 31: Manager implementation gate 2026-07-08](cache-handling-phase35-implementation/part-31-manager-implementation-gate-20260708.md) - PASS; closes implementation review and routes Stage 35 to QA test planning because the shared test plan has no Stage 35 upstream-merge regression part yet.
+- [QA report 2026-07-08](.test_reports/test-report-20260708-01.md) - FAIL; TP-35-COV-01 coverage target build failed because `tests/test-step10-metrics.cpp` still calls removed `hybrid_cache_controller::process_completions`.
+- [Developer test-results review 2026-07-08](.test_reports/test-report-20260708-01-developer-review.md) - REWORK; classifies F35-QA-01 as test/coverage target drift, not a product runtime bug, and assigns focused coverage-test fix/retest to Developer.
+- [F35-QA-01 fix report 2026-07-08](.test_reports/test-report-20260708-01-fixes.md) - updated after Architect fix review; compile drift fixed and deterministic sync metrics assertions added.
+- [F35-QA-01 fix review 2026-07-08](.test_reports/test-report-20260708-01-fix-review.md) - historical REWORK; F35-QA-FIX-01 required deterministic Step 10 sync metrics assertions.
+- [F35-QA-01 fix re-review 2026-07-08](.test_reports/test-report-20260708-01-fix-re-review.md) - PASS; closes F35-QA-FIX-01 and returns TP-35-COV-01 to QA rerun.
+- [Focused TP-35-COV-01 QA rerun 2026-07-08](.test_reports/test-report-20260708-02.md) - FAIL; corrected focused targets build and run under OpenCppCoverage, but markdown coverage is below required floors: combined 0.734 against 0.80 and product-only 0.5856 against 0.70. Direct OpenCppCoverage was used after the wrapper produced no `.cov` files through its Start-Process path.
+- [Developer TP-35-COV-01 rerun review 2026-07-08](.test_reports/test-report-20260708-02-developer-review.md) - MANAGER-DECISION; classifies F35-QA-02 as a coverage-contract issue, not a product runtime bug, and assigns the next gate to Manager.
+- [Part 32: Manager coverage-contract decision 2026-07-08](cache-handling-phase35-implementation/part-32-manager-coverage-contract-decision-20260708.md) - REWORK; no coverage exception for Stage 35, Developer must add meaningful focused coverage and return for fix review before QA reruns TP-35-COV-01.
+- [Part 33: F35-QA-02 coverage fix and review 2026-07-09](cache-handling-phase35-implementation/part-33-f35-qa-02-coverage-fix-review-20260709.md) - PASS; focused test-only coverage rework closes both coverage floors: combined `0.8112`, product-only `0.7026`.
+- [Focused TP-35-COV-01 QA rerun 2026-07-09](.test_reports/test-report-20260709-01-stage35-coverage-rerun.md) - PASS; clean focused build and direct OpenCppCoverage evidence produced 10 `.cov` files and passed combined/product-only floors.
+- [Developer coverage rerun review 2026-07-09](.test_reports/test-report-20260709-01-stage35-coverage-rerun-developer-review.md) - PASS; no product bug remains from F35-QA-02.
+- [Part 34: Manager closure 2026-07-09](cache-handling-phase35-implementation/part-34-manager-closure-20260709.md) - PASS; Stage 35 closed, with the no-commit merge still open and uncommitted.
 
 ## Progress log
 
@@ -83,30 +105,59 @@ Binding sources:
 | Focused build/test after clean-tree gate | Blocked | Part 20 records `llama-server test-cache-controller` build timeout after 604 seconds, `test-cache-controller` timeout after 304 seconds, and build-process cleanup. |
 | Source-ref recheck after clean-tree gate | Blocked | Part 20 records `origin/upstream_master=47e1de77aa0f`, actual upstream `master=bec4772f6a25`, open `MERGE_HEAD=bec4772f6a25`; implementation-gate closure stopped. |
 | Manager source-ref correction | Done | Part 21 records the user correction that `upstream_master` is the source branch, aborts the wrong GitHub-`master` merge, and restores `origin/upstream_master` to `47e1de77aa0f`. |
+| Restart merge against upstream_master | Partial | Part 22 records `git merge --no-ff --no-commit origin/upstream_master`; merge opened with `MERGE_HEAD=47e1de77aa0f` and five textual conflicts. |
+| Resolve upstream_master conflicts | Partial | Part 22 records resolutions for `common/common.cpp`, `common/fit.h`, `tools/server/CMakeLists.txt`, `tools/server/server-common.h`, and `tools/server/server-context.cpp`. |
+| Semantic conflict scans against upstream_master | Partial | Part 22 records clean conflict-marker and public metric-label scans plus cache transaction, target/draft, checkpoint, route/session/stream, and speculative-helper anchor scans. |
+| Focused build/test against upstream_master | Blocked | Part 22 records `llama-server test-cache-controller` build timeout after 608 seconds and build-process cleanup. |
+| Source-ref recheck against upstream_master | Done | Part 22 records `origin/upstream_master`, remote `refs/heads/upstream_master`, and open `MERGE_HEAD` all equal `47e1de77aa0f`. |
+| Manager build retry decision | Done | Part 23 authorizes one longer focused build/test retry before implementation review. |
+| Focused build retry after Manager decision | Blocked | Part 24 records source-ref PASS, no unresolved paths, combined build FAIL after 557.9 seconds, fallback `test-cache-controller` build FAIL after 2.0 seconds, both on `LNK1136` corrupt `argsort.obj`, and process cleanup PASS. |
+| Clean object-pruned build retry | Blocked | Part 25 records pre-check PASS, whole `ggml-cuda.dir` pruned, CUDA objects recompiled cleanly after 1330.6 seconds (Part 24 `LNK1136` blocker resolved), but clean build FAIL with 27 compile errors in `server-context.cpp` and `server-cache-hybrid.cpp` (`server_state` enum redefinition plus struct field mismatches); `test-cache-controller` not reached, leftover processes cleaned. |
+| Manager source-fix routing | Done | Part 26 authorizes Developer to make focused merge-resolution source fixes for the Part 25 compile errors before Architect implementation review. |
+| Source-level merge compile fixes | Done | Part 27 records production source fixes in `server-context.cpp`, `server-cache-hybrid.cpp`, `server-common.cpp`, and `server-common.h`; focused build PASS for `llama-server test-cache-controller`; direct `test-cache-controller` PASS 149 tests; `ctest -C Release -R cache` PASS 1/1; `test_router_props` PASS 1/1. |
+| Architect implementation review | Rework | Part 28 records F35-IMPL-01: router child `set_state_callback` overwrites the sleep handler that calls `handle_sleeping_state`; Developer source-fix rework required before re-review. |
+| F35-IMPL-01 source-fix rework | Done | Part 29 records the composed sleep handler fix, focused build PASS for `llama-server test-cache-controller`, direct `test-cache-controller` PASS 150 tests including the router sleep-state regression, and `ctest -C Release -R cache` PASS 1/1. |
+| Architect implementation re-review | Done | Part 30 records PASS for F35-IMPL-01, with local sleep destroy/reload preserved, router sleeping notification ordered after successful local sleep entry, test hooks guarded, and Stage 25/34 invariants still passing focused evidence. |
+| Manager implementation gate | Done | Part 31 records implementation PASS and routes Stage 35 to QA test planning because the shared test plan does not yet include Stage 35 upstream-merge regression coverage. |
+| F35-QA-02 coverage rework | Done | Part 33 records focused test-only coverage for current synchronous restore, metadata/payload, sync I/O worker, demotion rejection, and coverage contract edge paths. |
+| Architect F35-QA-02 fix review | Done | Part 33 records PASS with no blocking findings. |
+| QA TP-35-COV-01 rerun | Done | Report `test-report-20260709-01-stage35-coverage-rerun.md` records clean focused build PASS and direct OpenCppCoverage PASS: combined `0.8112`, product-only `0.7026`. |
+| Developer QA rerun review | Done | Report `test-report-20260709-01-stage35-coverage-rerun-developer-review.md` records PASS and no remaining product bug. |
+| Manager closure | Done | Part 34 records Stage 35 PASS closure. |
 
 ## Current handoff
 
-Source-ref verdict: corrected by user. Part 21 records that Stage 35 upstream
-source is the `upstream_master` branch, not GitHub `master`.
+Source-ref verdict: PASS. Part 27 rechecks that `origin/upstream_master`,
+remote `refs/heads/upstream_master`, and open `MERGE_HEAD` all equal
+`47e1de77aa0f06bf73cfd8c5281d95979f89fcbe`.
 
-Merge state: no open merge. The wrong-source no-commit merge against
-`MERGE_HEAD=bec4772f6a25` was aborted. No merge commit exists.
+Merge state: open no-commit merge against corrected `upstream_master`. Five
+textual conflicts are resolved and staged. No merge commit exists.
 
-Manager approval history: refreshed pre-merge approval passed in part 13, but
-part 14 blocks implementation-gate closure on stale source state. Part 15
-chooses refresh-and-redo against actual upstream `master` at `bec4772f6a25` and
-authorizes aborting the open no-commit merge first. Part 16 provides the new
-refreshed analysis, part 17 passes Architect review, and part 18 approves the
-latest source-ref, counts, and routing. Part 19 passes the clean-tree gate.
-Part 20 records partial evidence from the wrong-source merge attempt. Part 21
-supersedes that merge path and restores `origin/upstream_master` to
-`47e1de77aa0f`.
+Build/test state: PASS for focused source-fix and F35-IMPL-01 rework scope.
+Part 30 records Architect rerun evidence: `cmake --build build-cuda --config
+Release --target llama-server test-cache-controller -j 8` passed, direct
+`test-cache-controller` passed 150 tests, and `ctest -C Release -R cache`
+passed 1/1. Part 27's `test_router_props` evidence remains the router smoke
+check.
 
-Next owner: Developer.
+Implementation gate verdict: PASS. Part 31 accepts the implementation evidence
+and Architect re-review. The CUDA-object blocker, source compile blocker, and
+router sleep-state callback rework are closed for the focused scope.
 
-Next gate: restart merge/rework implementation execution against
-`origin/upstream_master=47e1de77aa0f`.
+Test execution state: PASS. The 2026-07-09 focused TP-35-COV-01 rerun passed
+after a clean focused build. Direct OpenCppCoverage evidence under
+`_test_output/stage35-f35-qa-02-dev/coverage-direct-13-clean/` records combined
+coverage `0.8112`, `7795 / 9609`, and product-only coverage `0.7026`,
+`2833 / 4032`.
 
-Developer must re-check the clean worktree and source ref before opening the
-new merge. Merge commit, push, PR, and reviewer response remain blocked unless
-separately requested.
+Developer review state: PASS. The 2026-07-09 developer review reports no
+remaining product bug from F35-QA-02.
+
+Manager decision: PASS. Part 34 closes Stage 35. The merge remains open and
+uncommitted. Commit, push, PR, merge abort, and reviewer response remain blocked
+unless separately requested.
+
+Next owner: human maintainer.
+
+Next gate: optional human commit decision for the open no-commit merge.

@@ -63,7 +63,7 @@ Condition:
 
 Action:
 
-- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, parts lists, progress rows, and linked gate-status part files before and after patching. When adding a new review or re-review part, link it from the parent entry and update any index summary whose handoff wording would otherwise stay on the old gate; for refreshed pre-merge reviews, also scrub part-list labels like `READY FOR ARCHITECT REVIEW`, progress-row text like `Architect review is next`, and design/index row text like `pending review` once PASS is recorded. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
+- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, parts lists, progress rows, and linked gate-status part files before and after patching. When adding a new review or re-review part, link it from the parent entry and update any index summary whose handoff wording would otherwise stay on the old gate; for fix re-review PASS, also scrub parent/index "Developer rework next" wording to the actual QA or Manager next gate. For refreshed pre-merge reviews, also scrub part-list labels like `READY FOR ARCHITECT REVIEW`, progress-row text like `Architect review is next`, and design/index row text like `pending review` once PASS is recorded. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
 
 
 ## Improvement: Contingency-branch stale wording hides after status-line fix
@@ -971,7 +971,7 @@ Condition:
 - When reviewing implementation evidence that maps a required test ID to a registered test function
 
 Action:
-- Do inspect the test body, not only its name and registration. If the function only prints, `assert(true)`, or otherwise cannot fail when the required behavior regresses, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
+- Do inspect the test body, not only its name, registration, compile status, or coverage inclusion. If the function only prints, asserts `true`, uses tautologies such as unsigned `value >= 0`, or guards the real assertion behind `if (counter > 0)` so the required behavior can disappear without failure, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
 
 
 ## Improvement: User hints are hypotheses, not requirements
@@ -1641,3 +1641,23 @@ Condition:
 Action:
 
 - Do reconstruct the stage from durable docs, advance only the earliest open gate allowed by the current role/session, and write the handoff for the next owner. If a merge-cycle source ref fails staleness/count checks, record a Manager refresh-or-pin decision and redo pre-merge analysis plus review before any merge execution. If the next implementation step requires a clean tree but planning docs or agent memory are dirty, record a Manager blocker and stop for explicit user approval of a clean-tree path; don't commit, stash, revert, or spawn merge implementation without that approval. Don't skip fresh-session review, correction, Manager gate, QA, or test-results review requirements just because the user asked for completion.
+
+## Improvement: Callback merge reviews must check replacement vs composition
+
+Condition:
+
+- Reviewing upstream merge resolution where local code and upstream both register lifecycle callbacks, queue handlers, router state hooks, or other single-slot function handlers
+
+Action:
+
+- Do trace whether the registration API stores only one callback or supports chaining. If it stores one callback, require the merge fix to compose local lifecycle behavior with upstream notification behavior instead of overwriting either side. Do verify both callback effects with evidence, especially sleep/resume, load/unload, router state, and cleanup paths. Don't accept compile-only or shallow route tests as proof that callback composition survived.
+
+## Improvement: Open no-commit merge reviews need staged and unstaged diffs
+
+Condition:
+
+- Reviewing implementation or rework during an open no-commit merge where conflict resolutions may be staged and follow-up fixes may be unstaged
+
+Action:
+
+- Do inspect both `git diff --cached -- <paths>` and `git diff -- <paths>` for every reviewed source/test path, then read the current file around the final behavior. Don't judge the implementation from only the unstaged diff or only the staged merge resolution.

@@ -27,9 +27,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <thread>
 #include <vector>
-#include <chrono>
 
 // Custom assertion macro that works in both Debug and Release modes.
 // Uses exit() instead of abort() for graceful termination.
@@ -83,29 +81,21 @@ static std::unique_ptr<hybrid_cache_controller> create_controller_with_cold(
 void test_demotion_success_counter() {
     printf("step10: demotion success counter...\n");
     fs::path tmp_dir = fs::temp_directory_path() / "step10_test_demotion_success";
+    fs::remove_all(tmp_dir);
     fs::create_directories(tmp_dir);
     {
         auto ctrl = create_controller_with_cold(tmp_dir);
         ctrl->debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024, true);
 
-        // Add an entry with payload
         ctrl->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4, 5}), false, "ns1", 100, 0);
 
-        // Set a small budget to trigger eviction/demotion
-        ctrl->debug_set_hot_payload_budget_bytes_for_tests(50, false);
-
-        // Add another entry to trigger eviction of the first
-        ctrl->debug_add_entry_for_tests(create_tokens({6, 7, 8, 9, 10}), false, "ns1", 100, 0);
-
-        // Process completions to handle demotion
-        ctrl->process_completions();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        ctrl->process_completions();
-
+        json stats_before = ctrl->get_stats();
+        TEST_ASSERT(stats_before["n_demotion_successes"].get<size_t>() == 0);
+        TEST_ASSERT(ctrl->tx_demote_payload(1));
         json stats = ctrl->get_stats();
-        // Demotion should have been attempted
-        size_t demotion_successes = stats["n_demotion_successes"];
-        TEST_ASSERT(demotion_successes >= 0 && "demotion success counter should exist");
+        TEST_ASSERT(stats["n_demotion_successes"].get<size_t>() == 1);
+        TEST_ASSERT(stats["n_demotion_failures"].get<size_t>() == 0);
+        TEST_ASSERT(stats["n_cold_payload_count"].get<size_t>() == 1);
     }
     fs::remove_all(tmp_dir);
     printf("  PASSED\n");
@@ -167,32 +157,26 @@ void test_get_stats_includes_new_metrics() {
 void test_cold_payload_bytes_gauge() {
     printf("step10: cold payload bytes gauge updates on demotion...\n");
     fs::path tmp_dir = fs::temp_directory_path() / "step10_test_cold_bytes";
+    fs::remove_all(tmp_dir);
     fs::create_directories(tmp_dir);
     {
         auto ctrl = create_controller_with_cold(tmp_dir);
         ctrl->debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024, true);
 
-        // Add an entry with payload
-        ctrl->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4, 5}), false, "ns1", 100, 0);
+        ctrl->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4, 5}), false, "ns1", 100, 25);
 
         json stats_before = ctrl->get_stats();
-        TEST_ASSERT(stats_before["n_cold_payload_bytes"] == 0);
+        TEST_ASSERT(stats_before["n_cold_payload_bytes"].get<size_t>() == 0);
+        TEST_ASSERT(stats_before["n_cold_payload_count"].get<size_t>() == 0);
 
-        // Set a small budget to trigger eviction/demotion
-        ctrl->debug_set_hot_payload_budget_bytes_for_tests(50, false);
-
-        // Add another entry to trigger eviction of the first
-        ctrl->debug_add_entry_for_tests(create_tokens({6, 7, 8, 9, 10}), false, "ns1", 100, 0);
-
-        // Process completions
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        ctrl->process_completions();
+        TEST_ASSERT(ctrl->tx_demote_payload(1));
 
         json stats_after = ctrl->get_stats();
-        // After demotion, cold_payload_bytes should be > 0
-        // (may or may not have completed depending on timing)
-        size_t cold_bytes = stats_after["n_cold_payload_bytes"];
-        TEST_ASSERT(cold_bytes >= 0 && "cold_payload_bytes should be non-negative");
+        TEST_ASSERT(stats_after["n_demotion_successes"].get<size_t>() == 1);
+        TEST_ASSERT(stats_after["n_cold_payload_bytes"].get<size_t>() == 125);
+        TEST_ASSERT(stats_after["n_cold_payload_count"].get<size_t>() == 1);
+        TEST_ASSERT(stats_after["n_cold_payload_descriptors"].get<size_t>() == 1);
+        TEST_ASSERT(stats_after["n_hot_payload_descriptors"].get<size_t>() == 0);
     }
     fs::remove_all(tmp_dir);
     printf("  PASSED\n");
@@ -231,37 +215,23 @@ void test_hot_payload_count_gauge() {
 void test_evictions_not_counting_demotions() {
     printf("step10: cache_payload_evictions_total does NOT count demoted payloads...\n");
     fs::path tmp_dir = fs::temp_directory_path() / "step10_test_evictions_vs_demotions";
+    fs::remove_all(tmp_dir);
     fs::create_directories(tmp_dir);
     {
         auto ctrl = create_controller_with_cold(tmp_dir);
         ctrl->debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024, true);
 
-        // Add an entry with payload
         ctrl->debug_add_entry_for_tests(create_tokens({1, 2, 3, 4, 5}), false, "ns1", 100, 0);
 
         json stats_before = ctrl->get_stats();
-        size_t evictions_before = stats_before["n_payload_evictions"];
+        const size_t evictions_before = stats_before["n_payload_evictions"].get<size_t>();
+        const size_t demotions_before = stats_before["n_demotion_successes"].get<size_t>();
 
-        // Set a small budget to trigger eviction/demotion
-        ctrl->debug_set_hot_payload_budget_bytes_for_tests(50, false);
-
-        // Add another entry to trigger eviction of the first
-        ctrl->debug_add_entry_for_tests(create_tokens({6, 7, 8, 9, 10}), false, "ns1", 100, 0);
-
-        // Process completions
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        ctrl->process_completions();
-
+        TEST_ASSERT(ctrl->tx_demote_payload(1));
         json stats_after = ctrl->get_stats();
-        size_t evictions_after = stats_after["n_payload_evictions"];
-        size_t demotion_successes = stats_after["n_demotion_successes"];
-
-        // If demotion succeeded, n_payload_evictions should NOT have increased
-        // If demotion failed (cold store issue), n_payload_evictions should have increased
-        if (demotion_successes > 0) {
-            TEST_ASSERT(evictions_after == evictions_before && "demoted payloads should not count as evictions");
-        }
-        // Either way, the test verifies the counter behavior is correct
+        TEST_ASSERT(stats_after["n_demotion_successes"].get<size_t>() == demotions_before + 1);
+        TEST_ASSERT(stats_after["n_payload_evictions"].get<size_t>() == evictions_before);
+        TEST_ASSERT(stats_after["n_cold_payload_count"].get<size_t>() == 1);
     }
     fs::remove_all(tmp_dir);
     printf("  PASSED\n");

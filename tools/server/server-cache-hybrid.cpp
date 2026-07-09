@@ -4267,7 +4267,7 @@ static std::string draft_model_source_id(const common_params_model & model) {
     ss << "|url=" << model.url;
     ss << "|hf_repo=" << model.hf_repo;
     ss << "|hf_file=" << model.hf_file;
-    ss << "|name=" << model.name;
+    ss << "|name=" << model.get_name();
     ss << "|docker_repo=" << model.docker_repo;
     return ss.str();
 }

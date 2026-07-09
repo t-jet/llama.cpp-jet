@@ -1,12 +1,10 @@
 # Cache handling test plan
-
 Status: Active
-Last updated: 2026-06-30
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 32
+Last updated: 2026-07-08
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 35
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
-
 Use plain ASCII status labels in plans, scripts, and reports: `PASS`, `FAIL`, `SKIP`, and `BLOCKED`.
 
 Every execution session must start from a clean build. Do not use stale or incrementally rebuilt binaries as test evidence.
@@ -47,7 +45,6 @@ Example design:
 ```
 
 ## Purpose
-
 This plan covers server integration tests for the cache behavior implemented now. When public HTTP cannot create an internal precondition, the plan also maps focused C++ or Python metric-shape evidence that may be used for that row.
 
 ## Finding current implementation status
@@ -107,7 +104,6 @@ For Stage 13 endpoint compatibility planning and execution, read:
 - [Part 23: Stage 13 endpoint compatibility](./cache-handling-test-plan/part-23-stage13-endpoint-compatibility.md)
 
 ## Test coverage summary
-
 The integration plan covers:
 
 - Stage 1 mode selection, legacy compatibility, and public HTTP surface checks.
@@ -122,6 +118,7 @@ The integration plan covers:
 - Stage 10 observability metric shapes and escaping, bounded structured diagnostics, cold-store root and path hardening, startup validation, pressure and abuse handling, deterministic stress, 80% hybrid-path coverage evidence, benchmark evidence, operator documentation checks, security evidence, no marker-surface note, and Stage 4-9 regression after hardening.
 - Stage 13 endpoint compatibility after implementation review PASS: native completion, OpenAI completion/chat/responses/embeddings, Anthropic availability and completion-state handling, transcription availability or fixture blocking evidence, embeddings cache-exclusion evidence, slots regression, marker/public-schema stability, route-neutral preparation identity, degraded diagnostics, response schema stability, and clean-build/report gates.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
+- Stage 35 upstream-merge regression after Manager implementation gate PASS: clean build and stale-binary rules, cache core, MTP/KV/speculative pair-state, route/session/router child state, checkpoint message spans, bounded metrics, cold-store checks when touched, Stage 34 replay/synthetic rows when touched, and focused coverage when feature-mode files changed.
 
 ## Current testable scope
 
@@ -179,7 +176,7 @@ Implemented behavior that must be covered:
 - No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
 - Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
 - Stage 13 keeps endpoint cache behavior selected by server flags and internal metadata. Public request and response schemas, `/slots`, and fork-only marker behavior must remain stable. Embedding routes are metadata-excluded unless a future implementation adds a real embedding cache save/restore path.
-- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`. Stage 32 reruns the Stage 29/30 legacy-vs-hybrid comparison after the Stage 31 namespace and metric-shape fixes, with clean Release CUDA build proof, focused controller evidence, stale-binary proof, dry-run/preflight, full comparison artifacts under `_test_output/stage32-cache-modes-YYYYMMDD-NN/`, and a durable Stage 32 report under `.test_reports/`.
+- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`. Stage 32 reruns the Stage 29/30 legacy-vs-hybrid comparison after the Stage 31 namespace and metric-shape fixes. Stage 35 uses the upstream-merge regression package in Part 40 and must not reuse implementation-review builds as QA evidence.
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -210,6 +207,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 35: Stage 31 hybrid cache misbehavior](./cache-handling-test-plan/part-35-stage31-hybrid-cache-misbehavior.md)
 - [Part 36: Stage 32 live comparison rerun](./cache-handling-test-plan/part-36-stage32-live-comparison-rerun.md)
 - [Part 37: Stage 34 real agentic transcript replay](./cache-handling-test-plan/part-37-stage34-real-agentic-transcript-replay.md)
+- [Part 40: Stage 35 upstream merge regression](./cache-handling-test-plan/part-40-stage35-upstream-merge-regression.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -229,7 +227,6 @@ The Stage 10 closure record at
 cites the T114 row only and is not affected by the split.
 
 ## Review reports
-
 - [Stage 4 test-plan review: 2026-05-27](./cache-handling-test-plan/stage-4-test-plan-review-20260527.md)
 - [Stage 5 test-plan review: 2026-05-28](./cache-handling-test-plan/stage-5-test-plan-review-20260528.md)
 - [Stage 6 test-plan review: 2026-05-30](./cache-handling-test-plan/stage-6-test-plan-review-20260530.md)
@@ -252,11 +249,13 @@ cites the T114 row only and is not affected by the split.
 - [Stage 24 Manager build-path gate: 2026-06-24](./cache-handling-test-plan/stage-24-manager-build-path-gate-20260624.md)
 - [Stage 24 Manager CUDA rerun gate 03: 2026-06-24](./cache-handling-test-plan/stage-24-manager-cuda-rerun-gate-03-20260624.md)
 - [Stage 31 test-plan review: 2026-06-29](./cache-handling-test-plan/stage-31-test-plan-review-20260629.md)
-
+- [Stage 35 test-plan review: 2026-07-08](./cache-handling-test-plan/stage-35-test-plan-review-20260708.md)
+- [Stage 35 test-plan re-review: 2026-07-08](./cache-handling-test-plan/stage-35-test-plan-re-review-20260708.md)
+- [Stage 35 independent test-plan re-review: 2026-07-08](./cache-handling-test-plan/stage-35-test-plan-independent-re-review-20260708.md)
+- [Stage 35 manager test-plan gate: 2026-07-08](./cache-handling-test-plan/stage-35-manager-test-plan-gate-20260708.md)
 ## Test scripts
 
 Reusable PowerShell scripts live in [cache-handling-test-scripts/](./cache-handling-test-scripts/).
-
 ```powershell
 & "._design_docs\cache-handling-test-scripts\execute_tests.ps1"
 ```
@@ -298,4 +297,4 @@ Each report must include:
 
 Use [Part 7](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md) for the detailed report checklist.
 
-See [Test output folder convention](#test-output-folder-convention) above for where to put logs, build outputs, ctest outputs, and other non-durable content. The `.test_reports/` folder is for Markdown reports only.
+See [Test output folder convention](#test-output-folder-convention) above for artifact placement. The `.test_reports/` folder is for Markdown reports only.

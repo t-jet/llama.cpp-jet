@@ -2,7 +2,7 @@
 # run_coverage.ps1
 # Hybrid-cache line coverage via OpenCppCoverage.
 #
-# Runs the 8 focused cache tests and an HTTP probe under individual coverage
+# Runs the current focused cache tests and an HTTP probe under individual coverage
 # sessions, merges the binary .cov files into a single Cobertura XML, and
 # reports union line coverage for the hybrid-mode denominator.
 #
@@ -86,11 +86,13 @@ $srcPatterns = @(
     (Join-Path $SourceRoot 'tools\server\server-cache-policy-lru.cpp'),
     (Join-Path $SourceRoot 'tools\server\server-cache-legacy.h'),
     (Join-Path $SourceRoot 'tests\test-cache-controller.cpp'),
+    (Join-Path $SourceRoot 'tests\test-step1-state-machine.cpp'),
+    (Join-Path $SourceRoot 'tests\test-step2-cold-store.cpp'),
+    (Join-Path $SourceRoot 'tests\test-step3-4-cold-store-write-read.cpp'),
+    (Join-Path $SourceRoot 'tests\test-step9-startup-validation.cpp'),
     (Join-Path $SourceRoot 'tests\test-step10-metrics.cpp'),
+    (Join-Path $SourceRoot 'tests\test-stage10-policy-lru.cpp'),
     (Join-Path $SourceRoot 'tests\test-stage10-cold-store-hardening.cpp'),
-    (Join-Path $SourceRoot 'tests\test-step6-demotion-protocol.cpp'),
-    (Join-Path $SourceRoot 'tests\test-step7-promotion-protocol.cpp'),
-    (Join-Path $SourceRoot 'tests\test-step11-test-hooks-fault-injection.cpp'),
     (Join-Path $SourceRoot 'tests\test-step12-branch-graph.cpp'),
     (Join-Path $SourceRoot 'tests\test-step13-stage8.cpp')
 )
@@ -119,11 +121,13 @@ $covFiles = [System.Collections.Generic.List[string]]::new()
 # --- Phase 1: Focused tests -------------------------------------------------
 $focusedTests = @(
     'test-cache-controller',
+    'test-step1-state-machine',
+    'test-step2-cold-store',
+    'test-step3-4-cold-store-write-read',
+    'test-step9-startup-validation',
     'test-step10-metrics',
+    'test-stage10-policy-lru',
     'test-stage10-cold-store-hardening',
-    'test-step6-demotion-protocol',
-    'test-step7-promotion-protocol',
-    'test-step11-test-hooks-fault-injection',
     'test-step12-branch-graph',
     'test-step13-stage8'
 )
@@ -308,11 +312,13 @@ $denomBasenames = @(
     'server-cache-policy-lru.cpp',
     'server-cache-legacy.h',
     'test-cache-controller.cpp',
+    'test-step1-state-machine.cpp',
+    'test-step2-cold-store.cpp',
+    'test-step3-4-cold-store-write-read.cpp',
+    'test-step9-startup-validation.cpp',
     'test-step10-metrics.cpp',
+    'test-stage10-policy-lru.cpp',
     'test-stage10-cold-store-hardening.cpp',
-    'test-step6-demotion-protocol.cpp',
-    'test-step7-promotion-protocol.cpp',
-    'test-step11-test-hooks-fault-injection.cpp',
     'test-step12-branch-graph.cpp',
     'test-step13-stage8.cpp'
 )
@@ -362,7 +368,7 @@ $verdict      = if ($combinedRate -ge 0.80) { 'PASS' } else { 'FAIL' }
 $reportLines = @(
     "# Hybrid-mode coverage report",
     "",
-    "Denominator: hybrid cache implementation files and 8 focused test files.",
+    "Denominator: hybrid cache implementation files and current focused test files.",
     "Excluded: server-context.cpp, server-context.h (general dispatcher).",
     "Tool: OpenCppCoverage, Cobertura XML line-rate.",
     "Branch-rate: not available (OpenCppCoverage does not produce branch coverage).",

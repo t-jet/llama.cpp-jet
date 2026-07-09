@@ -190,7 +190,7 @@ static void test_branch_metadata_pressure_large_forest() {
 }
 
 static void test_queue_pressure_records_bounded_rows() {
-    printf("stage10: queue pressure records bounded rows...\n");
+    printf("stage10: retired queue pressure rows stay bounded...\n");
     const fs::path tmp_dir = fs::temp_directory_path() / "stage10_queue_pressure";
     fs::remove_all(tmp_dir);
     fs::create_directories(tmp_dir);
@@ -198,19 +198,18 @@ static void test_queue_pressure_records_bounded_rows() {
     const common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
     ctrl.debug_set_cold_store_for_tests(tmp_dir.string());
-    ctrl.debug_set_io_worker_queue_capacity_for_tests(1);
     ctrl.debug_add_entry_for_tests(create_tokens({10, 11, 12}), false, "stage10-queue", 128, 0);
     ctrl.debug_add_entry_for_tests(create_tokens({13, 14, 15}), false, "stage10-queue", 128, 0);
 
     const bool first = ctrl.demote_payload(1);
     const bool second = ctrl.demote_payload(2);
     TEST_ASSERT(first);
-    TEST_ASSERT(!second);
+    TEST_ASSERT(second);
 
     const json stats = ctrl.get_stats();
-    TEST_ASSERT(stats["n_demotion_queue_full"] == 1);
-    TEST_ASSERT(rows_have(stats["cache_payload_transitions_by_shape"], "reason", "queue_full"));
-    TEST_ASSERT(rows_have(stats["cache_structured_diagnostics_by_shape"], "event", "queue_pressure"));
+    TEST_ASSERT(stats["n_demotion_queue_full"] == 0);
+    TEST_ASSERT(!rows_have(stats["cache_payload_transitions_by_shape"], "reason", "queue_full"));
+    TEST_ASSERT(!rows_have(stats["cache_structured_diagnostics_by_shape"], "event", "queue_pressure"));
 
     fs::remove_all(tmp_dir);
     printf("  PASSED\n");

@@ -55,6 +55,38 @@ static void require_or_abort(bool condition, const char * message) {
     }
 }
 
+class stage35_default_restore_controller : public cache_controller {
+public:
+    bool save_slot(server_slot & slot, const prepared_prompt_metadata & metadata) override {
+        GGML_UNUSED(slot);
+        GGML_UNUSED(metadata);
+        return false;
+    }
+
+    bool load_slot(server_slot & slot, const server_task & task) override {
+        loaded_slot_id = slot.id;
+        loaded_tokens = task.tokens.size();
+        return true;
+    }
+
+    void update() override {}
+
+    json get_stats() const override {
+        return json::object();
+    }
+
+    size_t size() const override {
+        return 0;
+    }
+
+    size_t n_tokens() const override {
+        return 0;
+    }
+
+    int loaded_slot_id = -1;
+    size_t loaded_tokens = 0;
+};
+
 static size_t count_occurrences(const std::string & haystack, const std::string & needle) {
     size_t count = 0;
     size_t pos = 0;
@@ -3602,9 +3634,49 @@ struct stage22_handle_demotion_tag {
     friend type stage22_get_private(stage22_handle_demotion_tag);
 };
 
+struct stage35_handle_promotion_tag {
+    using type = void (hybrid_cache_controller::*)(io_completion_result &);
+    friend type stage22_get_private(stage35_handle_promotion_tag);
+};
+
 struct stage22_remove_payload_tag {
     using type = void (hybrid_cache_controller::*)(uint64_t);
     friend type stage22_get_private(stage22_remove_payload_tag);
+};
+
+struct stage35_cold_budget_allows_write_tag {
+    using type = bool (hybrid_cache_controller::*)(size_t) const;
+    friend type stage22_get_private(stage35_cold_budget_allows_write_tag);
+};
+
+struct stage35_record_workload_profile_tag {
+    using type = void (hybrid_cache_controller::*)(cache_workload_profile);
+    friend type stage22_get_private(stage35_record_workload_profile_tag);
+};
+
+struct stage35_record_checkpoint_restore_tag {
+    using type = void (hybrid_cache_controller::*)(const payload_descriptor &, bool);
+    friend type stage22_get_private(stage35_record_checkpoint_restore_tag);
+};
+
+struct stage35_record_exact_restore_tag {
+    using type = void (hybrid_cache_controller::*)(const payload_descriptor &, const char *, const char *);
+    friend type stage22_get_private(stage35_record_exact_restore_tag);
+};
+
+struct stage35_record_payload_transition_tag {
+    using type = void (hybrid_cache_controller::*)(const char *, const payload_descriptor &, const char *, const char *);
+    friend type stage22_get_private(stage35_record_payload_transition_tag);
+};
+
+struct stage35_record_payload_eviction_tag {
+    using type = void (hybrid_cache_controller::*)(const payload_descriptor &, const char *, const char *);
+    friend type stage22_get_private(stage35_record_payload_eviction_tag);
+};
+
+struct stage35_record_fallback_restore_tag {
+    using type = void (hybrid_cache_controller::*)(const char *, payload_kind, cache_workload_profile, const char *, const char *);
+    friend type stage22_get_private(stage35_record_fallback_restore_tag);
 };
 
 struct stage23_admit_checkpoint_store_tag {
@@ -3621,7 +3693,15 @@ template struct stage22_private_access<stage22_entries_tag, &hybrid_cache_contro
 template struct stage22_private_access<stage22_descriptors_tag, &hybrid_cache_controller::payload_descriptors>;
 template struct stage22_private_access<stage22_hot_payloads_tag, &hybrid_cache_controller::hot_payloads>;
 template struct stage22_private_access<stage22_handle_demotion_tag, &hybrid_cache_controller::handle_demotion_completion>;
+template struct stage22_private_access<stage35_handle_promotion_tag, &hybrid_cache_controller::handle_promotion_completion>;
 template struct stage22_private_access<stage22_remove_payload_tag, &hybrid_cache_controller::remove_payload>;
+template struct stage22_private_access<stage35_cold_budget_allows_write_tag, &hybrid_cache_controller::cold_budget_allows_write>;
+template struct stage22_private_access<stage35_record_workload_profile_tag, &hybrid_cache_controller::record_workload_profile>;
+template struct stage22_private_access<stage35_record_checkpoint_restore_tag, &hybrid_cache_controller::record_checkpoint_restore>;
+template struct stage22_private_access<stage35_record_exact_restore_tag, &hybrid_cache_controller::record_exact_restore>;
+template struct stage22_private_access<stage35_record_payload_transition_tag, &hybrid_cache_controller::record_payload_transition>;
+template struct stage22_private_access<stage35_record_payload_eviction_tag, &hybrid_cache_controller::record_payload_eviction>;
+template struct stage22_private_access<stage35_record_fallback_restore_tag, &hybrid_cache_controller::record_fallback_restore>;
 template struct stage22_private_access<
     stage23_admit_checkpoint_store_tag,
     &hybrid_cache_controller::admit_latest_checkpoint_and_store_metadata>;
@@ -3642,8 +3722,68 @@ static void stage22_handle_demotion_completion(hybrid_cache_controller & ctrl, i
     (ctrl.*stage22_get_private(stage22_handle_demotion_tag{}))(result);
 }
 
+static void stage35_handle_promotion_completion(hybrid_cache_controller & ctrl, io_completion_result & result) {
+    (ctrl.*stage22_get_private(stage35_handle_promotion_tag{}))(result);
+}
+
 static void stage22_remove_payload(hybrid_cache_controller & ctrl, uint64_t payload_id) {
     (ctrl.*stage22_get_private(stage22_remove_payload_tag{}))(payload_id);
+}
+
+static bool stage35_cold_budget_allows_write(const hybrid_cache_controller & ctrl, size_t bytes) {
+    return (ctrl.*stage22_get_private(stage35_cold_budget_allows_write_tag{}))(bytes);
+}
+
+static void stage35_record_workload_profile(hybrid_cache_controller & ctrl, cache_workload_profile profile) {
+    (ctrl.*stage22_get_private(stage35_record_workload_profile_tag{}))(profile);
+}
+
+static void stage35_record_checkpoint_restore(hybrid_cache_controller & ctrl, const payload_descriptor & descriptor, bool success) {
+    (ctrl.*stage22_get_private(stage35_record_checkpoint_restore_tag{}))(descriptor, success);
+}
+
+static void stage35_record_exact_restore(hybrid_cache_controller & ctrl, const payload_descriptor & descriptor, const char * result, const char * reason) {
+    (ctrl.*stage22_get_private(stage35_record_exact_restore_tag{}))(descriptor, result, reason);
+}
+
+static void stage35_record_payload_transition(hybrid_cache_controller & ctrl, const char * operation, const payload_descriptor & descriptor, const char * result, const char * reason) {
+    (ctrl.*stage22_get_private(stage35_record_payload_transition_tag{}))(operation, descriptor, result, reason);
+}
+
+static void stage35_record_payload_eviction(hybrid_cache_controller & ctrl, const payload_descriptor & descriptor, const char * result, const char * reason) {
+    (ctrl.*stage22_get_private(stage35_record_payload_eviction_tag{}))(descriptor, result, reason);
+}
+
+static void stage35_record_fallback_restore(hybrid_cache_controller & ctrl, const char * strategy, payload_kind kind, cache_workload_profile profile, const char * result, const char * reason) {
+    (ctrl.*stage22_get_private(stage35_record_fallback_restore_tag{}))(strategy, kind, profile, result, reason);
+}
+
+template <typename Tag, typename Tag::type Member>
+struct stage35_worker_private_access {
+    friend typename Tag::type stage35_worker_get_private(Tag) {
+        return Member;
+    }
+};
+
+struct stage35_worker_process_demotion_tag {
+    using type = io_completion_result (server_cache_io_worker::*)(io_work_item &);
+    friend type stage35_worker_get_private(stage35_worker_process_demotion_tag);
+};
+
+struct stage35_worker_process_promotion_tag {
+    using type = io_completion_result (server_cache_io_worker::*)(io_work_item &);
+    friend type stage35_worker_get_private(stage35_worker_process_promotion_tag);
+};
+
+template struct stage35_worker_private_access<stage35_worker_process_demotion_tag, &server_cache_io_worker::process_demotion>;
+template struct stage35_worker_private_access<stage35_worker_process_promotion_tag, &server_cache_io_worker::process_promotion>;
+
+static io_completion_result stage35_worker_process_demotion(server_cache_io_worker & worker, io_work_item & item) {
+    return (worker.*stage35_worker_get_private(stage35_worker_process_demotion_tag{}))(item);
+}
+
+static io_completion_result stage35_worker_process_promotion(server_cache_io_worker & worker, io_work_item & item) {
+    return (worker.*stage35_worker_get_private(stage35_worker_process_promotion_tag{}))(item);
 }
 
 static bool stage23_admit_checkpoint_store(
@@ -5802,6 +5942,692 @@ void test_stage34_pathb_second_pass_dedupe_same_prompt() {
     printf("  PASSED\n");
 }
 
+void test_stage35_state_callback_keeps_sleep_handler() {
+    printf("test-cache-controller: Stage 35 router state callback keeps sleep handler...\n");
+
+    server_context ctx;
+    std::vector<std::string> states;
+
+    ctx.set_state_callback([&](server_state state, json payload) {
+        (void) payload;
+        require_or_abort(ctx.debug_is_sleeping_for_tests(),
+            "Stage 35 router notification ran before local sleep handler");
+        states.push_back(server_state_to_str(state));
+    });
+    ctx.debug_install_sleeping_state_handler_for_tests();
+
+    require_or_abort(!ctx.debug_is_sleeping_for_tests(),
+        "Stage 35 context started in sleeping state");
+    ctx.debug_invoke_sleeping_state_for_tests(true);
+
+    require_or_abort(ctx.debug_is_sleeping_for_tests(),
+        "Stage 35 local sleep handler did not enter sleeping state");
+    require_or_abort(states.size() == 1,
+        "Stage 35 router state callback count mismatch");
+    require_or_abort(states[0] == "sleeping",
+        "Stage 35 router state callback did not report sleeping");
+    printf("  PASSED\n");
+}
+
+void test_stage35_current_sync_restore_coverage() {
+    printf("test-cache-controller: Stage 35 current sync restore coverage...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    prepared_prompt_metadata metadata;
+    const std::string ns = ctrl.debug_compute_namespace_id_for_tests(metadata);
+
+    server_slot slot;
+    slot.id = 3501;
+
+    server_task miss_task;
+    miss_task.tokens = create_tokens({3501, 3502});
+    miss_task.prompt_metadata = metadata;
+    require_or_abort(!ctrl.load_slot(slot, miss_task),
+        "Stage 35 load_slot miss unexpectedly restored");
+
+    ctrl.debug_add_entry_for_tests(create_tokens({3501, 3502, 3503}), false, ns, 64, 0);
+
+    server_task prefix_task;
+    prefix_task.tokens = create_tokens({3501, 3502, 3503, 3504});
+    prefix_task.prompt_metadata = metadata;
+    require_or_abort(!ctrl.load_slot(slot, prefix_task),
+        "Stage 35 load_slot accepted unsafe prefix");
+
+    server_task hit_task;
+    hit_task.tokens = create_tokens({3501, 3502, 3503});
+    hit_task.prompt_metadata = metadata;
+    require_or_abort(ctrl.load_slot(slot, hit_task),
+        "Stage 35 load_slot exact sync hit failed");
+    require_or_abort(slot.n_prompt_tokens_cache == 3,
+        "Stage 35 load_slot exact hit cache token count mismatch");
+    require_or_abort(slot.prompt.tokens.size() == 3,
+        "Stage 35 load_slot exact hit prompt tokens not copied");
+
+    hybrid_cache_controller checkpoint_ctrl(params, 100, 1000, nullptr, nullptr);
+    checkpoint_ctrl.debug_add_entry_for_tests(create_tokens({3511, 3512, 3513}), false, "stage35-cp", 64, 0);
+    (void) checkpoint_ctrl.debug_admit_checkpoint_for_tests(16, 0, int64_t(2));
+
+    debug_attach_options opts;
+    opts.bypass_workload_profile = true;
+    opts.runtime_has_draft = false;
+    require_or_abort(checkpoint_ctrl.debug_admit_checkpoint_for_tests(16, 0, int64_t(64), opts),
+        "Stage 35 checkpoint opts admission failed");
+    require_or_abort(
+        checkpoint_ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+            create_tokens({3511, 3512, 3513}), "stage35-cp", cache_workload_profile::checkpoint_dependent) == 3,
+        "Stage 35 checkpoint restore source selection failed");
+    require_or_abort(
+        checkpoint_ctrl.debug_request_stage9_checkpoint_promotion_for_tests(
+            create_tokens({3511, 3512, 3513}), "stage35-cp"),
+        "Stage 35 checkpoint promotion request failed for hot checkpoint");
+
+    debug_attach_options fail_opts;
+    fail_opts.bypass_workload_profile = true;
+    fail_opts.runtime_has_draft = false;
+    fail_opts.fail_after_descriptor = true;
+    require_or_abort(!checkpoint_ctrl.debug_admit_checkpoint_for_tests(16, 0, int64_t(3), fail_opts),
+        "Stage 35 checkpoint injected attach failure unexpectedly succeeded");
+
+    hybrid_cache_controller tx_ctrl(params, 100, 1000, nullptr, nullptr);
+    tx_ctrl.debug_add_entry_for_tests(create_tokens({3521, 3522, 3523}), false, "stage35-tx", 16, 8);
+    require_or_abort(!tx_ctrl.debug_transaction_for_tests(true, true, false, false),
+        "Stage 35 restore transaction target failure did not fail");
+    require_or_abort(!tx_ctrl.debug_transaction_for_tests(true, false, true, false),
+        "Stage 35 restore transaction draft failure did not fail");
+    require_or_abort(!tx_ctrl.debug_transaction_for_tests(true, false, false, true),
+        "Stage 35 restore transaction commit failure did not fail");
+    require_or_abort(tx_ctrl.debug_transaction_for_tests(true, false, false, false),
+        "Stage 35 restore transaction success path failed");
+
+    hybrid_cache_controller apply_ctrl(params, 100, 1000, nullptr, nullptr);
+    apply_ctrl.debug_add_entry_for_tests(create_tokens({3531, 3532, 3533}), false, "stage35-apply", 16, 0);
+    auto response = apply_ctrl.debug_capture_first_payload_for_tests(false);
+    require_or_abort(response.found,
+        "Stage 35 captured restore response was not found");
+    server_slot apply_slot;
+    apply_slot.id = 3531;
+    apply_ctrl.debug_apply_restore_transaction_for_tests(apply_slot, response, false);
+    apply_ctrl.debug_apply_restore_transaction_for_tests(apply_slot, response, true);
+
+    printf("  PASSED\n");
+}
+
+void test_stage35_current_metadata_and_payload_coverage() {
+    printf("test-cache-controller: Stage 35 current metadata and payload coverage...\n");
+
+    common_params params = create_test_params();
+
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        const auto base = create_tokens({3541, 3542, 3543});
+        const auto child = create_tokens({3541, 3542, 3544});
+        const std::string ns = "stage35-meta";
+        ctrl.debug_add_entry_for_tests(base.clone(), false, ns, 64, 0);
+        require_or_abort(ctrl.debug_evict_first_payload_for_tests(),
+            "Stage 35 metadata fixture eviction failed");
+        require_or_abort(ctrl.debug_first_entry_metadata_only_for_tests(),
+            "Stage 35 evicted entry did not become metadata-only");
+        require_or_abort(ctrl.debug_select_restore_source_tokens_for_tests(base.clone(), ns) == -1,
+            "Stage 35 metadata-only entry without source was restorable");
+        require_or_abort(ctrl.debug_try_admit_stage8_for_tests(child.clone(), ns, 64, 0),
+            "Stage 35 child admission from mismatch parent failed");
+        require_or_abort(ctrl.debug_entry_count_for_tests() == 2,
+            "Stage 35 child admission count mismatch");
+        require_or_abort(ctrl.debug_rematerialize_first_entry_for_tests(48, 0),
+            "Stage 35 metadata-only rematerialization failed");
+        require_or_abort(ctrl.debug_first_entry_has_payload_for_tests(),
+            "Stage 35 rematerialized entry has no payload");
+    }
+
+    {
+        const std::filesystem::path cold_dir =
+            std::filesystem::temp_directory_path() / "stage35_checkpoint_promotion_test";
+        std::error_code ec;
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+
+        hybrid_cache_controller checkpoint_ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+        checkpoint_ctrl.debug_add_entry_for_tests(create_tokens({3561, 3562, 3563}), false, "stage35-cold-cp", 64, 0);
+
+        debug_attach_options opts;
+        opts.bypass_workload_profile = true;
+        opts.runtime_has_draft = false;
+        require_or_abort(checkpoint_ctrl.debug_admit_checkpoint_for_tests(32, 0, int64_t(3), opts),
+            "Stage 35 cold checkpoint admission failed");
+        const uint64_t checkpoint_id = checkpoint_ctrl.debug_first_checkpoint_payload_id_for_tests();
+        require_or_abort(checkpoint_id != 0,
+            "Stage 35 checkpoint payload id missing");
+        require_or_abort(checkpoint_ctrl.debug_demote_first_checkpoint_for_tests(),
+            "Stage 35 checkpoint demotion failed");
+        require_or_abort(checkpoint_ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::cold,
+            "Stage 35 checkpoint did not become cold");
+        require_or_abort(checkpoint_ctrl.debug_request_stage9_checkpoint_promotion_for_tests(
+                             create_tokens({3561, 3562, 3563}), "stage35-cold-cp"),
+            "Stage 35 cold checkpoint promotion request failed");
+        require_or_abort(checkpoint_ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::hot,
+            "Stage 35 checkpoint was not promoted hot");
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    {
+        hybrid_cache_controller fault_ctrl(params, 100, 1000, nullptr, nullptr);
+        fault_ctrl.debug_add_entry_for_tests(create_tokens({3571, 3572}), false, "stage35-faults", 32, 8);
+        require_or_abort(fault_ctrl.debug_inject_first_payload_fault_for_tests(payload_debug_fault::owner_mismatch),
+            "Stage 35 owner mismatch fault injection failed");
+        require_or_abort(!fault_ctrl.debug_validate_first_payload_for_tests(true),
+            "Stage 35 owner mismatch payload validated");
+
+        hybrid_cache_controller empty_ctrl(params, 100, 1000, nullptr, nullptr);
+        empty_ctrl.debug_add_entry_for_tests(create_tokens({3573, 3574}), false, "stage35-empty", 16, 0);
+        require_or_abort(!empty_ctrl.debug_empty_preimage_draft_failure_for_tests(false),
+            "Stage 35 empty preimage draft failure path did not fail");
+        require_or_abort(!empty_ctrl.debug_unsupported_empty_clear_for_tests(false),
+            "Stage 35 unsupported empty clear path did not fail");
+        require_or_abort(!empty_ctrl.debug_rollback_failure_for_tests(false),
+            "Stage 35 rollback failure path did not fail");
+    }
+
+    printf("  PASSED\n");
+}
+
+void test_stage35_current_promotion_io_and_evidence_coverage() {
+    printf("test-cache-controller: Stage 35 current promotion, I/O, and evidence coverage...\n");
+
+    common_params params = create_test_params();
+
+    require_or_abort(can_transition(payload_residency_state::hot, payload_residency_state::demoting),
+        "Stage 35 hot->demoting transition rejected");
+    require_or_abort(can_transition(payload_residency_state::hot, payload_residency_state::evicted),
+        "Stage 35 hot->evicted transition rejected");
+    require_or_abort(can_transition(payload_residency_state::demoting, payload_residency_state::cold),
+        "Stage 35 demoting->cold transition rejected");
+    require_or_abort(can_transition(payload_residency_state::demoting, payload_residency_state::hot),
+        "Stage 35 demoting->hot transition rejected");
+    require_or_abort(can_transition(payload_residency_state::promoting, payload_residency_state::evicted),
+        "Stage 35 promoting->evicted transition rejected");
+    require_or_abort(can_transition(payload_residency_state::cold, payload_residency_state::promoting),
+        "Stage 35 cold->promoting transition rejected");
+    require_or_abort(!can_transition(payload_residency_state::evicted, payload_residency_state::hot),
+        "Stage 35 evicted transition accepted");
+
+    branch_node node;
+    node.node_id = 35;
+    node.namespace_id = "stage35-graph";
+    node.token_span = {1, 2, 3};
+    node.prefix_checksums = {11, 22};
+    node.slot_ref_count.store(2);
+    branch_node copied(node);
+    branch_node assigned;
+    assigned = copied;
+    branch_node moved(std::move(copied));
+    branch_node move_assigned;
+    move_assigned = std::move(moved);
+    require_or_abort(move_assigned.node_id == 35,
+        "Stage 35 branch node move/copy state mismatch");
+    require_or_abort(move_assigned.metadata_ram_bytes() >= sizeof(branch_node),
+        "Stage 35 branch node metadata size invalid");
+
+    {
+        server_cache_io_worker worker;
+        io_work_item item{};
+        item.type = io_task_type::demotion;
+        item.payload_id = 3581;
+        require_or_abort(!worker.execute_inline(item).has_value(),
+            "Stage 35 unconfigured worker returned completion");
+        io_completion_result direct_demote_fail = stage35_worker_process_demotion(worker, item);
+        require_or_abort(!direct_demote_fail.success && direct_demote_fail.failure_reason == io_failure_reason::write_error,
+            "Stage 35 unconfigured worker demotion did not fail with write_error");
+        item.type = io_task_type::promotion;
+        io_completion_result direct_promote_fail = stage35_worker_process_promotion(worker, item);
+        require_or_abort(!direct_promote_fail.success && direct_promote_fail.failure_reason == io_failure_reason::read_error,
+            "Stage 35 unconfigured worker promotion did not fail with read_error");
+
+        const auto cold_dir = std::filesystem::temp_directory_path() / "stage35_io_worker_test";
+        std::error_code ec;
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+        server_cache_store_cold store;
+        require_or_abort(store.configure(cold_dir.string(), COLD_STORE_FORMAT_VERSION_1),
+            "Stage 35 cold store configure failed");
+        worker.debug_set_cold_store_for_tests(&store);
+
+        cold_descriptor_snapshot snapshot{};
+        snapshot.payload_id = 3581;
+        snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_and_draft);
+        snapshot.format_version = 1;
+        snapshot.target_size_bytes = 3;
+        snapshot.draft_size_bytes = 2;
+        snapshot.target_checksum = stage22_checksum_range(1, 3);
+        snapshot.draft_checksum = stage22_checksum_range(4, 2);
+        const std::vector<uint8_t> target = {1, 2, 3};
+        const std::vector<uint8_t> draft = {4, 5};
+        snapshot.target_checksum = 1469598103934665603ull;
+        for (uint8_t b : target) {
+            snapshot.target_checksum ^= b;
+            snapshot.target_checksum *= 1099511628211ull;
+        }
+        snapshot.draft_checksum = 1469598103934665603ull;
+        for (uint8_t b : draft) {
+            snapshot.draft_checksum ^= b;
+            snapshot.draft_checksum *= 1099511628211ull;
+        }
+
+        auto demoted = worker.execute_demotion_inline(3581, snapshot, target, draft);
+        require_or_abort(demoted.has_value() && demoted->success,
+            "Stage 35 worker demotion failed");
+        auto promoted = worker.execute_promotion_inline(3581, demoted->ref, snapshot);
+        require_or_abort(promoted.has_value() && promoted->success,
+            "Stage 35 worker promotion failed");
+        require_or_abort(promoted->target_bytes == target && promoted->draft_bytes == draft,
+            "Stage 35 worker promotion bytes mismatch");
+
+        auto missing = worker.execute_promotion_inline(3581, demoted->ref + 1000, snapshot);
+        require_or_abort(missing.has_value() && !missing->success,
+            "Stage 35 worker missing promotion did not fail");
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    {
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        ctrl.debug_add_entry_for_tests(create_tokens({3591, 3592}), false, "stage35-promotion", 32, 0);
+        const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+        auto & descriptor = stage22_descriptors(ctrl)[payload_id];
+
+        io_completion_result missing{};
+        missing.payload_id = payload_id + 1000;
+        missing.success = false;
+        stage35_handle_promotion_completion(ctrl, missing);
+
+        io_completion_result duplicate{};
+        duplicate.payload_id = payload_id;
+        duplicate.success = true;
+        descriptor.residency = payload_residency_state::hot;
+        stage35_handle_promotion_completion(ctrl, duplicate);
+
+        io_completion_result stale_evicted{};
+        stale_evicted.payload_id = payload_id;
+        stale_evicted.success = true;
+        descriptor.residency = payload_residency_state::evicted;
+        stage35_handle_promotion_completion(ctrl, stale_evicted);
+
+        io_completion_result stale_hot_failure{};
+        stale_hot_failure.payload_id = payload_id;
+        stale_hot_failure.success = false;
+        stale_hot_failure.failure_reason = io_failure_reason::validation_file_not_found;
+        descriptor.residency = payload_residency_state::hot;
+        stage35_handle_promotion_completion(ctrl, stale_hot_failure);
+
+        io_completion_result residency_failure{};
+        residency_failure.payload_id = payload_id;
+        residency_failure.success = false;
+        residency_failure.failure_reason = io_failure_reason::read_error;
+        descriptor.residency = payload_residency_state::cold;
+        stage35_handle_promotion_completion(ctrl, residency_failure);
+
+        io_completion_result not_found_failure{};
+        not_found_failure.payload_id = payload_id;
+        not_found_failure.success = false;
+        not_found_failure.failure_reason = io_failure_reason::validation_file_not_found;
+        descriptor.residency = payload_residency_state::promoting;
+        stage35_handle_promotion_completion(ctrl, not_found_failure);
+        require_or_abort(descriptor.residency == payload_residency_state::evicted,
+            "Stage 35 promotion failure did not evict");
+    }
+
+    {
+        common_params zero_cold_params = create_test_params();
+        zero_cold_params.cache_cold_max_mib = 0;
+        hybrid_cache_controller zero_cold(zero_cold_params, 100, 1000, nullptr, nullptr);
+        require_or_abort(!stage35_cold_budget_allows_write(zero_cold, 1),
+            "Stage 35 zero cold budget allowed write");
+
+        common_params limited_cold_params = create_test_params();
+        limited_cold_params.cache_cold_max_mib = 1;
+        hybrid_cache_controller limited_cold(limited_cold_params, 100, 1000, nullptr, nullptr);
+        require_or_abort(stage35_cold_budget_allows_write(limited_cold, 512),
+            "Stage 35 limited cold budget rejected small write");
+        require_or_abort(!stage35_cold_budget_allows_write(limited_cold, 2 * 1024 * 1024),
+            "Stage 35 limited cold budget allowed oversize write");
+
+        hybrid_cache_controller metrics_ctrl(params, 100, 1000, nullptr, nullptr);
+        metrics_ctrl.debug_add_entry_for_tests(create_tokens({3595, 3596}), false, "stage35-metrics", 64, 8);
+        metrics_ctrl.debug_set_cold_store_validation_failure_for_tests(io_failure_reason::validation_file_not_found);
+        metrics_ctrl.debug_set_cold_store_read_failure_for_tests(false);
+        (void) metrics_ctrl.debug_io_worker_for_tests();
+        {
+            std::lock_guard<std::recursive_mutex> lock(metrics_ctrl.debug_get_cache_state_mutex_for_tests());
+            require_or_abort(metrics_ctrl.debug_get_transaction_depth_for_tests() == 0,
+                "Stage 35 transaction depth changed unexpectedly");
+        }
+        require_or_abort(metrics_ctrl.debug_get_reentrancy_depth_limit_for_tests() > 0,
+            "Stage 35 reentrancy limit missing");
+        metrics_ctrl.debug_clear_promotion_failures_for_tests();
+        const payload_descriptor descriptor = stage22_descriptors(metrics_ctrl).begin()->second;
+        stage35_record_workload_profile(metrics_ctrl, cache_workload_profile::plain_transformer);
+        stage35_record_workload_profile(metrics_ctrl, cache_workload_profile::checkpoint_dependent);
+        stage35_record_workload_profile(metrics_ctrl, cache_workload_profile::unsupported);
+        stage35_record_checkpoint_restore(metrics_ctrl, descriptor, true);
+        stage35_record_checkpoint_restore(metrics_ctrl, descriptor, false);
+        stage35_record_exact_restore(metrics_ctrl, descriptor, "fallback", "restore_state_missing");
+        stage35_record_payload_transition(metrics_ctrl, "promotion", descriptor, "failure", "validation_target_checksum_mismatch");
+        stage35_record_payload_eviction(metrics_ctrl, descriptor, "success", "cold_budget_pressure");
+        stage35_record_fallback_restore(metrics_ctrl, "checkpoint_fallback", payload_kind::checkpoint,
+            cache_workload_profile::checkpoint_dependent, "fallback", "missing checkpoint state");
+
+        json stats = metrics_ctrl.get_stats();
+        require_or_abort(stats["cache_workload_profile_plain_transformer_total"].get<size_t>() >= 1,
+            "Stage 35 workload plain metric missing");
+        require_or_abort(stats["cache_workload_profile_checkpoint_dependent_total"].get<size_t>() >= 1,
+            "Stage 35 workload checkpoint metric missing");
+        require_or_abort(stats["cache_checkpoint_restores_total"].get<size_t>() >= 1,
+            "Stage 35 checkpoint restore metric missing");
+        require_or_abort(stats["cache_checkpoint_restore_failures_total"].get<size_t>() >= 1,
+            "Stage 35 checkpoint restore failure metric missing");
+    }
+
+    {
+        server_cache_policy_lru policy;
+        std::vector<server_cache_policy_candidate> candidates = {
+            {3, "stage35-lru", 40, 1, 30, 3, true, true, false},
+            {2, "stage35-lru", 40, 1, 20, 2, false, true, false},
+            {1, "stage35-lru", 40, 1, 10, 1, false, true, false},
+        };
+        auto plan = policy.plan_evictions(120, 30, false, candidates);
+        require_or_abort(plan.evictions.size() == 3,
+            "Stage 35 LRU policy did not plan all needed evictions");
+        require_or_abort(plan.evictions[0].entry_id == 1 && plan.evictions[1].entry_id == 2,
+            "Stage 35 LRU policy unprotected ordering mismatch");
+        require_or_abort(plan.evictions[2].reason == server_cache_eviction_reason::protected_budget_pressure,
+            "Stage 35 LRU policy protected reason mismatch");
+        require_or_abort(plan.protected_budget_pressure,
+            "Stage 35 LRU policy protected pressure missing");
+        auto no_plan = policy.plan_evictions(10, 30, true, candidates);
+        require_or_abort(no_plan.evictions.empty(),
+            "Stage 35 LRU policy unlimited budget planned eviction");
+    }
+
+    {
+        server_cache_store_cold store;
+        require_or_abort(!store.configure("", COLD_STORE_FORMAT_VERSION_1),
+            "Stage 35 cold store accepted empty root");
+        require_or_abort(!store.is_configured(),
+            "Stage 35 cold store configured after empty root");
+
+        const auto temp_file = std::filesystem::temp_directory_path() / "stage35_cold_store_not_dir.tmp";
+        {
+            std::ofstream out(temp_file);
+            out << "x";
+        }
+        require_or_abort(!store.configure(temp_file.string(), COLD_STORE_FORMAT_VERSION_1),
+            "Stage 35 cold store accepted file root");
+        std::error_code ec;
+        std::filesystem::remove(temp_file, ec);
+
+        cold_descriptor_snapshot snapshot{};
+        snapshot.payload_id = 3611;
+        snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_only);
+        snapshot.format_version = 1;
+        snapshot.target_size_bytes = 1;
+        snapshot.target_checksum = 12638134423997487868ull;
+        std::vector<uint8_t> target = {0x42};
+        std::vector<uint8_t> empty;
+        require_or_abort(store.write(3611, target, empty, snapshot) == 0,
+            "Stage 35 unconfigured cold store write succeeded");
+        cold_descriptor_snapshot out_snapshot{};
+        require_or_abort(!store.read(3611, target, empty, out_snapshot),
+            "Stage 35 unconfigured cold store read succeeded");
+        require_or_abort(!store.remove(3611),
+            "Stage 35 unconfigured cold store remove succeeded");
+        require_or_abort(store.delete_ids({3611}) == 0,
+            "Stage 35 unconfigured cold store delete_ids removed rows");
+
+        const auto cold_dir = std::filesystem::temp_directory_path() / "stage35_cold_store_public_test";
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+        require_or_abort(store.configure(cold_dir.string(), COLD_STORE_FORMAT_VERSION_1),
+            "Stage 35 cold store configure failed");
+        require_or_abort(store.root_path().find("stage35_cold_store_public_test") != std::string::npos,
+            "Stage 35 cold store root path missing");
+        store.debug_set_write_failure_for_tests(true);
+        require_or_abort(store.write(3611, target, empty, snapshot) == 0,
+            "Stage 35 injected cold store write failure succeeded");
+        store.debug_set_write_failure_for_tests(false);
+        const cold_ref ref = store.write(3611, target, empty, snapshot);
+        require_or_abort(ref == 3611,
+            "Stage 35 cold store ref mismatch");
+        store.debug_set_read_failure_for_tests(true);
+        require_or_abort(!store.read(ref, target, empty, out_snapshot),
+            "Stage 35 injected cold store read failure succeeded");
+        store.debug_set_read_failure_for_tests(false);
+        require_or_abort(store.read(ref, target, empty, out_snapshot),
+            "Stage 35 cold store read failed");
+        require_or_abort(store.delete_ids({ref, ref + 1}) == 1,
+            "Stage 35 cold store delete_ids count mismatch");
+        require_or_abort(store.remove(ref),
+            "Stage 35 cold store remove missing file failed");
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    {
+        const auto dir = std::filesystem::temp_directory_path() / "stage35_raw_evidence_test";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+
+        common_params evidence_params = create_test_params();
+        evidence_params.cache_prompt_evidence = "raw";
+        evidence_params.cache_prompt_evidence_dir = dir.string();
+        hybrid_cache_controller ctrl(evidence_params, 100, 1000, nullptr, nullptr);
+
+        prepared_prompt_metadata meta;
+        meta.preparation_id = "prep-stage35";
+        meta.add_span(prompt_boundary::MESSAGE_END, 0, 2, token_checksum({3601, 3602}), false, "user");
+
+        server_slot slot;
+        server_task task;
+        task.tokens = create_tokens({3601, 3602});
+        task.prompt_metadata = meta;
+        require_or_abort(!ctrl.load_slot(slot, task),
+            "Stage 35 raw evidence miss unexpectedly restored");
+
+        const auto evidence_file = dir / "cache-prompt-evidence.jsonl";
+        require_or_abort(std::filesystem::exists(evidence_file),
+            "Stage 35 raw evidence file missing");
+        std::ifstream in(evidence_file);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const std::string evidence = buffer.str();
+        require_or_abort(evidence.find("\"raw_prompt_file\"") != std::string::npos,
+            "Stage 35 raw evidence marker missing");
+        require_or_abort(evidence.find("\"first_user_boundary\"") != std::string::npos,
+            "Stage 35 evidence user boundary missing");
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    printf("  PASSED\n");
+}
+
+void test_stage35_current_contract_edge_coverage() {
+    printf("test-cache-controller: Stage 35 current contract edge coverage...\n");
+
+    {
+        stage35_default_restore_controller ctrl;
+        server_slot slot;
+        slot.id = 35201;
+        server_task task;
+        task.tokens = create_tokens({35201, 35202, 35203});
+        require_or_abort(ctrl.try_restore_from_cache(slot, task),
+            "Stage 35 cache_controller default restore did not call load_slot");
+        require_or_abort(ctrl.loaded_slot_id == 35201 && ctrl.loaded_tokens == 3,
+            "Stage 35 cache_controller default restore did not forward inputs");
+    }
+
+    {
+        server_cache_policy_lru policy;
+        std::vector<server_cache_policy_candidate> tie_candidates = {
+            {30, "stage35-lru-tie", 10, 1, 7, 2, false, true, false},
+            {20, "stage35-lru-tie", 10, 1, 7, 1, false, true, false},
+            {10, "stage35-lru-tie", 10, 1, 7, 1, false, true, false},
+            {40, "stage35-lru-tie", 10, 1, 8, 1, true, true, false},
+        };
+        auto tie_plan = policy.plan_evictions(160, 10, false, tie_candidates);
+        require_or_abort(tie_plan.evictions.size() == 4,
+            "Stage 35 LRU tie plan did not include all candidates under pressure");
+        require_or_abort(tie_plan.evictions[0].entry_id == 10 &&
+                         tie_plan.evictions[1].entry_id == 20 &&
+                         tie_plan.evictions[2].entry_id == 30,
+            "Stage 35 LRU tie-break ordering mismatch");
+        require_or_abort(tie_plan.evictions[3].reason == server_cache_eviction_reason::protected_budget_pressure,
+            "Stage 35 LRU protected tie reason mismatch");
+        require_or_abort(tie_plan.protected_budget_pressure,
+            "Stage 35 LRU protected pressure missing in tie plan");
+    }
+
+    {
+        const auto cold_dir = std::filesystem::temp_directory_path() / "stage35_contract_worker_test";
+        std::error_code ec;
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+
+        server_cache_store_cold store;
+        require_or_abort(store.configure(cold_dir.string(), COLD_STORE_FORMAT_VERSION_1),
+            "Stage 35 contract cold store configure failed");
+
+        server_cache_io_worker worker;
+        worker.debug_set_cold_store_for_tests(&store);
+
+        cold_descriptor_snapshot snapshot{};
+        snapshot.payload_id = 35210;
+        snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_only);
+        snapshot.format_version = 1;
+        snapshot.target_size_bytes = 3;
+        snapshot.target_checksum = 1469598103934665603ull;
+        const std::vector<uint8_t> target = {9, 8, 7};
+        for (uint8_t b : target) {
+            snapshot.target_checksum ^= b;
+            snapshot.target_checksum *= 1099511628211ull;
+        }
+
+        io_work_item demote{};
+        demote.type = io_task_type::demotion;
+        demote.payload_id = 35210;
+        demote.pair_state = snapshot.pair_state;
+        demote.format_version = snapshot.format_version;
+        demote.target_size_bytes = snapshot.target_size_bytes;
+        demote.target_checksum = snapshot.target_checksum;
+        demote.target_bytes = target;
+
+        auto demote_result = worker.execute_inline(demote);
+        require_or_abort(demote_result.has_value() && demote_result->success,
+            "Stage 35 direct execute_inline demotion failed");
+
+        io_work_item promote{};
+        promote.type = io_task_type::promotion;
+        promote.payload_id = 35210;
+        promote.ref = demote_result->ref;
+        promote.pair_state = snapshot.pair_state;
+        promote.format_version = snapshot.format_version;
+        promote.target_size_bytes = snapshot.target_size_bytes;
+        promote.target_checksum = snapshot.target_checksum;
+        auto promote_result = worker.execute_inline(promote);
+        require_or_abort(promote_result.has_value() && promote_result->success,
+            "Stage 35 direct execute_inline promotion failed");
+        require_or_abort(promote_result->target_bytes == target,
+            "Stage 35 direct execute_inline promotion bytes mismatch");
+
+        store.debug_set_write_failure_for_tests(true);
+        auto failed_demote = worker.execute_inline(demote);
+        require_or_abort(failed_demote.has_value() && !failed_demote->success &&
+                         failed_demote->failure_reason == io_failure_reason::write_error,
+            "Stage 35 direct execute_inline write failure mismatch");
+        store.debug_set_write_failure_for_tests(false);
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    {
+        common_params params = create_test_params();
+        const auto cold_dir = std::filesystem::temp_directory_path() / "stage35_contract_debug_accessors";
+        std::error_code ec;
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        ctrl.debug_set_cold_store_for_tests(cold_dir.string());
+        require_or_abort(ctrl.debug_cold_store_for_tests().is_configured(),
+            "Stage 35 debug cold store accessor not configured");
+        require_or_abort(&ctrl.debug_io_worker_for_tests() != nullptr,
+            "Stage 35 debug io worker accessor returned null");
+        ctrl.debug_inject_promotion_failure_for_tests(35220);
+        ctrl.debug_clear_promotion_failures_for_tests();
+        ctrl.debug_set_reentrancy_depth_limit_for_tests(3);
+        require_or_abort(ctrl.debug_get_reentrancy_depth_limit_for_tests() == 3,
+            "Stage 35 debug reentrancy limit mismatch");
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    {
+        common_params params = create_test_params();
+        require_or_abort(!hybrid_cache_controller(params, 100, 1000, nullptr, nullptr).demote_payload(999999),
+            "Stage 35 demote accepted missing descriptor");
+
+        hybrid_cache_controller demoting_ctrl(params, 100, 1000, nullptr, nullptr);
+        stage22_add_exact_payload(demoting_ctrl, 32, 0);
+        uint64_t demoting_id = stage22_entries(demoting_ctrl).front().payload_id;
+        stage22_descriptors(demoting_ctrl)[demoting_id].residency = payload_residency_state::demoting;
+        require_or_abort(!demoting_ctrl.demote_payload(demoting_id),
+            "Stage 35 demote accepted already-demoting payload");
+
+        hybrid_cache_controller cold_ctrl(params, 100, 1000, nullptr, nullptr);
+        stage22_add_exact_payload(cold_ctrl, 32, 0);
+        uint64_t cold_id = stage22_entries(cold_ctrl).front().payload_id;
+        stage22_descriptors(cold_ctrl)[cold_id].residency = payload_residency_state::cold;
+        require_or_abort(!cold_ctrl.demote_payload(cold_id),
+            "Stage 35 demote accepted non-hot payload");
+
+        hybrid_cache_controller unconfigured_ctrl(params, 100, 1000, nullptr, nullptr);
+        stage22_add_exact_payload(unconfigured_ctrl, 32, 0);
+        uint64_t unconfigured_id = stage22_entries(unconfigured_ctrl).front().payload_id;
+        require_or_abort(!unconfigured_ctrl.demote_payload(unconfigured_id),
+            "Stage 35 demote accepted unconfigured cold store");
+
+        const auto cold_dir = std::filesystem::temp_directory_path() / "stage35_contract_demote_failures";
+        std::error_code ec;
+        std::filesystem::remove_all(cold_dir, ec);
+        std::filesystem::create_directories(cold_dir);
+
+        hybrid_cache_controller missing_hot_ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+        stage22_add_exact_payload(missing_hot_ctrl, 32, 0);
+        uint64_t missing_hot_id = stage22_entries(missing_hot_ctrl).front().payload_id;
+        stage22_hot_payloads(missing_hot_ctrl).erase(missing_hot_id);
+        require_or_abort(!missing_hot_ctrl.demote_payload(missing_hot_id),
+            "Stage 35 demote accepted missing hot payload");
+
+        hybrid_cache_controller pair_ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+        stage22_add_exact_payload(pair_ctrl, 32, 8);
+        uint64_t pair_id = stage22_entries(pair_ctrl).front().payload_id;
+        stage22_hot_payloads(pair_ctrl)[pair_id].draft.clear();
+        require_or_abort(!pair_ctrl.demote_payload(pair_id),
+            "Stage 35 demote accepted target-and-draft descriptor without draft bytes");
+
+        hybrid_cache_controller hot_budget_ctrl(params, 1, 1000, nullptr, nullptr, cold_dir.string());
+        stage22_add_exact_payload(hot_budget_ctrl, 2 * 1024 * 1024, 0);
+        uint64_t hot_budget_id = stage22_entries(hot_budget_ctrl).front().payload_id;
+        require_or_abort(!hot_budget_ctrl.demote_payload(hot_budget_id),
+            "Stage 35 demote accepted hot budget pressure");
+
+        common_params cold_budget_params = create_test_params();
+        cold_budget_params.cache_cold_max_mib = 1;
+        hybrid_cache_controller cold_budget_ctrl(cold_budget_params, 100, 1000, nullptr, nullptr, cold_dir.string());
+        stage22_add_exact_payload(cold_budget_ctrl, 2 * 1024 * 1024, 0);
+        uint64_t cold_budget_id = stage22_entries(cold_budget_ctrl).front().payload_id;
+        require_or_abort(!cold_budget_ctrl.demote_payload(cold_budget_id),
+            "Stage 35 demote accepted cold budget pressure");
+
+        std::filesystem::remove_all(cold_dir, ec);
+    }
+
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
@@ -5862,6 +6688,11 @@ int main() {
     test_stage34_idempotent_save_cold_rematerializes_in_place();
     test_stage34_pathb_restore_runs_during_save_read_window();
     test_stage34_pathb_second_pass_dedupe_same_prompt();
+    test_stage35_state_callback_keeps_sleep_handler();
+    test_stage35_current_sync_restore_coverage();
+    test_stage35_current_metadata_and_payload_coverage();
+    test_stage35_current_promotion_io_and_evidence_coverage();
+    test_stage35_current_contract_edge_coverage();
     test_namespace_isolation_validation();
 
     // Phase 3: Part 14 comprehensive field tests
@@ -5983,7 +6814,7 @@ int main() {
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 149 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions + 5 Stage 34 reopened regressions)\n");
+    printf("Total: 152 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions + 5 Stage 34 reopened regressions + 4 Stage 35 focused regressions)\n");
     printf("==================================================\n");
 
     return 0;

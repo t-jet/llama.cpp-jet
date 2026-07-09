@@ -177,7 +177,7 @@ Condition:
 - Editing reusable QA markdown OR creating a fresh QA part file that must stay under repo line-count, ASCII, LF, and whitespace rules
 
 Action:
-- Do draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass, targeting well under 300 with buffer. Measure the physical line count with `@(Get-Content <path>).Count`, not `Measure-Object -Line`; the latter undercounts blank lines on PowerShell and can report dozens of lines below reality (observed 189 reported vs 231 actual on a part-38 file). If a new file exceeds the cap, compact in place rather than splitting unless content truly needs another part. Verify byte-level hygiene on EVERY new file immediately after creation AND after any line-ending normalization: count CR bytes (target 0), bytes above 127 (target 0), BOM (target absent), trailing-whitespace lines (target 0), and resolve every local relative link from the edited file's own directory. The `create_file` tool writes CRLF endings on Windows even when the source content uses LF, and `git diff --check` does NOT inspect untracked files; a freshly created part file can ship CRLF with no warning. Normalize deliberately with `[System.IO.File]::WriteAllText($path, $content.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))` and re-verify CR=0 before the final report. For files under `._design_docs/cache-handling-test-plan/`, sibling design docs resolve as `../cache-handling-phase34-*.md` and test reports as `../.test_reports/*.md`, never `../../cache-handling-*.md`.
+- Do draft new standalone QA docs or execution reports against an explicit line budget before the first validation pass, targeting well under 300 with buffer. Measure the physical line count with `@(Get-Content <path>).Count`, not `Measure-Object -Line`; the latter undercounts blank lines on PowerShell and can report dozens of lines below reality (observed 189 reported vs 231 actual on a part-38 file). If a new file exceeds the cap, compact in place rather than splitting unless content truly needs another part. If an existing entry document is already at or over the cap, budget the entry edit before adding links and compact nearby overview text or blank lines in the same patch; do not leave the entry above the repo cap because the new part file is compliant. Verify byte-level hygiene on EVERY new file immediately after creation AND after any line-ending normalization: count CR bytes (target 0), bytes above 127 (target 0), BOM (target absent), trailing-whitespace lines (target 0), and resolve every local relative link from the edited file's own directory. The `create_file` tool writes CRLF endings on Windows even when the source content uses LF, and `git diff --check` does NOT inspect untracked files; a freshly created part file can ship CRLF with no warning. Normalize deliberately with `[System.IO.File]::WriteAllText($path, $content.Replace("`r`n", "`n"), [System.Text.UTF8Encoding]::new($false))` and re-verify CR=0 before the final report. For files under `._design_docs/cache-handling-test-plan/`, sibling design docs resolve as `../cache-handling-phase34-*.md` and test reports as `../.test_reports/*.md`, never `../../cache-handling-*.md`.
 
 
 ## Improvement: separate own QA edits from dirty sources
@@ -382,7 +382,7 @@ Condition:
 
 Action:
 
-- Reproduce one focused test with direct coverage-tool invocation and a single export argument string before classifying the source row as failed. If direct invocation produces coverage, classify the wrapper as blocked or defective and cite both wrapper output and direct-run evidence.
+- Reproduce one focused test with direct coverage-tool invocation and a single export argument string before classifying the source row as failed. If direct invocation produces coverage, classify the wrapper path as defective and cite both wrapper output and direct-run evidence. Then run the required target set directly and classify the row by the direct markdown coverage evidence: if rates are below required floors, report `FAIL`, not `BLOCKED-wrapper`, because coverage was measurable and the wrapper defect did not hide the threshold result.
 ## Improvement: dedupe OpenCppCoverage merged Cobertura XML by (file, line)
 
 Condition:
@@ -970,10 +970,10 @@ Action:
 ## Improvement: verify cited line range matches the actual content before quoting
 
 Condition:
-- QA author drafts a test plan or review that cites a specific line range (e.g. design part file L64-72 for output equivalence) and uses the cited content as evidence for a row contract
+- QA author drafts or updates a test plan, review, or re-review that cites a specific line range (e.g. design part file L64-72 for output equivalence) and uses the cited content as evidence for a row contract
 
 Action:
-- Do not trust the line range without byte-level verification. Read the cited file at the cited line range and confirm the actual content matches the cited claim. Common drift: off-by-7 to off-by-15 lines because the cited range was eyeballed against a previous session's read or against a stale copy. Cross-check with `Get-Content path | Select-Object -Skip (start-1) -First (end-start+1)` or equivalent. If the cited content does not match, edit the row to cite the correct line range before handoff. Do not block the review on a citation drift when the substance is correct and the cited range is in the same neighborhood (within ~10 lines); record the drift as an INFO finding and update the citation. Do block when the cited content is in a different section entirely.
+- Do not trust the line range without byte-level verification. Read the cited file at the cited line range and confirm the actual content matches the cited claim. Common drift: off-by-7 to off-by-15 lines because the cited range was eyeballed against a previous session's read, against a stale copy, or before a later correction note shifted the file. Cross-check with `Get-Content path | Select-Object -Skip (start-1) -First (end-start+1)` or equivalent after the last doc edit. If the cited content does not match, edit the row to cite the correct line range before handoff. Do not block the review on a citation drift when the substance is correct and the cited range is in the same neighborhood (within ~10 lines); record the drift as an INFO finding and update the citation. Do block when the cited content is in a different section entirely.
 
 
 ## Improvement: test-plan review verdict when underlying BLOCKING was fixed between authoring and review
@@ -1166,3 +1166,27 @@ Condition:
 
 Action:
 - Do compare the concurrent run to a sequential run from the same server process, same transcript, same expected-hit table shape, and same cache budget before choosing the blocker class. If sequential proves every predicted hot exact hit and concurrent misses only a subset while HTTP, namespace count, and logs stay clean, classify as a concurrent cache reuse or runner ordering failure, not transcript incompleteness, budget under-sizing, or startup failure. Record the exact missed request ids and the matching `cache_hits_total` delta so Developer can reproduce the gap.
+
+## Improvement: compare artifact-root prose against executable commands
+
+Condition:
+- Reviewing a QA test plan that defines a fresh per-session output root and also includes command checklists or runner examples
+
+Action:
+- Do compare every prose artifact-root requirement with every `-OutputDir`, `-OutDir`, durable report path, and row-specific path in the command examples. Treat dotted-prefix differences such as `._test_output` versus `_test_output` as blocking when the plan could split one session's evidence across two roots. When correcting the plan, choose the root that matches the active row family and existing runner convention, then update prose, commands, evidence bullets, path checks, and handoff/index text to use the same spelling before execution.
+
+## Improvement: keep PowerShell validation one-liners simple
+
+Condition:
+- Running QA hygiene or link-check validation as inline PowerShell against docs
+
+Action:
+- Do use explicit loops, temporary variables, and the `-f` format operator for path/line output. Don't embed statement-form `if` inside arithmetic expressions, and don't interpolate variables immediately followed by `:` in double-quoted strings; both can turn validation into parser noise and force a rerun before evidence is usable.
+
+## Improvement: classify required coverage target compile failures as failures
+
+Condition:
+- QA execution must run a required coverage row, coverage tooling is present, but a focused test target needed by the coverage command fails to compile before the coverage wrapper starts
+
+Action:
+- Do classify the coverage row as `FAIL` with the exact compile error and target name. Do not report it as a missing-tool or Manager-approved coverage blocker when OpenCppCoverage or the configured coverage tool exists and the blocker is source or test target compilation. Continue other executable rows, but keep the session verdict failed until Developer fixes the target or Manager changes the required coverage contract.
