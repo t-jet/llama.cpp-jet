@@ -655,6 +655,14 @@ Condition:
 Action:
 - Do treat the dedicated Manager closure part, latest Developer review, and latest Architect review as binding over stale tracker narrative text. Explicitly call out the stale tracker text as documentation debt, not as an open gate, unless the closure part itself is missing, contradictory, or fails the closure checklist.
 
+## Improvement: latest-stage number when tracker lags index
+
+Condition:
+- Opening or validating a new stage and `document-index.md` plus durable stage docs show a later closed stage than `cache-handling-stage-tracker.md`, or a closure doc claims an open no-commit merge while git history shows a real merge commit.
+
+Action:
+- Do use the latest durable indexed stage plus verified git merge shape to choose the next stage number, and report the tracker or closure text as documentation debt that must be corrected when files can be edited. Do not downgrade read-only intake validation solely because the tracker is stale.
+
 ## Improvement: read-only stage-opening validation
 
 Condition:
@@ -670,3 +678,11 @@ Condition:
 
 Action:
 - Do verify the existing artifacts on disk, line caps, links, and consistency before deciding. Treat verified existing gate records as the current Manager decision instead of recreating or duplicating them. Report no task-doc edits when no edit was needed.
+
+## Improvement: avoid dirty index intake writes
+
+Condition:
+- Opening a new stage requires appending manager-input, tracker, or document-index entries, but the required durable navigation files already have unrelated dirty changes, or an earlier stage candidate was validated only in chat and not opened on disk.
+
+Action:
+- Don't edit those dirty navigation files from Manager mode. Do reconstruct the next durable stage number from on-disk docs, distinguish durable opened stages from non-durable candidates, validate the intake, and return exact stage-opening handoff text with target filenames and row/index text so a fresh owner or user-authorized edit can apply it without overwriting unrelated work.

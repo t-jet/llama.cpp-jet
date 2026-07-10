@@ -1,9 +1,9 @@
 # Stage 35 implementation: upstream merge pre-merge analysis
 
-Status: Closed PASS; corrected upstream_master no-commit merge remains open and uncommitted
+Status: Corrected upstream_master no-commit merge open; F35-QA-FIX-01 PASS; TP-35-COV-01 QA rerun next
 Date opened: 2026-07-07
 Stage: 35 (Upstream merge cycle)
-Owner: Human maintainer
+Owner: Developer
 Reviewer: Architect
 Manager approver: Manager
 Branch: `work-branch`
@@ -63,13 +63,6 @@ Binding sources:
 - [F35-QA-01 fix report 2026-07-08](.test_reports/test-report-20260708-01-fixes.md) - updated after Architect fix review; compile drift fixed and deterministic sync metrics assertions added.
 - [F35-QA-01 fix review 2026-07-08](.test_reports/test-report-20260708-01-fix-review.md) - historical REWORK; F35-QA-FIX-01 required deterministic Step 10 sync metrics assertions.
 - [F35-QA-01 fix re-review 2026-07-08](.test_reports/test-report-20260708-01-fix-re-review.md) - PASS; closes F35-QA-FIX-01 and returns TP-35-COV-01 to QA rerun.
-- [Focused TP-35-COV-01 QA rerun 2026-07-08](.test_reports/test-report-20260708-02.md) - FAIL; corrected focused targets build and run under OpenCppCoverage, but markdown coverage is below required floors: combined 0.734 against 0.80 and product-only 0.5856 against 0.70. Direct OpenCppCoverage was used after the wrapper produced no `.cov` files through its Start-Process path.
-- [Developer TP-35-COV-01 rerun review 2026-07-08](.test_reports/test-report-20260708-02-developer-review.md) - MANAGER-DECISION; classifies F35-QA-02 as a coverage-contract issue, not a product runtime bug, and assigns the next gate to Manager.
-- [Part 32: Manager coverage-contract decision 2026-07-08](cache-handling-phase35-implementation/part-32-manager-coverage-contract-decision-20260708.md) - REWORK; no coverage exception for Stage 35, Developer must add meaningful focused coverage and return for fix review before QA reruns TP-35-COV-01.
-- [Part 33: F35-QA-02 coverage fix and review 2026-07-09](cache-handling-phase35-implementation/part-33-f35-qa-02-coverage-fix-review-20260709.md) - PASS; focused test-only coverage rework closes both coverage floors: combined `0.8112`, product-only `0.7026`.
-- [Focused TP-35-COV-01 QA rerun 2026-07-09](.test_reports/test-report-20260709-01-stage35-coverage-rerun.md) - PASS; clean focused build and direct OpenCppCoverage evidence produced 10 `.cov` files and passed combined/product-only floors.
-- [Developer coverage rerun review 2026-07-09](.test_reports/test-report-20260709-01-stage35-coverage-rerun-developer-review.md) - PASS; no product bug remains from F35-QA-02.
-- [Part 34: Manager closure 2026-07-09](cache-handling-phase35-implementation/part-34-manager-closure-20260709.md) - PASS; Stage 35 closed, with the no-commit merge still open and uncommitted.
 
 ## Progress log
 
@@ -119,11 +112,6 @@ Binding sources:
 | F35-IMPL-01 source-fix rework | Done | Part 29 records the composed sleep handler fix, focused build PASS for `llama-server test-cache-controller`, direct `test-cache-controller` PASS 150 tests including the router sleep-state regression, and `ctest -C Release -R cache` PASS 1/1. |
 | Architect implementation re-review | Done | Part 30 records PASS for F35-IMPL-01, with local sleep destroy/reload preserved, router sleeping notification ordered after successful local sleep entry, test hooks guarded, and Stage 25/34 invariants still passing focused evidence. |
 | Manager implementation gate | Done | Part 31 records implementation PASS and routes Stage 35 to QA test planning because the shared test plan does not yet include Stage 35 upstream-merge regression coverage. |
-| F35-QA-02 coverage rework | Done | Part 33 records focused test-only coverage for current synchronous restore, metadata/payload, sync I/O worker, demotion rejection, and coverage contract edge paths. |
-| Architect F35-QA-02 fix review | Done | Part 33 records PASS with no blocking findings. |
-| QA TP-35-COV-01 rerun | Done | Report `test-report-20260709-01-stage35-coverage-rerun.md` records clean focused build PASS and direct OpenCppCoverage PASS: combined `0.8112`, product-only `0.7026`. |
-| Developer QA rerun review | Done | Report `test-report-20260709-01-stage35-coverage-rerun-developer-review.md` records PASS and no remaining product bug. |
-| Manager closure | Done | Part 34 records Stage 35 PASS closure. |
 
 ## Current handoff
 
@@ -145,19 +133,27 @@ Implementation gate verdict: PASS. Part 31 accepts the implementation evidence
 and Architect re-review. The CUDA-object blocker, source compile blocker, and
 router sleep-state callback rework are closed for the focused scope.
 
-Test execution state: PASS. The 2026-07-09 focused TP-35-COV-01 rerun passed
-after a clean focused build. Direct OpenCppCoverage evidence under
-`_test_output/stage35-f35-qa-02-dev/coverage-direct-13-clean/` records combined
-coverage `0.8112`, `7795 / 9609`, and product-only coverage `0.7026`,
-`2833 / 4032`.
+Test execution state: focused coverage fix ready for QA rerun. QA report
+[test-report-20260708-01.md](.test_reports/test-report-20260708-01.md)
+passes all required runtime and route rows except TP-35-COV-01. The Developer
+review
+[test-report-20260708-01-developer-review.md](.test_reports/test-report-20260708-01-developer-review.md)
+classifies the failure as test/coverage target drift: `tests/test-step10-metrics.cpp`
+still calls the removed `hybrid_cache_controller::process_completions` API.
+The follow-up fix report
+[test-report-20260708-01-fixes.md](.test_reports/test-report-20260708-01-fixes.md)
+records test-only updates and a corrected coverage-target build PASS. Historical Architect
+fix review
+[test-report-20260708-01-fix-review.md](.test_reports/test-report-20260708-01-fix-review.md)
+returned REWORK because `test-step10-metrics` compiled but still did not
+deterministically prove the current synchronous demotion and cold-byte metrics.
+Architect fix re-review
+[test-report-20260708-01-fix-re-review.md](.test_reports/test-report-20260708-01-fix-re-review.md)
+passes the rework: deterministic sync demotion, cold bytes/count/descriptors,
+and eviction-vs-demotion assertions are now present.
 
-Developer review state: PASS. The 2026-07-09 developer review reports no
-remaining product bug from F35-QA-02.
+Next owner: QA.
 
-Manager decision: PASS. Part 34 closes Stage 35. The merge remains open and
-uncommitted. Commit, push, PR, merge abort, and reviewer response remain blocked
-unless separately requested.
-
-Next owner: human maintainer.
-
-Next gate: optional human commit decision for the open no-commit merge.
+Next gate: focused TP-35-COV-01 rerun with the corrected coverage target set.
+Commit, push, PR, merge abort, and reviewer response remain blocked unless
+separately requested.

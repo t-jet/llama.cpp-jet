@@ -281,13 +281,13 @@ Action:
 - Treat missing in-scope routes, route registration, build support, tools, or fixtures as `BLOCKED` with exact prerequisite evidence. Don't allow `SKIP` unless the row is explicitly out of current scope by design or Manager decision.
 
 
-## Improvement: reconcile gate status across reviewed docs
+## Improvement: reconcile gate status and artifact roots across reviewed docs
 
 Condition:
-- QA planning or test-plan review includes doc hygiene checks and one of reviewed gate documents has stale stage status
+- QA planning or test-plan review includes doc hygiene checks, including re-review after REWORK, and one reviewed gate document has stale stage status or a command artifact root differs from the active convention
 
 Action:
-- Update stale gate status when within requested documentation scope. Cite source gate that proves current state. Record hygiene correction in the plan/review handoff instead of leaving conflicting readiness signals for next owner.
+- Update stale gate status and mismatched command roots when file edits are in scope. In no-edit test-plan reviews, classify conflicting gate/readiness status or dotted-prefix command roots as review findings instead of silently tolerating them. Cite the source gate that proves current state and the executable command line that proves the path spelling. In REWORK re-reviews, verify each named correction directly in the current files before returning PASS, and record any remaining hygiene correction in the plan/review handoff so the next owner does not inherit conflicting readiness signals.
 
 
 ## Improvement: verify create_file path against near-duplicate dir names
@@ -1190,3 +1190,11 @@ Condition:
 
 Action:
 - Do classify the coverage row as `FAIL` with the exact compile error and target name. Do not report it as a missing-tool or Manager-approved coverage blocker when OpenCppCoverage or the configured coverage tool exists and the blocker is source or test target compilation. Continue other executable rows, but keep the session verdict failed until Developer fixes the target or Manager changes the required coverage contract.
+
+## Improvement: reconcile split setup logs with later run roots
+
+Condition:
+- When QA execution evidence uses one run id for setup/preflight logs and a later run id for the final model-backed run after a harness/report-emission retry
+
+Action:
+- Do verify the setup logs predate the final run, the binaries are fresh before traffic starts, and the final run used the same build tree and HEAD. Cite setup logs and final run artifacts separately. Do not reject the final run solely because controller or ctest logs have the earlier retry suffix, but record the suffix split and any transient setup rerun in the report.

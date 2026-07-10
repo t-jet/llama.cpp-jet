@@ -1319,6 +1319,14 @@ Condition:
 Action:
 - Do run or preserve a focused live probe that closes each independent channel before marking the fix ready for review. For the stage-style cache reuse, collect both parsed request rows with non-zero `cache_n` and a positive `llamacpp:cache_hits_total{mode="hybrid"}` delta from the same duplicate-request run.
 
+## Improvement: Separate gate-blocking bugs from non-gated metric observations
+
+Condition:
+- When reviewing QA test results and the report includes a real-looking product metric anomaly that is outside the accepted test-plan PASS rows, while all binding setup, correctness, hit, performance, error, cleanup, and hygiene rows pass
+
+Action:
+- Do classify the anomaly as a non-blocking product observability bug candidate, state that no stage-blocking product bug remains, and avoid requesting retest for the current gate unless the accepted test plan explicitly makes that metric value a pass/fail row. Hand Manager a separate follow-up decision instead of blocking closure.
+
 ## Improvement: Coverage target drift can be wider than first compile error
 
 Condition:

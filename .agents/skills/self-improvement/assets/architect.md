@@ -1562,6 +1562,26 @@ Action:
 
 - Do run Select-String or Get-Content with line offsets to confirm the cited lines contain the claimed code. Do not propagate the Developer's line numbers verbatim if they are off; cite the actual lines and note the discrepancy in a non-blocking observation. Do treat line-number drift as a useful signal: if a line-number is off by tens of lines, the Developer's analysis may be pointing at the wrong code path. Don't accept any cited line number without byte-level verification, even when the broader claim is correct.
 
+## Improvement: Touched reusable docs must not keep stale metric contracts
+
+Condition:
+
+- Reviewing an implementation that updates a reusable runner README or script doc while the stage design requires current public metric names
+
+Action:
+
+- Do scan the whole touched README or helper doc for old metric spellings, not only the new stage section. Do block implementation-gate PASS when the same touched doc exposes both old and current public metric contracts for QA evidence. Don't dismiss stale metric rows as pre-existing when the current implementation relies on that document for handoff.
+
+## Improvement: Scope adjacent stale helpers in narrow re-review
+
+Condition:
+
+- Performing a narrow implementation re-review after rework where a touched README describes a helper outside the stage execution path, and that adjacent helper appears stale against the current public contract
+
+Action:
+
+- Do trace the reviewed stage's actual driver/helper call path before deciding gate impact. Block only when the stale helper or doc claim is part of the stage evidence handoff or creates conflicting instructions in the touched document. Record adjacent legacy helper drift as advisory when the stage path uses a different current-contract parser.
+
 ## Improvement: Hyphenated globs can miss root peer files
 
 Condition:
@@ -1631,6 +1651,16 @@ Condition:
 Action:
 
 - Do verify the named gate docs, parent entry handoff, line counts, byte hygiene, `git diff --check`, and dirty status locally before final. Do close the completed subagent before stopping. Don't rely only on the subagent summary when repo state may have changed concurrently.
+
+## Improvement: No-edit review still needs explicit gate basis
+
+Condition:
+
+- User asks for Architect design or implementation review but explicitly forbids file edits
+
+Action:
+
+- Do keep the review as a chat verdict only and state that no durable stage docs were edited. Still read the index, intake, subject docs, prior closure/review docs, and any reused script/API signatures before approving. For runtime-log diagnosis, cite both the durable cache contract and the live code path that emits the observed log/timing. Don't create the usual persistent review part unless the user allows edits.
 
 ## Improvement: Stage completion requests still advance one gate at a time
 

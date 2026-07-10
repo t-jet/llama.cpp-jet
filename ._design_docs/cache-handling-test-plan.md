@@ -1,7 +1,7 @@
 # Cache handling test plan
 Status: Active
-Last updated: 2026-07-08
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 35
+Last updated: 2026-07-10
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 36
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
@@ -119,6 +119,7 @@ The integration plan covers:
 - Stage 13 endpoint compatibility after implementation review PASS: native completion, OpenAI completion/chat/responses/embeddings, Anthropic availability and completion-state handling, transcription availability or fixture blocking evidence, embeddings cache-exclusion evidence, slots regression, marker/public-schema stability, route-neutral preparation identity, degraded diagnostics, response schema stability, and clean-build/report gates.
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 - Stage 35 upstream-merge regression after Manager implementation gate PASS: clean build and stale-binary rules, cache core, MTP/KV/speculative pair-state, route/session/router child state, checkpoint message spans, bounded metrics, cold-store checks when touched, Stage 34 replay/synthetic rows when touched, and focused coverage when feature-mode files changed.
+- Stage 36 hybrid hit and performance validation: Stage 33 comparison lineage with tight duplicate bursts, positive hybrid hit evidence, bounded metrics, hot-RAM and throughput comparison, clean logs, cleanup, and hygiene.
 
 ## Current testable scope
 
@@ -208,6 +209,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 36: Stage 32 live comparison rerun](./cache-handling-test-plan/part-36-stage32-live-comparison-rerun.md)
 - [Part 37: Stage 34 real agentic transcript replay](./cache-handling-test-plan/part-37-stage34-real-agentic-transcript-replay.md)
 - [Part 40: Stage 35 upstream merge regression](./cache-handling-test-plan/part-40-stage35-upstream-merge-regression.md)
+- [Part 41: Stage 36 hybrid hit and performance validation](./cache-handling-test-plan/part-41-stage36-hybrid-hit-performance-validation.md)
 
 ## T114 split (Stage 11 onward)
 
@@ -253,6 +255,9 @@ cites the T114 row only and is not affected by the split.
 - [Stage 35 test-plan re-review: 2026-07-08](./cache-handling-test-plan/stage-35-test-plan-re-review-20260708.md)
 - [Stage 35 independent test-plan re-review: 2026-07-08](./cache-handling-test-plan/stage-35-test-plan-independent-re-review-20260708.md)
 - [Stage 35 manager test-plan gate: 2026-07-08](./cache-handling-test-plan/stage-35-manager-test-plan-gate-20260708.md)
+- [Stage 36 test-plan review: 2026-07-10](./cache-handling-test-plan/stage-36-test-plan-review-20260710.md)
+- [Stage 36 test-plan re-review: 2026-07-10](./cache-handling-test-plan/stage-36-test-plan-re-review-20260710.md)
+- [Stage 36 manager test-plan gate: 2026-07-10](./cache-handling-test-plan/stage-36-manager-test-plan-gate-20260710.md)
 ## Test scripts
 
 Reusable PowerShell scripts live in [cache-handling-test-scripts/](./cache-handling-test-scripts/).
@@ -274,15 +279,11 @@ Two folders serve different purposes for test execution outputs:
 **Enforcement:** A pre-commit hook or CI lint can run `Get-ChildItem ._design_docs/.test_reports -File | Where-Object { $_.Name -notmatch '\.md$' -and $_.Name -ne '.gitignore' }` and fail if the result is non-empty.
 
 See [Part 24](./cache-handling-test-plan/part-24-test-output-folder-convention.md) for rationale, examples, and the move procedure for files that land in the wrong folder.
-
 ## Test execution reports
-
 For each execution session, create a new report in [._design_docs/.test_reports/](./.test_reports/) named:
-
 ```text
 test-report-YYYYMMDD-NN.md
 ```
-
 Each report must include:
 
 - test run ID matching the filename
@@ -294,7 +295,5 @@ Each report must include:
 - per-test command, request, response, metric, and log evidence
 - final `PASS`, `FAIL`, `SKIP`, and `BLOCKED` counts
 - reproducible bug reports for failures
-
 Use [Part 7](./cache-handling-test-plan/part-07-test-report-quality-and-templates.md) for the detailed report checklist.
-
 See [Test output folder convention](#test-output-folder-convention) above for artifact placement. The `.test_reports/` folder is for Markdown reports only.

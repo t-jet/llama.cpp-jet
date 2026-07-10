@@ -32,6 +32,10 @@ param(
     [int]      $Parallel               = 2,
     [int]      $Seed                   = 42,
     [int]      $RequestCount           = 200,
+    [switch]   $BurstDuplicateMode,
+    [int]      $BurstCount             = 8,
+    [int]      $RepeatsPerBurst        = 6,
+    [int]      $FillerCount            = 0,
     [switch]   $DryRun,
     [switch]   $OutputEquivalenceOnly
 )
@@ -147,7 +151,22 @@ function Invoke-Phase05WorkloadBuild {
     if (-not $healthy) { Stop-Stage29Server $proc; throw 'BLOCKED-workload-build: tokenize helper failed /health' }
     try {
         $wlPath = Join-Path $RunRoot 'workload.jsonl'
-        New-ComparisonWorkload -RequestCount $RequestCount -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $wlPath -Seed $Seed -MaxTokens 8 -MaxIterations 200 -SizeClass '2k'
+        $workloadArgs = @{
+            RequestCount = $RequestCount
+            ServerUrl = "http://127.0.0.1:$BasePort"
+            OutPath = $wlPath
+            Seed = $Seed
+            MaxTokens = 8
+            MaxIterations = 200
+            SizeClass = '2k'
+        }
+        if ($BurstDuplicateMode) {
+            $workloadArgs.BurstDuplicateMode = $true
+            $workloadArgs.BurstCount = $BurstCount
+            $workloadArgs.RepeatsPerBurst = $RepeatsPerBurst
+            $workloadArgs.FillerCount = $FillerCount
+        }
+        New-ComparisonWorkload @workloadArgs
         $eqPath = Join-Path $RunRoot 'equivalence-prompts.jsonl'
         New-ComparisonWorkload -RequestCount $OutputEquivalencePrompts -ServerUrl "http://127.0.0.1:$BasePort" -OutPath $eqPath -Seed $Seed -MaxTokens 8 -MaxIterations 200 -SizeClass '2k'
     } finally {
@@ -221,7 +240,10 @@ function Write-Stage29Report {
     $summaryPath = Join-Path $RunRoot 'summary.json'
     if (-not (Test-Path $summaryPath)) { return }
     $s = Get-Content -Raw -LiteralPath $summaryPath | ConvertFrom-Json
-    $lines = @('# Stage 29 Cache Modes Comparison Report', '', "Run: $RunId", '', '## Per-leg summary', '', '| cycle | mode | phase | hit_delta | miss_delta | status |', '| ---: | --- | --- | ---: | ---: | --- |')
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @('# Stage 29 Cache Modes Comparison Report', '', "Run: $RunId", '', '## Per-leg summary', '', '| cycle | mode | phase | hit_delta | miss_delta | status |', '| ---: | --- | --- | ---: | ---: | --- |')) {
+        [void]$lines.Add($line)
+    }
     foreach ($r in $s.rows) { [void]$lines.Add(("| {0} | {1} | {2} | {3} | {4} | {5} |" -f $r.cycle, $r.mode, $r.phase, $r.hit_delta, $r.miss_delta, $r.status)) }
     [void]$lines.Add(''); [void]$lines.Add('## Decision-support'); [void]$lines.Add(''); [void]$lines.Add('Q1..Q5 verdict is computed at QA execution from the per-leg evidence rows.')
     Write-Stage29Text -Path $ReportPath -Text ($lines -join "`n")

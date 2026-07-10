@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-06-07
+Last updated: 2026-07-10
 Status: Active reusable integration runner
 
 ## Scope
@@ -23,6 +23,34 @@ The Stage 9 plan adds checkpoint payloads and workload profiles. Public HTTP can
 The Stage 10 plan adds observability metric shapes and escaping, bounded diagnostics, cold-store hardening, startup validation, pressure and abuse checks, deterministic stress, coverage evidence, benchmark evidence, operator documentation checks, security evidence, and Stage 4-9 regression. Public HTTP can cover startup validation and live `/metrics` shape when the server can create the rows. Cold-store path hardening, queue pressure, repeated integrity failures, branch pressure, deterministic stress, and exporter escaping rely on focused C++ tests, Python startup or metric checks, coverage reports, benchmark runners, and documented fixture evidence.
 
 ## Scripts
+
+### `compare-legacy-vs-hybrid.ps1`
+
+Stage 29/30/32/33 comparison driver for legacy-vs-hybrid A/B runs on
+`/v1/chat/completions`. It builds a workload, runs output equivalence, executes
+legacy and hybrid legs sequentially, writes per-leg request rows and metrics,
+and emits a durable Markdown report.
+
+Stage 36 adds an opt-in tight duplicate workload mode:
+
+```powershell
+pwsh -NoProfile -File ._design_docs\cache-handling-test-scripts\compare-legacy-vs-hybrid.ps1 `
+    -RunId stage36-stage33-rerun-YYYYMMDD-NN `
+    -ModelPath ._test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf `
+    -RunRoot ._test_output\stage36-stage33-rerun-YYYYMMDD-NN `
+    -ReportPath ._design_docs\.test_reports\test-report-YYYYMMDD-NN-stage36-stage33-rerun.md `
+    -CacheColdPath D:\tmp\cache-cold-stage36-stage33-rerun-YYYYMMDD-NN `
+    -LlamaServerPath build-cuda\bin\Release\llama-server.exe `
+    -BasePort 8900 -ColdBudgetMiB 2048 -HotBudgetMiB 512 `
+    -ContextSize 4096 -Parallel 2 -Seed 42 -RequestCount 48 `
+    -Cycles 1 -OutputEquivalencePrompts 5 `
+    -BurstDuplicateMode -BurstCount 8 -RepeatsPerBurst 6 -FillerCount 0
+```
+
+Use `-BurstDuplicateMode` only for Stage 36-style hit validation. Without that
+switch, the driver keeps the original randomized Stage 29/33 workload shape.
+Stage 36 expects positive hybrid hit evidence from both per-request cached
+tokens and `llamacpp:cache_hits_total{mode="hybrid"}`.
 
 ### `run_cache_integration.ps1`
 
@@ -47,22 +75,23 @@ Main helpers:
 - `Get-CacheMetrics`
 - `Invoke-ParallelRequests`
 
-`Get-CacheMetrics` parses `llamacpp_cache_*` Prometheus metrics, including:
+`Get-CacheMetrics` parses current `llamacpp:cache_*` Prometheus metrics,
+including:
 
-- `llamacpp_cache_entries`
-- `llamacpp_cache_bytes`
-- `llamacpp_cache_tokens`
-- `llamacpp_cache_hits_total`
-- `llamacpp_cache_misses_total`
-- `llamacpp_cache_evictions_total`
-- `llamacpp_cache_payload_evictions_total`
-- `llamacpp_cache_protected_root_decisions_total`
-- `llamacpp_cache_restore_failures_total`
-- `llamacpp_cache_descriptor_validation_failures_total`
-- `llamacpp_cache_pairing_violations_total`
-- `llamacpp_cache_fallback_restores_total`
-- `llamacpp_cache_hot_payload_descriptors`
-- `llamacpp_cache_evicted_payload_descriptors`
+- `llamacpp:cache_entries`
+- `llamacpp:cache_bytes`
+- `llamacpp:cache_tokens`
+- `llamacpp:cache_hits_total`
+- `llamacpp:cache_misses_total`
+- `llamacpp:cache_evictions_total`
+- `llamacpp:cache_payload_evictions_total`
+- `llamacpp:cache_protected_root_decisions_total`
+- `llamacpp:cache_restore_failures_total`
+- `llamacpp:cache_descriptor_validation_failures_total`
+- `llamacpp:cache_pairing_violations_total`
+- `llamacpp:cache_fallback_restores_total`
+- `llamacpp:cache_hot_payload_descriptors`
+- `llamacpp:cache_evicted_payload_descriptors`
 
 Stage 8 metric rows should capture the raw `/metrics` response or use the Python metric-shape test until the PowerShell parser is extended for the `cache_*` Stage 8 metric family listed in the Stage 8 plan.
 
@@ -193,8 +222,8 @@ Evidence classes produced:
 | Evidence type | Source class |
 | --- | --- |
 | `timings.cache_n` per response | direct stats |
-| `llamacpp_cache_hits_total` delta | public Prometheus |
-| `llamacpp_cache_misses_total` delta | public Prometheus |
+| `llamacpp:cache_hits_total` delta | public Prometheus |
+| `llamacpp:cache_misses_total` delta | public Prometheus |
 | `cache_hit_rate` k6 Rate threshold | harness-only |
 | `cache_miss_prompt_ms` vs `cache_hit_prompt_ms` | direct stats |
 

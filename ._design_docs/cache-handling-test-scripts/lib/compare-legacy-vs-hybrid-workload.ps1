@@ -12,6 +12,8 @@
 #
 # Public entry point: New-ComparisonWorkload
 # Output schema: stage29-comparison-workload-v1
+# Stage 36 adds an opt-in burst duplicate mode. Default Stage 29 behavior is
+# unchanged unless -BurstDuplicateMode is passed.
 #
 # Usage:
 #   . .\lib\agentic-prompt-generator.ps1
@@ -64,7 +66,11 @@ function New-ComparisonWorkload {
         [int]    $MinAnchors         = 10,
         [string] $SizeClass          = '2k',
         [int]    $TokenizeTimeoutSec = 60,
-        [int]    $MaxIterations      = 200
+        [int]    $MaxIterations      = 200,
+        [switch] $BurstDuplicateMode,
+        [int]    $BurstCount         = 8,
+        [int]    $RepeatsPerBurst    = 6,
+        [int]    $FillerCount        = 0
     )
 
     if ($RequestCount -le 0) {
@@ -88,6 +94,20 @@ function New-ComparisonWorkload {
     if (-not $script:SizeClassMap.ContainsKey($SizeClass)) {
         throw "New-ComparisonWorkload: unknown SizeClass '$SizeClass'"
     }
+    if ($BurstDuplicateMode) {
+        if ($BurstCount -le 0) {
+            throw "New-ComparisonWorkload: BurstCount must be positive (got $BurstCount)"
+        }
+        if ($RepeatsPerBurst -le 1) {
+            throw "New-ComparisonWorkload: RepeatsPerBurst must be greater than 1 (got $RepeatsPerBurst)"
+        }
+        if ($FillerCount -lt 0) {
+            throw "New-ComparisonWorkload: FillerCount must be non-negative (got $FillerCount)"
+        }
+        if ($FillerCount -gt 48) {
+            throw "New-ComparisonWorkload: FillerCount must be <= 48 for burst mode (got $FillerCount)"
+        }
+    }
 
     if (-not (Test-Path (Split-Path -Parent $OutPath))) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutPath) | Out-Null
@@ -98,6 +118,76 @@ function New-ComparisonWorkload {
     $rng = New-Object System.Random($Seed)
     $target = $script:SizeClassMap[$SizeClass].Target
     $sizeClassName = $script:SizeClassMap[$SizeClass].SizeClass
+    $requestLines = New-Object System.Collections.Generic.List[string]
+
+    if ($BurstDuplicateMode) {
+        $reqIdx = 0
+        for ($burstIdx = 0; $burstIdx -lt $BurstCount; $burstIdx++) {
+            $anchorPath = Join-Path $tempDir ("burst-anchor-{0:D4}.json" -f $burstIdx)
+            New-AgenticChatPrompt `
+                -TargetTokens $target `
+                -SizeClass $sizeClassName `
+                -PromptClass 'different-agent-same-prefix' `
+                -OutPath $anchorPath `
+                -ServerUrl $ServerUrl `
+                -Seed ($Seed + $burstIdx) `
+                -TimeoutSec $TokenizeTimeoutSec `
+                -MaxIterations $MaxIterations | Out-Null
+            $anchorJson = Get-Content -Raw -Path $anchorPath | ConvertFrom-Json
+            for ($repeatIdx = 0; $repeatIdx -lt $RepeatsPerBurst; $repeatIdx++) {
+                $reqIdx++
+                $line = [pscustomobject]@{
+                    request_id   = "r-{0:D4}" -f $reqIdx
+                    cache_class  = 'exact'
+                    burst_id     = "b-{0:D4}" -f ($burstIdx + 1)
+                    burst_repeat = $repeatIdx + 1
+                    messages     = @($anchorJson.messages)
+                    max_tokens   = $MaxTokens
+                    temperature  = $Temperature
+                    seed         = $Seed
+                }
+                [void]$requestLines.Add(($line | ConvertTo-Json -Depth 10 -Compress))
+            }
+        }
+        for ($fillerIdx = 0; $fillerIdx -lt $FillerCount; $fillerIdx++) {
+            $freshPath = Join-Path $tempDir ("burst-filler-{0:D4}.json" -f $fillerIdx)
+            New-AgenticChatPrompt `
+                -TargetTokens $target `
+                -SizeClass $sizeClassName `
+                -PromptClass 'different-agent-same-prefix' `
+                -OutPath $freshPath `
+                -ServerUrl $ServerUrl `
+                -Seed ($Seed + $fillerIdx + 10000) `
+                -TimeoutSec $TokenizeTimeoutSec `
+                -MaxIterations $MaxIterations | Out-Null
+            $freshJson = Get-Content -Raw -Path $freshPath | ConvertFrom-Json
+            $reqIdx++
+            $line = [pscustomobject]@{
+                request_id  = "r-{0:D4}" -f $reqIdx
+                cache_class = 'new_branch'
+                burst_id    = $null
+                messages    = @($freshJson.messages)
+                max_tokens  = $MaxTokens
+                temperature = $Temperature
+                seed        = $Seed
+            }
+            [void]$requestLines.Add(($line | ConvertTo-Json -Depth 10 -Compress))
+        }
+
+        Write-ComparisonWorkloadLines -OutPath $OutPath -RequestLines $requestLines
+        Remove-Item -Recurse -Force -Path $tempDir -ErrorAction SilentlyContinue
+
+        return [pscustomobject]@{
+            OutPath          = $OutPath
+            RequestCount     = $requestLines.Count
+            Distribution     = @{ exact = 1.0; near_prefix = 0.0; new_branch = 0.0 }
+            Seed             = $Seed
+            BurstDuplicateMode = $true
+            BurstCount       = $BurstCount
+            RepeatsPerBurst  = $RepeatsPerBurst
+            FillerCount      = $FillerCount
+        }
+    }
 
     # Pass 1: build the anchor pool. Exact/near_prefix requests reuse anchor
     # messages, so the pool must be large enough to cover those classes.
@@ -121,7 +211,6 @@ function New-ComparisonWorkload {
     # Pass 2: build per-request entries using the distribution.
     $exactCutoff       = $Distribution['exact']
     $nearPrefixCutoff  = $exactCutoff + $Distribution['near_prefix']
-    $requestLines      = New-Object System.Collections.Generic.List[string]
 
     for ($reqIdx = 0; $reqIdx -lt $RequestCount; $reqIdx++) {
         $roll = $rng.NextDouble()
@@ -166,11 +255,7 @@ function New-ComparisonWorkload {
         [void]$requestLines.Add(($line | ConvertTo-Json -Depth 10 -Compress))
     }
 
-    # Write JSONL with LF endings and no BOM.
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllLines($OutPath, $requestLines, $utf8)
-    $content = [System.IO.File]::ReadAllText($OutPath) -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText($OutPath, $content, $utf8)
+    Write-ComparisonWorkloadLines -OutPath $OutPath -RequestLines $requestLines
 
     Remove-Item -Recurse -Force -Path $tempDir -ErrorAction SilentlyContinue
 
@@ -180,6 +265,17 @@ function New-ComparisonWorkload {
         Distribution = $Distribution
         Seed         = $Seed
     }
+}
+
+function Write-ComparisonWorkloadLines {
+    param(
+        [Parameter(Mandatory = $true)] [string] $OutPath,
+        [Parameter(Mandatory = $true)] $RequestLines
+    )
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($OutPath, $RequestLines, $utf8)
+    $content = [System.IO.File]::ReadAllText($OutPath) -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText($OutPath, $content, $utf8)
 }
 
 function Get-ModifiedMessagesForNearPrefix {
