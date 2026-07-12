@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 Status: Active reusable integration runner
 
 ## Scope
@@ -51,6 +51,60 @@ Use `-BurstDuplicateMode` only for Stage 36-style hit validation. Without that
 switch, the driver keeps the original randomized Stage 29/33 workload shape.
 Stage 36 expects positive hybrid hit evidence from both per-request cached
 tokens and `llamacpp:cache_hits_total{mode="hybrid"}`.
+
+### `stage38-prefix-restore-and-cold-budget.ps1`
+
+Stage 38 standalone evidence script. It starts a hybrid server once with a
+run-local minimal ChatML template, sends a chat message, replays the actual
+assistant output from that response, then appends a new user turn. Before cache
+assertions, it proves that both the first rendered request tokens and the
+first-turn assistant replay tokens are strict prefixes of the second rendered
+request tokens. It then asserts the Stage 38-specific public contract:
+
+- the suffix response reports nonzero
+  `usage.prompt_tokens_details.cached_tokens`;
+- the suffix response reports `timings.cache_n` equal to
+  `usage.prompt_tokens_details.cached_tokens`;
+- the suffix response reports `usage.prompt_tokens` equal to the rendered full
+  request token count from `/apply-template` plus `/tokenize`, and greater than
+  the cached prefix length;
+- `llamacpp:cache_hits_total{mode="hybrid"}` shows a positive delta after the
+  suffix turn;
+- `/metrics` shows at least one accepted prefix row;
+- the public `llamacpp:cache_cold_budget_bytes{mode="hybrid"}` gauge reads
+  `2147483648` for `--cache-cold-max-mib 2048`.
+
+The broad A/B chat reuse flow is covered by
+`compare-legacy-vs-hybrid.ps1 -BurstDuplicateMode`. Stage 38 adds actual
+assistant replay, a run-local template that avoids model-specific thinking
+history rewrites, the strict suffix turn (not an exact duplicate), the
+rendered-token prefix proof, the `cached_tokens > 0` assertion, the
+`timings.cache_n == cached_tokens` assertion, the rendered request
+`prompt_tokens` equality check, and the public `2147483648` cold-budget gauge
+line check. The script is standalone and does not depend on a prior run output.
+
+Parameters:
+
+- `-ModelPath`: GGUF model path (required)
+- `-LlamaServerPath`: `llama-server.exe` path (required)
+- `-RunRoot`: non-durable output root, defaults to `._test_output/stage38-prefix-restore-<stamp>`
+- `-ReportPath`: durable Markdown report path, optional
+- `-ColdBudgetMiB`: cold budget in MiB, default `2048`
+- `-HotBudgetMiB`: hot budget in MiB, default `512`
+- `-BasePort`: server port, default `8180`
+- `-ContextSize`: server context size, default `4096`
+- `-Seed`: sampling seed, default `42`
+
+The script refuses to start if the binary is older than 10 minutes.
+
+```powershell
+pwsh -NoProfile -File ._design_docs\cache-handling-test-scripts\stage38-prefix-restore-and-cold-budget.ps1 `
+    -ModelPath .\_test_models\Qwen3.5-4B-MTP-GGUF\Qwen3.5-4B-Q4_K_M.gguf `
+    -LlamaServerPath build\bin\Release\llama-server.exe `
+    -RunRoot ._test_output\stage38-prefix-restore-YYYYMMDD-NN `
+    -ReportPath ._design_docs\.test_reports\test-report-YYYYMMDD-NN-stage38.md `
+    -ColdBudgetMiB 2048
+```
 
 ### `run_cache_integration.ps1`
 

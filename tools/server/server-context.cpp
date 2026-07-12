@@ -4598,7 +4598,7 @@ void server_routes::init_routes() {
             write_cache_metric("gauge",   "llamacpp:cache_cold_payload_bytes", "Current total bytes of demoted payloads in cold storage by mode.", json_value(cache_stats, "n_cold_payload_bytes", 0));
             write_cache_metric("gauge",   "llamacpp:cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
             write_cache_metric("gauge",   "llamacpp:cache_cold_bytes", "Current descriptor-owned cold payload bytes.", json_value(cache_stats, "cache_cold_bytes", 0));
-            write_cache_metric("gauge",   "llamacpp:cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", -1));
+            write_cache_metric("gauge",   "llamacpp:cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", int64_t(-1)));
             write_cache_metric("counter", "llamacpp:cache_cold_demotions_skipped_total", "Cold demotions skipped before write.", json_value(cache_stats, "cache_cold_demotions_skipped_total", 0));
             const json cold_eviction_rows = cache_stats.contains("cache_cold_evictions_by_shape") ?
                 cache_stats["cache_cold_evictions_by_shape"] : json::array();

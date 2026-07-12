@@ -92,11 +92,11 @@ Action:
 
 Condition:
 
-- Adding or updating review part files in doc tree untracked or partly tracked by git
+- Adding or updating stage entry docs, design parts, or review part files in a doc tree untracked or partly tracked by git
 
 Action:
 
-- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. If user requires `git diff --check`, still run it, but remember it ignores untracked files unless they are staged; pair it with a direct whitespace/byte check for the edited untracked doc. For new untracked durable docs, run a separate whitespace check such as `git diff --check --no-index` against an empty temp file and interpret no output as clean even though no-index exits 1 for content differences. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. Do report task-local path list. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
+- Do track paths edited during task. Do verify contents directly with targeted reads, ripgrep, line counts, raw byte checks when `git diff` cannot show untracked content. If user requires `git diff --check`, still run it, but remember it ignores untracked files unless they are staged; pair it with direct whitespace/byte checks for every edited untracked doc. For new untracked durable docs, run a separate whitespace check such as `git diff --check --no-index` against an empty temp file and interpret no output as clean even though no-index exits 1 for content differences. Do separate task-local edits from pre-existing dirty paths and from older diffs inside the same index or tracker file before reporting. When tracked index or tracker diff shows a whole stage row as added because HEAD lacks the pre-existing working-tree row, state the task-local status/link changes separately from that baseline diff. Do report task-local path list and which paths were tracked vs untracked. Don't rely on `git diff` or `git status` alone to prove what changed. Before declaring referenced doc "not edited", do run `git status -- <path>` and read current contents; report as pre-existing rather than own work.
 
 
 ## Improvement: CRLF and trailing whitespace on Windows tool-inserted content
@@ -933,7 +933,7 @@ Condition:
 
 Action:
 
-- Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do require presence/minimum counts for every design-required workload class before PASS/PASS-candidate, then require the class-specific evidence for those rows. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them, or when it validates only rows that happen to exist while missing required classes can pass. Don't accept dry-run flag checks as proof that live verdict logic enforces bounded miss, redaction, metric, artifact, or workload-class requirements.
+- Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do map every named live evidence field and equality relation (for example `cached_tokens`, `prompt_tokens`, `timings.cache_n`, hit deltas, metric rows, artifact counts) to a parser, assertion, and report row. Do require presence/minimum counts for every design-required workload class before PASS/PASS-candidate, then require the class-specific evidence for those rows. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them, or when it validates only rows that happen to exist while missing required classes can pass. Don't accept comments, README text, dry-run flag checks, or weaker proxy predicates as proof that live verdict logic enforces bounded miss, redaction, metric, artifact, token-reporting, or workload-class requirements.
 
 
 ## Improvement: Parallel decision IDs across design and tracker
@@ -1562,6 +1562,16 @@ Action:
 
 - Do run Select-String or Get-Content with line offsets to confirm the cited lines contain the claimed code. Do not propagate the Developer's line numbers verbatim if they are off; cite the actual lines and note the discrepancy in a non-blocking observation. Do treat line-number drift as a useful signal: if a line-number is off by tens of lines, the Developer's analysis may be pointing at the wrong code path. Don't accept any cited line number without byte-level verification, even when the broader claim is correct.
 
+## Improvement: Script evidence claims need endpoint schema checks
+
+Condition:
+
+- Re-reviewing a test-plan or QA correction where a script claims binding evidence through server HTTP endpoints such as `/apply-template`, `/tokenize`, `/metrics`, or OpenAI-compatible response fields
+
+Action:
+
+- Do verify the script's request bodies, response field names, and metric family names against live server docs, unit tests, or source before closing the finding. Don't accept plan text alone when a typo or schema mismatch would make QA evidence fail for harness reasons instead of product behavior.
+
 ## Improvement: Touched reusable docs must not keep stale metric contracts
 
 Condition:
@@ -1652,6 +1662,26 @@ Action:
 
 - Do verify the named gate docs, parent entry handoff, line counts, byte hygiene, `git diff --check`, and dirty status locally before final. Do close the completed subagent before stopping. Don't rely only on the subagent summary when repo state may have changed concurrently.
 
+## Improvement: Plan-review reports must advance durable navigation
+
+Condition:
+
+- Authoring an implementation-plan review report where the review verdict changes the current stage handoff state
+
+Action:
+
+- Do update the implementation entry status, document-index summary, and stage-tracker row in the same pass as the review report, even if the user names only the report as the primary deliverable. Do keep the review report itself as the single new review part, and use terse parent/index/tracker edits only for navigation and gate state. Don't leave `implementation-plan candidate` or `next owner: implementation-plan review` wording after a PASS review.
+
+## Improvement: Intake-only stage opening with chat-only reserved numbering
+
+Condition:
+
+- User asks for durable stage-opening documentation only, and a prior stage number exists only as a chat reservation or candidate without durable docs
+
+Action:
+
+- Do verify the index, tracker, and manager-input directory for durable evidence before assigning the new stage number. Do record the skipped/reserved number as chat-only in both the intake brief and tracker note. Don't create a skipped stage row, design doc, or implementation artifact unless durable evidence or the user explicitly requires it.
+
 ## Improvement: No-edit review still needs explicit gate basis
 
 Condition:
@@ -1691,3 +1721,33 @@ Condition:
 Action:
 
 - Do inspect both `git diff --cached -- <paths>` and `git diff -- <paths>` for every reviewed source/test path, then read the current file around the final behavior. Don't judge the implementation from only the unstaged diff or only the staged merge resolution.
+
+## Improvement: Open design-review decisions are blockers
+
+Condition:
+
+- Reviewing a stage design candidate that says a behavior is allowed only if design review accepts it, or leaves an open question that changes runtime behavior, route eligibility, metrics, or public reporting.
+
+Action:
+
+- Do treat the unresolved decision as a blocking design finding. Require the design itself to choose the policy, scope it out explicitly, or add concrete validation and tests before PASS. Don't let Developer inherit a choice hidden behind "design review accepts" or an unresolved open question.
+
+## Improvement: Mid-session scope correction updates all durable navigation
+
+Condition:
+
+- User changes stage scope after design authoring has started, especially adding a second fix item to an existing stage design session
+
+Action:
+
+- Do update the stage entry doc, part-file scope, document-index row, and stage-tracker row in one pass so all durable navigation names the revised scope. Do re-run line count, ASCII/CR/BOM, tracker column-count, tracked `git diff --check`, and no-index whitespace checks for new docs before final. Don't leave the new scope only in one part file or chat handoff.
+
+## Improvement: Hard-coded test summary counts need call-site verification
+
+Condition:
+
+- Reviewing tests where a binary prints a hard-coded total test count after new test calls were added
+
+Action:
+
+- Do count actual `test_*();` calls in `main()` and compare to the printed footer before deciding gate impact. Treat a stale footer as non-blocking when real test execution passes and product behavior is unaffected, but record it as a cleanup item when the count is misleading.

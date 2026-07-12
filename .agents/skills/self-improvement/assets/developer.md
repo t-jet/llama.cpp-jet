@@ -95,11 +95,11 @@ Action:
 
 Condition:
 
-- When changing code or durable planning documents in a worktree that already has uncommitted changes
+- When changing code or durable planning documents in a worktree that already has uncommitted changes, especially tracked index/log files that already contain prior stage rows or untracked stage documents
 
 Action:
 
-- Do capture the pre-existing dirty state before edits; when the relevant files already have large unrelated diffs, identify the current task's changed paths and behavior with focused searches or line anchors, and distinguish those changes from existing user or prior-agent work in the handoff.
+- Do capture the pre-existing dirty state before edits; when the relevant files already have large unrelated diffs, identify the current task's changed paths and behavior with focused searches or line anchors, and distinguish those changes from existing user or prior-agent work in the handoff. If `git diff` on `document-index.md` or an implementation log includes pre-existing stage entries, state which exact row or paragraph this session added instead of implying ownership of the whole diff.
 
 
 ## Improvement: Verify untracked documentation edits
@@ -111,7 +111,8 @@ Condition:
 Action:
 
 - Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. If the hygiene note itself is edited after measurement, rerun the line-count and whitespace checks and record the final values, not the earlier draft values.
-- Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. When the user explicitly requires `git diff --check` on a new untracked file, run `git add -N <path>` first so the diff check includes the file without staging its content. Don't rely on plain `git diff`, because it does not show untracked file content.
+- Do include `git status --short` in the handoff evidence for untracked documentation, because `git diff --name-only` and `git diff --check` omit untracked files unless intent-to-add is used. Treat status output as the authoritative changed-path source for new docs when staging is not authorized.
+- Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. When the user explicitly requires `git diff --check` on a new untracked file, run `git add -N <path>` first so the diff check includes the file without staging its content, then clear the intent-to-add with `git reset -q -- <path>` before final status if the task did not authorize staging. Don't rely on plain `git diff`, because it does not show untracked file content.
 - Use `(Get-Content -LiteralPath $path).Count` for the logical line count and compare it to the LF byte count on LF-only markdown. If a combined PowerShell byte/line probe prints an impossible value such as `lines=0` with nonzero LF bytes, rerun the line count directly before reporting evidence.
 -.
 
@@ -204,15 +205,25 @@ Action:
 - Do remove the fallback from the merged code to match upstream's strict check. The fallback was added by the local lineage to support a specific case (probably non-native or degraded metadata) but it makes the strict boundary check not strict. Removing the fallback from both `validate_checkpoint_descriptor_metadata` and `attach_checkpoint_payload` made the test pass. Don't try to make the test match the fallback; the test is the cycle's expected behavior and the fallback is the local artifact.
 
 
-## Improvement: Test-results review gate classification
+## Improvement: Test-results review gate classification and PASS closure proof
 
 Condition:
 
-- When reviewing QA execution reports for a staged gate with FAIL, SKIP, BLOCKED, or misleading runner output
+- When reviewing QA execution reports for a staged gate, including FAIL, SKIP,
+  BLOCKED, misleading runner output, or a PASS report used for closure after a
+  fix loop
 
 Action:
 
-- Do classify each non-pass item as product bug, QA harness gap, environment/configuration limitation, design/test-plan mismatch, or acceptable deferred coverage; for model-backed rows, verify that the run created the required precondition metrics or logs before calling it a product bug, and update the stage implementation status with the exact next gate action.
+- Do classify each non-pass item as product bug, QA harness gap,
+  environment/configuration limitation, design/test-plan mismatch, or acceptable
+  deferred coverage; for PASS closure reviews, verify freshness against the
+  last fix/review gate, required PASS/FAIL/BLOCKED counts, cited artifact
+  existence, and raw artifact values for each binding metric before saying no
+  product bug or execution blocker remains. For model-backed rows, verify that
+  the run created the required precondition metrics or logs before calling it a
+  product bug, and update the stage implementation status with the exact next
+  gate action.
 
 
 ## Improvement: Cross-reference same-day QA follow-up sessions
@@ -1354,6 +1365,16 @@ Action:
 
 - Compute whether the workload can retain an entry long enough for a duplicate request before classifying the result as product failure. Estimate hot-cache entry capacity, admission rate, predicted retention time, and measured duplicate interval. If duplicates arrive after predicted eviction, classify as workload or budget mismatch rather than a cache restore regression.
 
+## Improvement: Live prefix-restore failures need rendered-token prefix proof
+
+Condition:
+
+- When reviewing a live chat prefix-restore QA failure where `cached_tokens` and hit metrics are zero, but the request pair includes generated or synthetic assistant turns
+
+Action:
+
+- Do inspect raw requests plus rendered template/tokenization artifacts before assigning a product restore bug. Require machine evidence that the first rendered prompt tokens are a strict prefix of the second request tokens, or that the selected checkpoint-safe prefix tokens match. If the driver inserts synthetic assistant text or omits the actual prior assistant output so strict-prefix proof is absent, classify the first action as QA workload/script correction with focused retest; escalate to product only after a corrected strict-prefix workload still fails.
+
 ## Improvement: Incomplete build trees need explicit fallback evidence
 
 Condition:
@@ -1483,3 +1504,41 @@ Action:
   direct path read fails. Check both dot-prefixed and non-dot project-root
   variants before declaring the artifact missing, and record the path actually
   read in the review evidence.
+
+## Improvement: Verify working-tree code against review verdict before assuming rework
+
+Condition:
+
+- When a REWORK or BLOCKING review verdict cites code behavior with line anchors
+  from a prior session, and the same uncommitted diff may already contain a fix
+  applied after the review snapshot
+
+Action:
+
+- Do read the live working-tree code at the cited anchors (treating the review's
+  line numbers as hints) before assuming the production fix is missing. Inspect
+  the uncommitted diff with `git diff -w` to separate real semantic changes from
+  CRLF/whitespace noise, and confirm whether the fix the review requires is
+  already present. When it is present, focus the session on what the review calls
+  open (missing tests, evidence, doc updates) rather than re-applying code. Do
+  record in the evidence which parts were already in the tree and which the
+  session added, so the re-review can trace every claimed correction to a
+  concrete change.
+
+## Improvement: Do not parallel-build overlapping MSBuild targets
+
+Condition:
+
+- When verifying Windows CMake/MSBuild targets that share source objects or
+  project dependencies, such as `test-cache-controller` and `llama-server`
+  both compiling `server-cache-hybrid.cpp`
+
+Action:
+
+- Do run overlapping build targets serially, or in one `cmake --build`
+  invocation when that target combination is supported. Don't launch parallel
+  `cmake --build` processes for targets that can compile the same object file;
+  MSBuild can fail with `Cannot open compiler generated file ... .obj:
+  Permission denied` even when the code is correct. If it happens, check for
+  leftover build workers, rerun the failed target serially, and record the first
+  failure as build-process contention, not product evidence.

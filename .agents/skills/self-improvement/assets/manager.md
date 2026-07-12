@@ -141,13 +141,13 @@ Action:
 - Don't treat error as subagent failure. Re-delegate to fresh subagent session with tighter prompt naming explicit return-message cap (e.g. "MAX 500 words" or "under 600 words") and listing exact fields return must include in that order. Shorten source-document list to essential 4-6 files and explicitly tell agent to skip reading large source files unless absolutely required. Keep work instructions specific (exact commands, exact paths, exact commit SHAs) so subagent can execute without inventing structure. Don't ask subagent to summarize files it has not read. When the delegated task is to review or read code in a large file (>= 1000 lines, e.g. server-context.cpp at 5667 lines), do NOT inline the file content or a long diff in the prompt; instead instruct the subagent to run `git diff <files>` or `git show <sha>:<path>` itself so the prompt stays small and the subagent's context does not overflow before it can produce a return. A prompt that includes a 100+ line inline diff is itself a likely cause of the "Response too long" error on the next delegation.
 
 
-## Improvement: stop gated workflow on subagent usage-limit failure
+## Improvement: re-delegate same subagent on usage-limit per user directive
 
 Condition:
-- Required fresh subagent delegation fails before producing a gate artifact because `codex exec` returns a usage-limit or credit-limit error with a retry time
+- Required fresh subagent delegation fails before producing a gate artifact because `codex exec` OR the `runSubagent` tool returns a usage-limit, credit-limit, or rate-limit error (e.g. "Usage limit reached for 5 hour", "Rate limit exceeded") with or without a retry time
 
 Action:
-- Don't perform the delegated Architect, Developer, or QA gate yourself. Record the active gate, missing artifact, exact usage-limit retry time, and next owner in the final response. Verify no child subagent process remains running and stop only the timed-out delegated child if needed before ending.
+- Per explicit user directive, ALWAYS re-delegate the same task to the same subagent when a usage-limit error occurs; do not abandon the gate, do not switch owners, do not move to a lower-scope workaround, and do not perform the delegated work yourself. Record the error and the attempt count. Keep re-delegating on each usage-limit error until the subagent succeeds. If a retry succeeds, proceed normally; if it fails again, report the repeat and the retry time, then await next user turn to retry once more. The Manager still authors no delegated artifacts.
 
 
 ## Improvement: verify merge commit shape before accepting merge claims
@@ -629,7 +629,7 @@ Condition:
 
 Action:
 
-- Do delegate Developer, Architect, and QA work to matching subagents. Keep local Manager work to sequencing, gate decisions, tracker/index updates, and user status. Do not implement code fixes, run QA evidence, or perform Developer review as Manager unless subagents are unavailable or the user explicitly changes the role boundary.
+- Do delegate Developer, Architect, and QA work to matching subagents. Keep local Manager work to sequencing, gate decisions, disk verification, and user status. If direct Manager doc edits are disallowed but stage-opening docs are safe to update, delegate the bounded intake/index/tracker edit to Architect and verify the artifacts from disk before deciding the gate. Do not implement code fixes, run QA evidence, author delegated design/implementation/test deliverables, or perform Developer review as Manager unless subagents are unavailable or the user explicitly changes the role boundary.
 
 
 ## Improvement: accept evidence-based reclassification when downstream reviewer proves upstream verdict rule was heuristic, not a hard contract
@@ -677,7 +677,7 @@ Condition:
 - Resuming Manager workflow and requested gate decision or routing already exists in linked durable docs, with parent entry docs and document-index updated.
 
 Action:
-- Do verify the existing artifacts on disk, line caps, links, and consistency before deciding. Treat verified existing gate records as the current Manager decision instead of recreating or duplicating them. Report no task-doc edits when no edit was needed.
+- Do verify the existing artifacts on disk, line caps, links, tracker/index references, and consistency before deciding. Treat verified existing gate records or intake briefs as the current Manager decision instead of recreating or duplicating them. Report no task-doc edits when no edit was needed.
 
 ## Improvement: avoid dirty index intake writes
 

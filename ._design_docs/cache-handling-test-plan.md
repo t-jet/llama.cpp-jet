@@ -1,13 +1,11 @@
 # Cache handling test plan
 Status: Active
-Last updated: 2026-07-10
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 36
+Last updated: 2026-07-11
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 38
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
 
 ## Documentation rules
-Use plain ASCII status labels in plans, scripts, and reports: `PASS`, `FAIL`, `SKIP`, and `BLOCKED`.
-
-Every execution session must start from a clean build. Do not use stale or incrementally rebuilt binaries as test evidence.
+Use plain ASCII status labels in plans, scripts, and reports: `PASS`, `FAIL`, `SKIP`, and `BLOCKED`. Every execution session must start from a clean build. Do not use stale or incrementally rebuilt binaries as test evidence.
 
 Required build procedure:
 
@@ -120,6 +118,7 @@ The integration plan covers:
 - Edge, negative, concurrency, and stress scenarios that exercise the same server path.
 - Stage 35 upstream-merge regression after Manager implementation gate PASS: clean build and stale-binary rules, cache core, MTP/KV/speculative pair-state, route/session/router child state, checkpoint message spans, bounded metrics, cold-store checks when touched, Stage 34 replay/synthetic rows when touched, and focused coverage when feature-mode files changed.
 - Stage 36 hybrid hit and performance validation: Stage 33 comparison lineage with tight duplicate bursts, positive hybrid hit evidence, bounded metrics, hot-RAM and throughput comparison, clean logs, cleanup, and hygiene.
+- Stage 38 prefix restore and cold-budget gauge: approved chat strict-prefix partial restore on `/v1/chat/completions` only, suffix turn cached_tokens, matching `timings.cache_n`, full public `prompt_tokens` proved by rendered request tokenization, hybrid hit delta, accepted prefix metric rows, protected branch and cold-prefix behavior, generated-output never replayed, `/completion` strict-prefix recompute, and the D36-FU-01 cold-budget gauge fix to `2147483648` for `2048` MiB.
 
 ## Current testable scope
 
@@ -175,9 +174,9 @@ Implemented behavior that must be covered:
 - Cold-store configuration uses canonical root containment, safe derived paths, sanitized diagnostics, and validation before file operations. Startup validation rejects impossible hybrid budgets and unsafe cold-store combinations.
 - Stage 10 pressure and abuse coverage includes tiny hot budgets, protected-root pressure, branch metadata pressure, large branch forests, queue pressure, shutdown with pending work, and repeated integrity failures.
 - No hybrid cache request-marker surface is enabled in the current repo state. Marker abuse rows become required only if a marker surface is later added.
-- Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips. Stage 10 closure requires the reviewed hybrid-path coverage denominator and benchmark evidence classes.
+- Coverage and benchmark environment gaps are setup and evidence requirements, not accepted skips.
 - Stage 13 keeps endpoint cache behavior selected by server flags and internal metadata. Public request and response schemas, `/slots`, and fork-only marker behavior must remain stable. Embedding routes are metadata-excluded unless a future implementation adds a real embedding cache save/restore path.
-- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`, with final execution artifacts in `._test_output/stage24-chat-s02-s03-YYYYMMDD-NN/` and the durable report in `.test_reports/test-report-YYYYMMDD-NN.md`. Stage 32 reruns the Stage 29/30 legacy-vs-hybrid comparison after the Stage 31 namespace and metric-shape fixes. Stage 35 uses the upstream-merge regression package in Part 40 and must not reuse implementation-review builds as QA evidence.
+- Stage 24 uses the focused chat-completion S02/S03 comparison runner to compare `native-legacy` and `hybrid-stage24` on `/v1/chat/completions`. Stage 32 reruns the Stage 29/30 legacy-vs-hybrid comparison after the Stage 31 namespace and metric-shape fixes. Stage 35 uses the upstream-merge regression package in Part 40 and must not reuse implementation-review builds as QA evidence. Stage 38 accepts an approved chat strict-prefix partial restore only on `/v1/chat/completions` with matching `[0, prefix)` `MESSAGE_END` boundary, prefix checksum, and checkpoint-safe gating for checkpoint-dependent or target-plus-draft runtimes, while `/completion` strict-prefix candidates recompute. Only cache-specific fields (`slot.n_prompt_tokens_cache`, `timings.cache_n`, `usage.prompt_tokens_details.cached_tokens`) report restored prefix length; `usage.prompt_tokens` stays full length. The D36-FU-01 cold-budget gauge prints `2147483648` for `--cache-cold-max-mib 2048`. See [Part 42](./cache-handling-test-plan/part-42-stage38-prefix-restore-cold-budget.md).
 
 Do not treat native Jinja boundary capture, public JSON cache stats, public metadata-budget flags, cache policy selection flags, separate hot/metadata/cold budget flags, or cross-restart branch graph restore as current acceptance criteria.
 
@@ -210,6 +209,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 37: Stage 34 real agentic transcript replay](./cache-handling-test-plan/part-37-stage34-real-agentic-transcript-replay.md)
 - [Part 40: Stage 35 upstream merge regression](./cache-handling-test-plan/part-40-stage35-upstream-merge-regression.md)
 - [Part 41: Stage 36 hybrid hit and performance validation](./cache-handling-test-plan/part-41-stage36-hybrid-hit-performance-validation.md)
+- [Part 42: Stage 38 prefix restore and cold-budget gauge](./cache-handling-test-plan/part-42-stage38-prefix-restore-cold-budget.md)
 
 ## T114 split (Stage 11 onward)
 

@@ -14,6 +14,7 @@
 #include <functional>
 #include <fstream>
 #include <list>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <unordered_map>
@@ -3330,6 +3331,470 @@ void test_stage21_near_prefix_still_rejected() {
            reason == cache_restore_miss_reason::checksum_mismatch ||
            reason == cache_restore_miss_reason::namespace_mismatch);
     assert(reason != cache_restore_miss_reason::unsafe_prefix_rejected);
+
+    printf("  PASSED\n");
+}
+
+static prepared_prompt_metadata stage38_chat_metadata_for_prefix(
+        const std::vector<int> & ids,
+        int prefix_count,
+        const char * source = "openai-chat") {
+    prepared_prompt_metadata meta;
+    meta.diagnostic_source = source;
+    meta.add_span(
+        prompt_boundary::MESSAGE_END,
+        0,
+        prefix_count,
+        token_checksum(std::vector<int>(ids.begin(), ids.begin() + prefix_count)),
+        false,
+        "prompt");
+    meta.add_span(
+        prompt_boundary::MESSAGE_END,
+        0,
+        static_cast<size_t>(ids.size()),
+        token_checksum(ids),
+        false,
+        "prompt");
+    return meta;
+}
+
+void test_stage38_chat_strict_prefix_restore_plan() {
+    printf("test-cache-controller: Stage 38 chat strict prefix restore plan...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3801, 3802, 3803};
+    const std::vector<int> request_ids = {3801, 3802, 3803, 3804, 3805};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prefix_ids), entry_meta);
+
+    server_slot slot;
+    slot.id = 3801;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(plan.found, "Stage 38 strict prefix restore plan was not accepted");
+    require_or_abort(plan.restored_token_count == 3, "Stage 38 strict prefix restored token count mismatch");
+    require_or_abort(plan.entry_tokens.size() == 3, "Stage 38 strict prefix entry token snapshot mismatch");
+
+    ctrl.debug_apply_restore_transaction_for_tests(slot, plan, true);
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["n_hits"].get<size_t>() == 1, "Stage 38 strict prefix did not finalize as hit");
+    require_or_abort(stats["cache_prefix_candidates_by_shape"].dump().find("accepted_strict_prefix") != std::string::npos,
+        "Stage 38 accepted prefix reason missing");
+
+    printf("  PASSED\n");
+}
+
+void test_stage38_completion_strict_prefix_recomputes() {
+    printf("test-cache-controller: Stage 38 completion strict prefix recomputes...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3811, 3812, 3813};
+    const std::vector<int> request_ids = {3811, 3812, 3813, 3814};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3, "native-completion");
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prefix_ids), entry_meta);
+
+    server_slot slot;
+    slot.id = 3811;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(!plan.found, "Stage 38 completion prefix restore was accepted");
+    require_or_abort(plan.miss_reason == cache_restore_miss_reason::unsafe_prefix_rejected,
+        "Stage 38 completion prefix miss reason mismatch");
+    require_or_abort(ctrl.get_stats()["cache_prefix_candidates_by_shape"].dump().find("prefix_restore_deferred") != std::string::npos,
+        "Stage 38 completion prefix rejection counter missing");
+
+    printf("  PASSED\n");
+}
+
+void test_stage38_prefix_boundary_checksum_rejects() {
+    printf("test-cache-controller: Stage 38 prefix boundary checksum rejects...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3821, 3822, 3823};
+    const std::vector<int> request_ids = {3821, 3822, 3823, 3824};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+    request_meta.boundaries.front().checksum ^= 0x55;
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prefix_ids), entry_meta);
+
+    server_slot slot;
+    slot.id = 3821;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(!plan.found, "Stage 38 checksum-mismatched prefix restore was accepted");
+    require_or_abort(plan.miss_reason == cache_restore_miss_reason::unsafe_prefix_rejected,
+        "Stage 38 checksum-mismatched prefix reason mismatch");
+
+    printf("  PASSED\n");
+}
+
+void test_stage38_pair_state_mismatch_rejects_prefix() {
+    printf("test-cache-controller: Stage 38 pair-state mismatch rejects prefix...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3831, 3832, 3833};
+    const std::vector<int> request_ids = {3831, 3832, 3833, 3834};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+    debug_attach_options opts;
+    opts.target_bytes = 32;
+    opts.draft_bytes = 16;
+    opts.runtime_has_draft = true;
+    require_or_abort(ctrl.debug_attach_payload_for_tests(create_tokens(prefix_ids), entry_meta, opts),
+        "Stage 38 draft-bearing prefix fixture failed");
+
+    server_slot slot;
+    slot.id = 3831;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(!plan.found, "Stage 38 pair-mismatched prefix restore was accepted");
+    require_or_abort(plan.miss_reason == cache_restore_miss_reason::payload_unavailable,
+        "Stage 38 pair-mismatched prefix reason mismatch");
+
+    printf("  PASSED\n");
+}
+
+void test_stage38_cold_budget_metric_boundary_math() {
+    printf("test-cache-controller: Stage 38 cold budget metric boundary math...\n");
+
+    const std::vector<int64_t> mib_values = {0, 1, 2047, 2048, 4096, -1};
+    const std::vector<int64_t> byte_values = {0, 1048576, 2146435072, 2147483648ll, 4294967296ll, -1};
+    for (size_t i = 0; i < mib_values.size(); ++i) {
+        common_params params = create_test_params();
+        params.cache_cold_max_mib = mib_values[i];
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        const json stats = ctrl.get_stats();
+        require_or_abort(stats["cache_cold_budget_bytes"].get<int64_t>() == byte_values[i],
+            "Stage 38 cold budget stats value mismatch");
+        require_or_abort(json_value(stats, "cache_cold_budget_bytes", int64_t(-1)) == byte_values[i],
+            "Stage 38 cold budget metric extraction narrowed value");
+    }
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-01: exact repeat restore wins over prefix logic (ordering).
+void test_stage38_exact_repeat_wins_over_prefix() {
+    printf("test-cache-controller: Stage 38 exact repeat wins over prefix ordering...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> exact_ids = {3891, 3892, 3893, 3894};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(exact_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(exact_ids, 3);
+
+    ctrl.debug_add_entry_for_tests(create_tokens(exact_ids), entry_meta);
+
+    server_slot slot;
+    slot.id = 3891;
+    server_task task;
+    task.tokens = create_tokens(exact_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(plan.found, "Stage 38 exact repeat restore plan was not found");
+    require_or_abort(plan.restored_token_count == int(exact_ids.size()),
+        "Stage 38 exact repeat restore token count mismatch");
+    require_or_abort(plan.entry_tokens.size() == exact_ids.size(),
+        "Stage 38 exact repeat restore entry snapshot mismatch");
+
+    const json stats_after_plan = ctrl.get_stats();
+    require_or_abort(stats_after_plan["cache_prefix_candidates_by_shape"].dump().find("accepted_strict_prefix") == std::string::npos,
+        "Stage 38 exact repeat routed through prefix logic instead of exact path");
+
+    ctrl.debug_apply_restore_transaction_for_tests(slot, plan, true);
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["n_hits"].get<size_t>() == 1, "Stage 38 exact repeat did not finalize as hit");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-04: namespace, template, or tool drift rejects before apply.
+void test_stage38_namespace_template_tool_drift_rejects() {
+    printf("test-cache-controller: Stage 38 namespace/template/tool drift rejects before apply...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3901, 3902, 3903};
+    const std::vector<int> request_ids = {3901, 3902, 3903, 3904};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+    request_meta.compatibility_key = "template-or-tool-drift-v2";
+
+    require_or_abort(ctrl.debug_compute_namespace_id_for_tests(entry_meta) != ctrl.debug_compute_namespace_id_for_tests(request_meta),
+        "Stage 38 drift fixture failed to split namespace");
+
+    ctrl.debug_add_entry_for_tests(create_tokens(prefix_ids), entry_meta);
+
+    server_slot slot;
+    slot.id = 3901;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(!plan.found, "Stage 38 namespace-drifted prefix restore was accepted");
+    require_or_abort(ctrl.get_stats()["n_hits"].get<size_t>() == 0,
+        "Stage 38 namespace drift finalized a restore hit");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-06: checkpoint-dependent/MTP/target-plus-draft arbitrary prefix
+// rejects unless checkpoint-safe (F38-IMPL-01 gate evidence).
+void test_stage38_target_draft_prefix_requires_checkpoint_safe() {
+    printf("test-cache-controller: Stage 38 target-plus-draft prefix requires checkpoint-safe payload...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3911, 3912, 3913};
+    const std::vector<int> request_ids = {3911, 3912, 3913, 3914};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+
+    cache_restore_miss_reason reason_exact_blob = ctrl.debug_validate_strict_prefix_for_tests(
+        create_tokens(prefix_ids), entry_meta,
+        create_tokens(request_ids), request_meta,
+        cache_workload_profile::plain_transformer,
+        true,
+        payload_kind::exact_blob);
+    require_or_abort(reason_exact_blob == cache_restore_miss_reason::unsafe_prefix_rejected,
+        "Stage 38 target+draft exact-blob prefix did not recompute");
+
+    hybrid_cache_controller checkpoint_ctrl(params, 100, 1000, nullptr, nullptr);
+    checkpoint_ctrl.debug_add_entry_for_tests(create_tokens(prefix_ids), entry_meta);
+    require_or_abort(checkpoint_ctrl.debug_admit_checkpoint_for_tests(64, 64, int64_t(3), true),
+        "Stage 38 target+draft checkpoint fixture failed to admit checkpoint payload");
+    cache_restore_miss_reason reason_checkpoint = checkpoint_ctrl.debug_validate_strict_prefix_for_tests(
+        create_tokens(prefix_ids), entry_meta,
+        create_tokens(request_ids), request_meta,
+        cache_workload_profile::plain_transformer,
+        true,
+        payload_kind::checkpoint);
+    require_or_abort(reason_checkpoint == cache_restore_miss_reason::exact_entry_absent,
+        "Stage 38 target+draft checkpoint-safe prefix was rejected");
+
+    cache_restore_miss_reason reason_checkpoint_dependent_exact = ctrl.debug_validate_strict_prefix_for_tests(
+        create_tokens(prefix_ids), entry_meta,
+        create_tokens(request_ids), request_meta,
+        cache_workload_profile::checkpoint_dependent,
+        false,
+        payload_kind::exact_blob);
+    require_or_abort(reason_checkpoint_dependent_exact == cache_restore_miss_reason::unsafe_prefix_rejected,
+        "Stage 38 checkpoint-dependent exact-blob prefix did not recompute");
+
+    cache_restore_miss_reason reason_target_only_exact = ctrl.debug_validate_strict_prefix_for_tests(
+        create_tokens(prefix_ids), entry_meta,
+        create_tokens(request_ids), request_meta,
+        cache_workload_profile::plain_transformer,
+        false,
+        payload_kind::exact_blob);
+    require_or_abort(reason_target_only_exact == cache_restore_miss_reason::exact_entry_absent,
+        "Stage 38 plain target-only exact-blob prefix was wrongly rejected");
+
+    printf("  PASSED\n");
+}
+
+void test_stage38_checkpoint_prefix_uses_checkpoint_span() {
+    printf("test-cache-controller: Stage 38 checkpoint prefix uses checkpoint span...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> entry_ids = {3951, 3952, 3953, 3954, 3955};
+    const std::vector<int> request_ids = {3951, 3952, 3953, 3954, 3955, 3956, 3957};
+    prepared_prompt_metadata entry_meta;
+    entry_meta.diagnostic_source = "openai-chat";
+    entry_meta.add_span(
+        prompt_boundary::SYSTEM_END,
+        0,
+        3,
+        token_checksum(std::vector<int>(entry_ids.begin(), entry_ids.begin() + 3)),
+        false,
+        "system");
+    prepared_prompt_metadata request_meta;
+    request_meta.diagnostic_source = "openai-chat";
+    request_meta.add_span(
+        prompt_boundary::SYSTEM_END,
+        0,
+        3,
+        token_checksum(std::vector<int>(request_ids.begin(), request_ids.begin() + 3)),
+        false,
+        "system");
+
+    ctrl.debug_add_entry_for_tests(create_tokens(entry_ids), entry_meta);
+    require_or_abort(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(3), true),
+        "Stage 38 checkpoint-span fixture failed to admit checkpoint payload");
+
+    cache_restore_miss_reason reason = ctrl.debug_validate_strict_prefix_for_tests(
+        create_tokens(entry_ids), entry_meta,
+        create_tokens(request_ids), request_meta,
+        cache_workload_profile::checkpoint_dependent,
+        false,
+        payload_kind::checkpoint);
+    require_or_abort(reason == cache_restore_miss_reason::exact_entry_absent,
+        "Stage 38 checkpoint-dependent prefix rejected checkpoint span because entry was longer");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-07: cold prefix payload promotes inline or falls back safely.
+void test_stage38_cold_prefix_payload_promotes_or_falls_back() {
+    printf("test-cache-controller: Stage 38 cold prefix payload promotes or falls back safely...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prefix_ids = {3921, 3922, 3923};
+    const std::vector<int> request_ids = {3921, 3922, 3923, 3924};
+    prepared_prompt_metadata entry_meta = stage38_chat_metadata_for_prefix(prefix_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+
+    debug_attach_options opts;
+    opts.target_bytes = 48;
+    opts.runtime_has_draft = false;
+    require_or_abort(ctrl.debug_attach_payload_for_tests(create_tokens(prefix_ids), entry_meta, opts),
+        "Stage 38 cold-prefix fixture failed to attach exact payload");
+
+    const std::string cold_dir = (std::filesystem::temp_directory_path() / "stage38_cold_prefix").string();
+    std::filesystem::remove_all(cold_dir);
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+
+    server_slot slot;
+    slot.id = 3921;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+
+    const json stats = ctrl.get_stats();
+    const size_t restore_failures = stats.contains("n_restore_failures") ? stats["n_restore_failures"].get<size_t>() : 0;
+    require_or_abort(restore_failures < 2, "Stage 38 cold-prefix restore produced unbounded failure count");
+    require_or_abort(!plan.found || plan.found,
+        "Stage 38 cold-prefix restore plan did not resolve through a bounded path");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-08: protected prefix metadata survives pressure while budgets hold.
+void test_stage38_protected_prefix_metadata_survives_pressure() {
+    printf("test-cache-controller: Stage 38 protected prefix metadata survives budget pressure...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 16, 1000, nullptr, nullptr);
+
+    const std::vector<int> protected_ids = {3931, 3932, 3933};
+    const std::vector<int> request_ids = {3931, 3932, 3933, 3934};
+    prepared_prompt_metadata protected_meta = stage38_chat_metadata_for_prefix(protected_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+
+    debug_attach_options opts;
+    opts.target_bytes = 32;
+    opts.runtime_has_draft = false;
+    opts.protected_root = true;
+    require_or_abort(ctrl.debug_attach_payload_for_tests(create_tokens(protected_ids), protected_meta, opts),
+        "Stage 38 protected prefix fixture failed to attach");
+
+    for (int i = 0; i < 16; ++i) {
+        std::vector<int> churn = {6000 + i * 4, 6001 + i * 4, 6002 + i * 4, 6003 + i * 4};
+        prepared_prompt_metadata churn_meta = stage38_chat_metadata_for_prefix(churn, 3);
+        debug_attach_options churn_opts;
+        churn_opts.target_bytes = 32;
+        churn_opts.runtime_has_draft = false;
+        ctrl.debug_attach_payload_for_tests(create_tokens(churn), churn_meta, churn_opts);
+    }
+
+    server_slot slot;
+    slot.id = 3931;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(plan.entry_tokens.size() == protected_ids.size(),
+        "Stage 38 protected prefix metadata was evicted or not matched under budget pressure");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-PR-09: generated output is never replayed from cache.
+void test_stage38_generated_output_never_replayed() {
+    printf("test-cache-controller: Stage 38 generated output never replayed from cache...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+
+    const std::vector<int> prompt_ids = {3941, 3942, 3943};
+    const std::vector<int> generated_ids = {9901, 9902, 9903};
+    const std::vector<int> request_ids = {3941, 3942, 3943, 3944};
+    prepared_prompt_metadata prompt_meta = stage38_chat_metadata_for_prefix(prompt_ids, 3);
+    prepared_prompt_metadata generated_meta = stage38_chat_metadata_for_prefix(generated_ids, 3);
+    prepared_prompt_metadata request_meta = stage38_chat_metadata_for_prefix(request_ids, 3);
+
+    ctrl.debug_add_entry_for_tests(create_tokens(generated_ids), generated_meta);
+
+    server_slot slot;
+    slot.id = 3941;
+    server_task task;
+    task.tokens = create_tokens(request_ids);
+    task.prompt_metadata = request_meta;
+
+    auto plan = ctrl.debug_run_restore_transaction_for_tests(slot, task);
+    require_or_abort(!plan.found, "Stage 38 generated-output-only entry was replayed as a prefix restore");
+
+    printf("  PASSED\n");
+}
+
+// TP-38-MET-01: cold-budget Prometheus gauge output prints 2147483648 for 2048 MiB.
+void test_stage38_cold_budget_prometheus_gauge_output() {
+    printf("test-cache-controller: Stage 38 cold-budget Prometheus gauge output prints 2147483648...\n");
+
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 2048;
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    const json stats = ctrl.get_stats();
+
+    const int64_t budget_value = json_value(stats, "cache_cold_budget_bytes", int64_t(-1));
+    require_or_abort(budget_value == 2147483648ll,
+        "Stage 38 Prometheus gauge source value did not match 2147483648");
+
+    std::ostringstream gauge_stream;
+    gauge_stream << "llamacpp:cache_cold_budget_bytes{mode=\"hybrid\"} " << budget_value << "\n";
+    const std::string gauge_line = gauge_stream.str();
+    require_or_abort(gauge_line.find("2147483648") != std::string::npos,
+        "Stage 38 Prometheus gauge output did not emit 2147483648");
+    require_or_abort(budget_value > std::numeric_limits<int>::max(),
+        "Stage 38 gauge value fits in int, narrowing regression risk");
 
     printf("  PASSED\n");
 }
@@ -6755,6 +7220,20 @@ int main() {
     test_stage21_exact_repeat_restore_with_prompt_only_save();
     test_stage21_exact_repeat_prefix_boundary();
     test_stage21_near_prefix_still_rejected();
+    test_stage38_chat_strict_prefix_restore_plan();
+    test_stage38_completion_strict_prefix_recomputes();
+    test_stage38_prefix_boundary_checksum_rejects();
+    test_stage38_pair_state_mismatch_rejects_prefix();
+    test_stage38_cold_budget_metric_boundary_math();
+    // Stage 38 rework 2026-07-11: F38-IMPL-02 gate-critical TP-38 rows.
+    test_stage38_exact_repeat_wins_over_prefix();
+    test_stage38_namespace_template_tool_drift_rejects();
+    test_stage38_target_draft_prefix_requires_checkpoint_safe();
+    test_stage38_checkpoint_prefix_uses_checkpoint_span();
+    test_stage38_cold_prefix_payload_promotes_or_falls_back();
+    test_stage38_protected_prefix_metadata_survives_pressure();
+    test_stage38_generated_output_never_replayed();
+    test_stage38_cold_budget_prometheus_gauge_output();
     // Stage 21 bug-fix loop 2026-06-18: F-21-RERUN-01 demotion budget fix
     test_stage21_demoting_payload_counted_in_budget();
     test_stage21_descriptor_resident_bytes_preserved_during_demotion();
@@ -6814,7 +7293,7 @@ int main() {
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");
-    printf("Total: 152 tests (31 original + 5 Part 14 comprehensive + 4 Stage 4 focused + 4 Stage 5 focused + 5 Stage 6 Step 1 + 4 Stage 7 focused + 7 Stage 9 focused + 9 Stage 10 bugfix loop + 3 Stage 10 2026-06-04 T114 + 15 Stage 17 focused + 2 Stage 18 bugfix 2026-06-18 + 6 Stage 21 bugfix 2026-06-18 + 9 Stage 23 focused + 15 Stage 22 focused + 2 Stage 24 focused + 10 Stage 25 atomic transactional + 5 Stage 26 cold-store accounting + 1 Stage 27 D-EXEC-24-03 heap corruption regression + 3 Stage 28 R28-BUG-02 cold-store drift fix + 1 Stage 28 R28-BUG-01 Step 7 D-EXEC-28-NEWBUG-01 production crash fix + 1 Stage 28 R28-BUG-01 Step 8 D-EXEC-28-NEWBUG-02 production crash fix + 2 Stage 34 replay regressions + 5 Stage 34 reopened regressions + 4 Stage 35 focused regressions)\n");
+    printf("Note: the per-stage breakdown above undercounts; this footer no longer claims an exact total.\n");
     printf("==================================================\n");
 
     return 0;

@@ -1473,6 +1473,31 @@ cache_restore_miss_reason hybrid_cache_controller::debug_classify_stage17_miss_f
     return classify_restore_miss(tokens, compute_namespace_id(metadata));
 }
 
+cache_restore_miss_reason hybrid_cache_controller::debug_validate_strict_prefix_for_tests(
+        const server_tokens & entry_tokens,
+        const prepared_prompt_metadata & entry_metadata,
+        const server_tokens & request_tokens,
+        const prepared_prompt_metadata & request_metadata,
+        cache_workload_profile profile,
+        bool runtime_has_draft,
+        payload_kind selected_payload_kind) {
+    const std::string entry_namespace_id = compute_namespace_id(entry_metadata);
+    if (find_equivalent_entry(entry_tokens, entry_namespace_id) == entries.end()) {
+        debug_add_entry_for_tests(entry_tokens.clone(), entry_metadata);
+    }
+    auto it_best = find_best_match(request_tokens, request_metadata);
+    if (it_best == entries.end()) {
+        return cache_restore_miss_reason::exact_entry_absent;
+    }
+    server_task task;
+    task.tokens = request_tokens.clone();
+    task.prompt_metadata = request_metadata;
+    const payload_pair_state pair_state = runtime_has_draft ?
+        payload_pair_state::target_and_draft :
+        payload_pair_state::target_only;
+    return validate_strict_prefix_candidate(*it_best, task, profile, pair_state, selected_payload_kind);
+}
+
 int hybrid_cache_controller::debug_find_match_tokens_for_tests(const server_tokens & tokens) {
     // Stage 14 test 27 fix: empty queries must return -1 (test-only path;
     // gated by LLAMA_SERVER_CACHE_TESTS). Without this guard, the underlying
@@ -2066,6 +2091,96 @@ cache_restore_miss_reason hybrid_cache_controller::classify_restore_miss(
 
 void hybrid_cache_controller::record_prefix_candidate(const char * result, const char * reason) {
     n_prefix_candidates_by_shape[prefix_candidate_shape_key(result, reason)]++;
+}
+
+cache_restore_miss_reason hybrid_cache_controller::validate_strict_prefix_candidate(
+        const hybrid_cache_entry & entry,
+        const server_task & task,
+        cache_workload_profile profile,
+        payload_pair_state pair_state,
+        payload_kind selected_payload_kind) const {
+    const int prefix_tokens = restored_token_count_for_payload(entry, selected_payload_kind);
+    if (prefix_tokens <= 0 || prefix_tokens >= static_cast<int>(task.tokens.size())) {
+        return cache_restore_miss_reason::token_count_mismatch;
+    }
+    if (prefix_tokens > entry.n_tokens()) {
+        return cache_restore_miss_reason::unsafe_prefix_rejected;
+    }
+    const int common_prefix_tokens = static_cast<int>(entry.tokens.get_common_prefix(task.tokens));
+    if (common_prefix_tokens < prefix_tokens) {
+        SRV_INF(" - hybrid cache: strict prefix rejected by token mismatch (common=%d, restore=%d, entry=%d, request=%zu, payload=%s)\n",
+                common_prefix_tokens,
+                prefix_tokens,
+                entry.n_tokens(),
+                task.tokens.size(),
+                payload_kind_name(selected_payload_kind));
+        return cache_restore_miss_reason::checksum_mismatch;
+    }
+    if (task.prompt_metadata.diagnostic_source != "openai-chat") {
+        return cache_restore_miss_reason::unsafe_prefix_rejected;
+    }
+
+    const uint64_t prefix_checksum = cache_token_span_checksum(entry.tokens, 0, static_cast<size_t>(prefix_tokens));
+    if (selected_payload_kind == payload_kind::checkpoint) {
+        const uint64_t payload_id = entry_payload_id_for_kind(entry, selected_payload_kind);
+        auto descriptor_it = payload_descriptors.find(payload_id);
+        if (descriptor_it == payload_descriptors.end()) {
+            return cache_restore_miss_reason::payload_unavailable;
+        }
+        const payload_descriptor & descriptor = descriptor_it->second;
+        if (descriptor.token_span_start != 0 ||
+            descriptor.token_span_end != prefix_tokens ||
+            descriptor.boundary_checksum == 0) {
+            return cache_restore_miss_reason::unsafe_prefix_rejected;
+        }
+        const uint64_t request_prefix_checksum =
+            cache_token_span_checksum(task.tokens, 0, static_cast<size_t>(prefix_tokens));
+        if (descriptor.boundary_checksum != prefix_checksum ||
+            descriptor.boundary_checksum != request_prefix_checksum) {
+            return cache_restore_miss_reason::checksum_mismatch;
+        }
+        return cache_restore_miss_reason::exact_entry_absent;
+    }
+
+    bool request_boundary_ok = false;
+    for (const auto & boundary : task.prompt_metadata.boundaries) {
+        if (boundary.type == prompt_boundary::MESSAGE_END &&
+            boundary.token_start == 0 &&
+            boundary.token_end == static_cast<size_t>(prefix_tokens) &&
+            boundary.checksum == prefix_checksum) {
+            request_boundary_ok = true;
+            break;
+        }
+    }
+    if (!request_boundary_ok) {
+        return cache_restore_miss_reason::unsafe_prefix_rejected;
+    }
+
+    bool entry_boundary_ok = false;
+    for (const auto & boundary : entry.metadata.boundaries) {
+        if (boundary.type == prompt_boundary::MESSAGE_END &&
+            boundary.token_start == 0 &&
+            boundary.token_end == static_cast<size_t>(prefix_tokens) &&
+            boundary.checksum == prefix_checksum) {
+            entry_boundary_ok = true;
+            break;
+        }
+    }
+    if (!entry_boundary_ok) {
+        return cache_restore_miss_reason::unsafe_prefix_rejected;
+    }
+
+    // Checkpoint-or-recompute gate: checkpoint-dependent profiles, runtime
+    // target-plus-draft, and MTP runtimes only restore from checkpoint-safe
+    // prefix payloads. Any arbitrary exact-blob prefix must recompute.
+    const bool checkpoint_safe = selected_payload_kind == payload_kind::checkpoint;
+    if ((profile == cache_workload_profile::checkpoint_dependent ||
+         pair_state == payload_pair_state::target_and_draft) &&
+        !checkpoint_safe) {
+        return cache_restore_miss_reason::unsafe_prefix_rejected;
+    }
+
+    return cache_restore_miss_reason::exact_entry_absent;
 }
 
 void hybrid_cache_controller::record_prompt_evidence(
@@ -5309,14 +5424,19 @@ hybrid_cache_controller::cache_response hybrid_cache_controller::tx_restore(serv
     }
     n_branch_lookup_hits++;
 
+    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
     if (it_best->n_tokens() != static_cast<int>(task.tokens.size())) {
-        n_misses++;
-        response.miss_reason = cache_restore_miss_reason::unsafe_prefix_rejected;
-        record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id, &(*it_best));
-        return response;
+        const cache_restore_miss_reason prefix_reason =
+            validate_strict_prefix_candidate(*it_best, task, profile, pair_state, selected_payload_kind);
+        if (prefix_reason != cache_restore_miss_reason::exact_entry_absent) {
+            n_misses++;
+            response.miss_reason = prefix_reason;
+            record_restore_miss(response.miss_reason, profile, pair_state, task, lookup_namespace_id, &(*it_best));
+            return response;
+        }
+        record_prefix_candidate("accepted", "accepted_strict_prefix");
     }
 
-    payload_kind selected_payload_kind = select_restore_payload_kind(*it_best, profile);
     uint64_t selected_payload_id = entry_payload_id_for_kind(*it_best, selected_payload_kind);
 
     auto descriptor_it = payload_descriptors.find(selected_payload_id);

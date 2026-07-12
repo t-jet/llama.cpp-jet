@@ -228,10 +228,10 @@ Action:
 ## Improvement: classify available fixture no-evidence runs
 
 Condition:
-- Suitable model-backed fixture is available and public probe starts successfully but expected cache-specific counters, timings, or checkpoint rows remain at zero or placeholder values
+- Suitable model-backed fixture is available and public probe starts successfully but expected cache-specific counters, timings, checkpoint rows, or strict-prefix acceptance rows remain at zero or placeholder values
 
 Action:
-- Classify fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP. Preserve request, response, metrics, and startup artifacts. Separately note any focused substitute evidence that still passed.
+- Classify fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP. Preserve request, response, metrics, and startup artifacts. Separately note any focused substitute evidence that still passed, but do not let focused PASS evidence override the required live model-backed acceptance row.
 
 
 ## Improvement: prove public checkpoint admission before restore claims
@@ -1181,7 +1181,7 @@ Condition:
 - Running QA hygiene or link-check validation as inline PowerShell against docs
 
 Action:
-- Do use explicit loops, temporary variables, and the `-f` format operator for path/line output. Don't embed statement-form `if` inside arithmetic expressions, and don't interpolate variables immediately followed by `:` in double-quoted strings; both can turn validation into parser noise and force a rerun before evidence is usable.
+- Do use explicit loops, temporary variables, and the `-f` format operator for path/line output. Assign `foreach` output to a variable before piping to `Format-Table`, `Where-Object`, or `Measure-Object`; don't place a pipeline immediately after a closing script block when the parser can treat it as an empty pipe element. Don't embed statement-form `if` inside arithmetic expressions, and don't interpolate variables immediately followed by `:` in double-quoted strings; these patterns can turn validation into parser noise and force a rerun before evidence is usable.
 
 ## Improvement: classify required coverage target compile failures as failures
 
@@ -1198,3 +1198,19 @@ Condition:
 
 Action:
 - Do verify the setup logs predate the final run, the binaries are fresh before traffic starts, and the final run used the same build tree and HEAD. Cite setup logs and final run artifacts separately. Do not reject the final run solely because controller or ctest logs have the earlier retry suffix, but record the suffix split and any transient setup rerun in the report.
+
+## Improvement: prefer direct server introspection over weakening prompt-token evidence
+
+Condition:
+- A test-plan correction finds that live script evidence proves only `prompt_tokens > cached_tokens` while the design or plan requires exact full rendered request token length
+
+Action:
+- Do search the server's public diagnostic/helper endpoints and existing harnesses for a direct proof path before narrowing the plan. For chat prompts, check whether `/apply-template` can render the request and `/tokenize` can count the rendered prompt with matching tokenization flags. If such endpoints exist, make the script assert `usage.prompt_tokens == rendered_request_tokens` and still assert cache-specific fields such as `timings.cache_n == usage.prompt_tokens_details.cached_tokens`; only narrow plan wording when no direct proof path exists.
+
+## Improvement: isolate prefix proof from reasoning-template history rewrites
+
+Condition:
+- A live chat prefix-restore QA workload must prove rendered-token prefix compatibility, but the selected model's chat template rewrites, strips, or reclassifies assistant history through reasoning/thinking tags so replaying the API response cannot render as a strict token prefix
+
+Action:
+- Do first inspect `/apply-template` outputs and token arrays for turn1, assistant replay, and turn2 to find the exact mismatch. If the mismatch is template history rewriting rather than cache behavior, use a run-local stable chat template for the live row and save that template as an artifact. Keep the same model, prove prefix compatibility with `/apply-template` plus `/tokenize`, and then classify cache fields, hit delta, and prefix metrics from that corrected workload. Do not classify a product bug until the strict prefix proof passes.

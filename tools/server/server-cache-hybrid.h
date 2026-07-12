@@ -491,6 +491,20 @@ public:
         const server_tokens & tokens,
         const prepared_prompt_metadata & metadata) const;
 
+    // Stage 38 F38-IMPL-01: test-only hook to drive the private prefix
+    // validator with a forced pair_state when the test controller has no
+    // live draft context (ctx_dft is nullptr). Adds the entry to the cache
+    // if not present, then returns the validator verdict. runtime_has_draft
+    // controls the pair_state passed in.
+    cache_restore_miss_reason debug_validate_strict_prefix_for_tests(
+        const server_tokens & entry_tokens,
+        const prepared_prompt_metadata & entry_metadata,
+        const server_tokens & request_tokens,
+        const prepared_prompt_metadata & request_metadata,
+        cache_workload_profile profile,
+        bool runtime_has_draft,
+        payload_kind selected_payload_kind);
+
     // Phase 6 Step 6: Demotion protocol test hooks
     void debug_set_cold_store_for_tests(const std::string & path) {
         cold_store.configure(path, COLD_STORE_FORMAT_VERSION_1);
@@ -1021,6 +1035,12 @@ private:
         const std::string & lookup_namespace_id,
         const hybrid_cache_entry * prefix_candidate = nullptr);
     void record_prefix_candidate(const char * result, const char * reason);
+    cache_restore_miss_reason validate_strict_prefix_candidate(
+        const hybrid_cache_entry & entry,
+        const server_task & task,
+        cache_workload_profile profile,
+        payload_pair_state pair_state,
+        payload_kind selected_payload_kind) const;
     bool cold_budget_allows_write(size_t bytes) const;
     bool cold_budget_make_room(size_t bytes, const payload_descriptor & descriptor);
     size_t calculate_demoting_payload_bytes() const;
