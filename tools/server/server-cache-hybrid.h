@@ -9,9 +9,11 @@
 #include "server-task.h"
 
 #include <chrono>
+#include <array>
 #include <list>
 #include <map>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -95,6 +97,18 @@ enum class cache_restore_miss_reason {
     unsafe_prefix_rejected,
     payload_unavailable,
     unsupported_route_or_profile,
+};
+
+enum class cache_two_layer_mode : uint8_t { hybrid };
+enum class cache_two_layer_result : uint8_t { retained_cold, evicted, bypassed, retained_hot };
+enum class cache_two_layer_reason : uint8_t {
+    cold_room, cold_room_made, both_filled, oversized_both, cold_disabled,
+    io_error, integrity_error, size_overflow,
+};
+enum class cache_cold_transaction_result : uint8_t { commit, rollback, recovery };
+enum class cache_cold_transaction_reason : uint8_t {
+    none, stage_write, stage_validate, victim_quarantine, incoming_publish,
+    apply, commit_marker, cleanup, manifest,
 };
 
 // Residency state transition table (Stage 6):
@@ -202,6 +216,88 @@ struct hot_payload_record {
     std::vector<uint8_t> target;
     std::vector<uint8_t> draft;
 };
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+struct stage39_live_pressure_inventory_row {
+    uint64_t payload_id = 0;
+    uint64_t owner_entry_id = 0;
+    std::string payload_kind;
+    std::string pair_state;
+    std::string residency;
+    bool protected_root = false;
+    uint64_t slot_reference_count = 0;
+    uint64_t resident_bytes = 0;
+    bool has_serialized_cold_bytes = false;
+    uint64_t serialized_cold_bytes = 0;
+    uint64_t hot_order = 0;
+    uint64_t cold_rank = 0;
+    bool eligible = false;
+};
+
+struct stage39_live_pressure_cold_set {
+    uint64_t incoming_payload_id = 0;
+    uint64_t incoming_owner_entry_id = 0;
+    std::vector<stage39_live_pressure_inventory_row> candidates;
+};
+
+struct stage39_live_pressure_hot_order {
+    uint64_t owner_entry_id = 0;
+    uint64_t desired_hot_order = 0;
+};
+
+struct stage39_live_pressure_cold_rank {
+    uint64_t payload_id = 0;
+    uint64_t desired_cold_rank = 0;
+};
+
+struct stage39_prepared_proof_binding {
+    std::string workload_role;
+    uint64_t request_number = 0;
+    uint64_t pressure_step = 0;
+    uint64_t payload_id = 0;
+    uint64_t owner_entry_id = 0;
+    std::string payload_kind;
+    std::string pair_state;
+    bool runtime_has_draft = false;
+    uint64_t target_size_bytes = 0;
+    uint64_t draft_size_bytes = 0;
+    uint64_t target_checksum = 0;
+    uint64_t draft_checksum = 0;
+};
+
+struct stage39_live_pressure_request {
+    std::string operation;
+    std::string scenario;
+    size_t hot_budget_bytes = 0;
+    uint64_t cold_budget_bytes = 0;
+    uint64_t snapshot_generation = 0;
+    std::string snapshot_token;
+    uint64_t incoming_payload_id = 0;
+    uint64_t incoming_owner_entry_id = 0;
+    std::vector<stage39_live_pressure_inventory_row> hot_candidates;
+    std::vector<stage39_live_pressure_cold_set> cold_sets;
+    std::vector<stage39_live_pressure_hot_order> desired_hot_orders;
+    std::vector<stage39_live_pressure_cold_rank> desired_cold_ranks;
+    std::string tp39_03_cold_owner_setup;
+    std::string tp39_03_setup;
+    std::string run_id;
+    std::string process_identity;
+    std::string proof_token;
+    std::string test_session_id;
+    std::string terminal_hmac;
+    std::string fault;
+    std::vector<uint64_t> proof_payload_ids;
+    std::vector<stage39_prepared_proof_binding> prepared_bindings;
+};
+
+struct stage39_live_pressure_result {
+    bool success = false;
+    bool consumed = false;
+    bool pressure_started = false;
+    std::string error;
+    json body;
+};
+#endif
 
 // Phase 1 hybrid cache entry with LRU tracking
 struct hybrid_cache_entry {
@@ -347,7 +443,7 @@ public:
     // runs the cold-store write inline on the calling thread under the
     // cache-state mutex and applies the success/failure path immediately,
     // so the descriptor residency transitions in one call.
-    bool tx_demote_payload(uint64_t payload_id);
+    bool tx_demote_payload(uint64_t payload_id, bool defer_final_decision = false);
     bool tx_promote_payload(uint64_t payload_id);
     // Stage 25: transactional eviction. Wraps evict_entry_by_id with the
     // lock guard. Preserves the over-hot-budget guard from D-EXEC-24-01
@@ -357,6 +453,20 @@ public:
     // branch-metadata prune, and token-limit loop run inside one
     // critical section. No more completion drain.
     void tx_update();
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    stage39_live_pressure_result stage39_live_pressure_control(
+        const stage39_live_pressure_request & request);
+    void debug_fail_stage39_setup_after_first_write_for_tests() {
+        stage39_fail_setup_after_first_write_for_tests_ = true;
+    }
+    void debug_fail_stage39_owner_setup_write_for_tests(size_t position) {
+        stage39_fail_owner_setup_write_for_tests_ = position;
+    }
+    void debug_stage39_forbidden_effect_probe_for_tests(const std::string & effect) {
+        stage39_forbidden_effect_probe_ = effect;
+    }
+#endif
 
     // Stage 25: cache_response holds the restore plan computed under lock.
     // tx_restore returns it; the slot thread applies target/draft bytes
@@ -508,6 +618,7 @@ public:
     // Phase 6 Step 6: Demotion protocol test hooks
     void debug_set_cold_store_for_tests(const std::string & path) {
         cold_store.configure(path, COLD_STORE_FORMAT_VERSION_1);
+        io_worker.set_cold_store(&cold_store);
     }
     // Stage 28 R28-BUG-04 Phase C: debug_start_io_worker_for_tests,
     // debug_stop_io_worker_for_tests, and
@@ -560,6 +671,39 @@ public:
 
     // Step 8: Test accessors for cold_store and io_worker
     server_cache_store_cold & debug_cold_store_for_tests() { return cold_store; }
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    uint64_t debug_cache_generation_for_tests() const { return cache_generation_; }
+    uint64_t debug_recovery_generation_for_tests() const { return stage39_recovery_generation_for_tests_; }
+    uint64_t debug_recovery_cleanup_generation_for_tests() const { return stage39_recovery_cleanup_generation_for_tests_; }
+    void debug_stage39_prepared_fault_for_tests(const std::string & fault) { stage39_requested_fault_ = fault; }
+#endif
+    void debug_set_cold_budget_bytes_for_tests(uint64_t bytes) {
+        std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+        cold_budget_bytes = static_cast<int64_t>(bytes);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
+    }
+    void debug_set_cold_accounting_for_tests(size_t payload, size_t quarantine) {
+        std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+        n_cold_payload_bytes = payload;
+        n_cold_quarantine_bytes_ = quarantine;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
+    }
+    bool debug_demote_first_payload_for_tests() {
+        for (const auto & item : payload_descriptors) {
+            if (item.second.residency == payload_residency_state::hot) return tx_demote_payload(item.first);
+        }
+        return false;
+    }
+    bool debug_record_two_layer_decision_for_tests(cache_two_layer_mode mode, cache_two_layer_result result, cache_two_layer_reason reason) {
+        return record_two_layer_decision(mode, result, reason, 0);
+    }
+    bool debug_record_cold_transaction_for_tests(cache_two_layer_mode mode, cache_cold_transaction_result result, cache_cold_transaction_reason reason) {
+        return record_cold_transaction(mode, result, reason, 0);
+    }
     server_cache_io_worker & debug_io_worker_for_tests() { return io_worker; }
 
     // Step 11: Test hooks for residency state query and promotion failure injection
@@ -725,6 +869,65 @@ private:
     // worker retirement per OQ-25-02).
     std::recursive_mutex cache_state_mutex_;
 
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    struct stage39_prepared_record {
+        stage39_prepared_proof_binding binding;
+        uint64_t expected_generation = 0;
+        uint64_t observed_generation = 0;
+        uint64_t serialized_bytes = 0;
+        uint64_t staging_file_bytes = 0;
+    };
+
+    struct stage39_prepared_session {
+        bool active = false;
+        bool terminal = false;
+        bool success = false;
+        bool checkpoint_attempted = false;
+        bool checkpoint_prepared = false;
+        bool common_sync_observed = false;
+        size_t common_sync_count = 0;
+        uint64_t discovery_generation = 0;
+        uint64_t post_setup_generation = 0;
+        uint64_t expected_step = 0;
+        uint64_t expected_generation = 0;
+        uint64_t exact_return_generation = 0;
+        uint64_t common_sync_generation = 0;
+        uint64_t final_generation = 0;
+        std::string process_identity;
+        std::string test_session_id;
+        std::string run_id;
+        std::string fault;
+        std::string error;
+        std::vector<std::string> mismatch_flags;
+        std::vector<stage39_prepared_proof_binding> expectations;
+        std::vector<stage39_prepared_record> records;
+        json pre_apply_state;
+        json terminal_body;
+        std::string terminal_hmac;
+    };
+
+    bool stage39_live_pressure_consumed_ = false;
+    bool stage39_fail_setup_after_first_write_for_tests_ = false;
+    size_t stage39_fail_owner_setup_write_for_tests_ = 0;
+    uint64_t cache_generation_ = 1;
+    uint64_t stage39_recovery_generation_for_tests_ = 0;
+    uint64_t stage39_recovery_cleanup_generation_for_tests_ = 0;
+    size_t stage39_checkpoint_classification_count_ = 0;
+    size_t stage39_checkpoint_publish_count_ = 0;
+    size_t stage39_checkpoint_commit_count_ = 0;
+    size_t stage39_checkpoint_cold_file_event_count_ = 0;
+    size_t stage39_checkpoint_descriptor_mutation_count_ = 0;
+    size_t stage39_checkpoint_link_mutation_count_ = 0;
+    size_t stage39_explicit_generation_advance_count_ = 0;
+    size_t stage39_later_kind_work_count_ = 0;
+    size_t stage39_post_abort_pressure_count_ = 0;
+    size_t stage39_post_abort_diagnostic_count_ = 0;
+    std::array<uint8_t, 32> stage39_snapshot_nonce_{};
+    stage39_prepared_session stage39_prepared_session_;
+    std::string stage39_requested_fault_;
+    std::string stage39_forbidden_effect_probe_;
+#endif
+
     // Stage 25: reentrancy counter for the server-context thread. Slot
     // threads use server_slot::cache_tx_depth (defined where server_slot
     // lives). The counter is incremented at lock_guard entry and
@@ -807,7 +1010,15 @@ private:
     size_t n_demotion_queue_full = 0;
     size_t n_promotion_queue_full = 0;
     size_t n_cold_payload_bytes = 0;              // Total bytes in cold store (incremented on demotion success)
+    size_t n_cold_quarantine_bytes_ = 0;
+    bool cold_mutation_disabled_ = false;
+    cold_tx_id next_cold_tx_id_ = 1;
+    std::map<std::pair<uint64_t, uint8_t>, uint64_t> recovered_payload_owners_;
+    bool last_demote_failure_was_capacity_ = false;
+    cache_two_layer_reason last_demote_failure_reason_ = cache_two_layer_reason::io_error;
     std::unordered_map<uint64_t, size_t> cold_payload_bytes_by_id_; // per-id actual write size; lets eviction subtract exact bytes
+    std::map<std::tuple<cache_two_layer_mode, cache_two_layer_result, cache_two_layer_reason>, size_t> n_two_layer_decisions_;
+    std::map<std::tuple<cache_two_layer_mode, cache_cold_transaction_result, cache_cold_transaction_reason>, size_t> n_cold_transactions_;
     size_t n_protected_root_demotions = 0;         // Protected roots that were demoted
     int64_t cold_budget_bytes = -1;                // -1 = unlimited, 0 = cold writes disabled
     size_t n_cold_demotions_skipped = 0;
@@ -1063,6 +1274,8 @@ private:
     void record_protected_root_decision(const char * decision, const char * pressure_source, const char * result, const char * reason);
     void record_fallback_restore(const char * strategy, payload_kind kind, cache_workload_profile profile, const char * result, const char * reason);
     void record_stage10_diagnostic(const char * event, const char * result, const char * reason, const payload_descriptor * descriptor = nullptr);
+    bool record_two_layer_decision(cache_two_layer_mode mode, cache_two_layer_result result, cache_two_layer_reason reason, uint64_t payload_id);
+    bool record_cold_transaction(cache_two_layer_mode mode, cache_cold_transaction_result result, cache_cold_transaction_reason reason, cold_tx_id tx_id);
 
     // Check if entry should be protected from eviction
     bool should_protect(const hybrid_cache_entry & entry) const;
@@ -1078,7 +1291,30 @@ private:
     size_t calculate_unprotected_payload_bytes() const;
     size_t calculate_protected_entry_count() const;
     bool hot_payload_budget_enabled() const;
+    struct policy_candidate_enumeration {
+        std::vector<server_cache_policy_candidate> candidates;
+        size_t blocked_references = 0;
+    };
+    policy_candidate_enumeration enumerate_hot_policy_candidates_core();
     std::vector<server_cache_policy_candidate> build_policy_candidates();
+    std::vector<uint64_t> enumerate_cold_policy_candidates_core(uint64_t incoming_owner_entry_id) const;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    bool stage39_validate_inventory_integrity(std::string & error) const;
+    json stage39_build_snapshot_locked(std::string & error);
+    std::string stage39_snapshot_token_locked(const json & snapshot) const;
+    std::string stage39_process_identity_locked() const;
+    json stage39_build_runtime_proof_locked(const std::vector<uint64_t> & payload_ids, std::string & error);
+    bool stage39_capture_prepared_locked(const payload_descriptor & descriptor,
+        const hot_payload_record & record, const prepared_cold_object & prepared);
+    bool stage39_prepared_abort_locked() const;
+    void stage39_latch_prepared_abort_locked(const char * error, const char * mismatch);
+    bool stage39_midpoint_after_exact_locked(const hybrid_cache_entry & entry);
+    void stage39_record_common_sync_locked(const hybrid_cache_entry & entry);
+    void stage39_capture_prepared_baseline_locked(const hybrid_cache_entry & entry);
+    void stage39_finalize_prepared_locked(const hybrid_cache_entry * entry);
+    stage39_live_pressure_result stage39_retrieve_prepared_locked(const stage39_live_pressure_request & request);
+    void advance_cache_generation_locked(bool explicit_advance = true);
+#endif
     uint64_t next_use_sequence();
     void assign_entry_identity(hybrid_cache_entry & entry);
 

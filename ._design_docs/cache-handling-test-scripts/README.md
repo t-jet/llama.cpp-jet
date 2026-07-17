@@ -1,7 +1,7 @@
 # Cache handling test scripts
 
 Location: `._design_docs/cache-handling-test-scripts/`
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 Status: Active reusable integration runner
 
 ## Scope
@@ -206,6 +206,23 @@ H37 uses focused controller evidence when `test-cache-controller.exe` includes `
 
 OpenCppCoverage union coverage runner for the hybrid-mode denominator (T114 and T115).
 
+The runner treats every listed binary as required, rejects nonzero test exits,
+and requires each smoke run to create a `.cov` file. Paths passed to test and
+server processes are absolute. Stage 39 adds `test-step6-demotion-protocol` to
+the target and source lists.
+
+### `stage39-two-layer-pressure.ps1`
+
+Guarded live control remains partial. Its first valid request needs exact
+payload and owner IDs, but the approved route does not expose a pre-mutation
+identity inventory. Do not claim TP-39-02 through TP-39-04 from guessed IDs or
+log fragments. See Stage 39 implementation Part 43.
+
+Stage 39 live driver. `both-filled` and `oversized-both` require measured
+resident and serialized pair sizes. The driver rejects budget combinations
+that do not create the claimed precondition. `legacy` runs the same request
+shape without cold options and fails if either Stage 39 metric family appears.
+
 Runs all 8 focused cache tests individually under OpenCppCoverage with binary
 `.cov` export, then optionally runs `llama-server` with a short HTTP probe under
 the same tool to cover the server integration paths in `server-cache-hybrid.cpp`.
@@ -231,7 +248,14 @@ Parameters:
 - `-ModelPath`: GGUF model for the HTTP probe (or `LLAMA_CACHE_TEST_MODEL`)
 - `-OcPath`: path to `OpenCppCoverage.exe`, default `D:\app\OpenCppCoverage\OpenCppCoverage.exe`
 - `-Port`: HTTP probe server port, default 8144
-- `-SkipServerProbe`: omit the `llama-server` HTTP probe phase
+- `-SkipServerProbe`: omit the `llama-server` HTTP probe phase only for an
+  incomplete diagnostic run
+- `-AllowIncompleteStage39Coverage`: required with `-SkipServerProbe`; output
+  from that run cannot satisfy complete Stage 39 coverage
+
+Complete Stage 39 runs fail if `llama-server`, the model, server readiness, or
+the server `.cov` capture is missing. Use an absolute `-ModelPath` when the
+default fixture is unavailable.
 
 Output files in `$OutDir`:
 
@@ -529,3 +553,46 @@ When cache behavior changes:
 4. Keep clean-build checks strict.
 5. Remove obsolete scenarios instead of hiding them behind exclusions.
 6. Avoid timing-only assertions. Prefer metrics, response fields, and log evidence. Use `--log-verbosity 5` for tests that inspect diagnostics.
+
+### `stage39-two-layer-pressure.ps1`
+
+Stage 39 model-backed pressure scaffold for `standard`, `multi-victim`,
+`both-filled`, `oversized-both`, `cold-disabled`, and `hot-zero` scenarios. It writes command arguments, JSONL
+requests and responses, before/after metrics, server logs, cold-file inventory,
+`metric-delta.txt`, `state.json`, and `summary.json` under `-RunRoot` (default
+`._test_output/stage39-<stamp>`). Both `cold-files-before.csv` and
+`cold-files-after.csv` are written, including an empty before inventory header.
+
+Use only after clean Release build. Measure resident and serialized entry sizes,
+then select integer `-HotBudgetMiB` and `-ColdBudgetMiB` values that create the
+intended boundary. `standard` passes only after a `retained_cold/cold_room` or
+`retained_cold/cold_room_made` delta, a `commit/none` transaction delta, a cold
+promotion, a restore with positive `timings.cache_n`, and zero payload-eviction
+and pruning deltas. `state.json` records hot and cold bytes, entries, branch
+nodes, file and quarantine bytes, counters, deltas, and reconciliation checks.
+Every Stage 39 decision and transaction sample is parsed after the live scrape;
+duplicate label names fail the run.
+Part 43 still requires matching fixed log tuples and row-level manual
+reconciliation before TP-39-01 passes.
+
+`multi-victim` uses exactly two smaller victim completions followed by one
+larger incoming completion. With Qwen3-0.6B Q8_0, use 7 MiB hot and 11 MiB cold
+apply budgets. The driver starts at 13/22 MiB, releases the idle slot reference
+through an isolated slots endpoint, discovers the full exact sets, then requires
+exactly one `retained_cold/cold_room_made` decision and one `commit/none` delta.
+It also checks tied payload-ID victim order, tombstones, cold accounting,
+retained topology, zero pruning, and incoming pair atomicity.
+
+```powershell
+pwsh -NoProfile -File ._design_docs\cache-handling-test-scripts\stage39-two-layer-pressure.ps1 `
+    -ModelPath D:\models\model.gguf -Scenario standard `
+    -RunRoot ._test_output\test-report-YYYYMMDD-NN\TP-39-01
+```
+
+```powershell
+pwsh -NoProfile -File ._design_docs\cache-handling-test-scripts\stage39-two-layer-pressure.ps1 `
+    -ModelPath ._test_models\Qwen3-0.6B-GGUF\Qwen3-0.6B-Q8_0.gguf `
+    -LlamaServerPath build-stage39-seam-on\bin\Release\llama-server.exe `
+    -Scenario multi-victim -HotBudgetMiB 7 -ColdBudgetMiB 11 -Requests 3 `
+    -RunRoot ._test_output\test-report-YYYYMMDD-NN\TP-39-02
+```

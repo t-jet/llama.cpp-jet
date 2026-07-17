@@ -1,5 +1,15 @@
 # Architect improvement memory
 
+## Improvement: Trace active ownership before changing empty inventory fixtures
+
+Condition:
+
+- A live discovery route reports branch nodes and saved payloads but returns no eligible inventory rows
+
+Action:
+
+- Do trace slot-reference acquisition, completion release, prompt clearing, branch candidate predicates, and later entry/descriptor filters in order. Do distinguish an expected pinned active node from a protected-root rule, fixture timing error, seam bug, or product bug before changing assertions or rerunning a model. If one approved public request can transfer the reference, require pure lifecycle tests and one transition capture before a bounded smoke; if the corrected transition still cannot expose the node, stop as structural instead of calibrating prompts or budgets.
+
 ## Improvement: Hidden test_reports directory and path resolution
 
 Condition:
@@ -54,6 +64,16 @@ Action:
 
 - Do make first assistant action and first tool call single-purpose memory read of skill and memory before any ack, comment, plan, or non-memory tool use. Don't batch memory reads with task reads, status checks, or skill loads in `multi_tool_use.parallel`. Don't send user-facing update first. Don't let AGENTS.md, environment context, efficiency concerns, or long brief tempt batching.
 
+## Improvement: Two-layer removal directives need lifecycle disambiguation
+
+Condition:
+
+- A cache-stage directive says entries may be removed only after multiple storage layers are filled
+
+Action:
+
+- Do define capacity predicates per enabled layer and separately define payload-byte eviction, descriptor tombstones, lookup-entry removal, and branch pruning before designing pressure flow. Do verify zero and unlimited parser semantics. Do require exact serialized-size staging, reversible victim commit plus crash recovery, fixed public reason taxonomy, and row-level evidence. Do specify oversized, I/O, integrity, ownership, overflow, cleanup, and rollback cases so capacity policy cannot delete metadata or convert operational failure into eviction authority.
+
 
 ## Improvement: Gate wording with open findings
 
@@ -63,7 +83,7 @@ Condition:
 
 Action:
 
-- Do check live entry docs, active fix reports, correction-evidence status lines, correction part handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, parts lists, progress rows, and linked gate-status part files before and after patching. When adding a new review or re-review part, link it from the parent entry and update any index summary whose handoff wording would otherwise stay on the old gate; for fix re-review PASS, also scrub parent/index "Developer rework next" wording to the actual QA or Manager next gate. For refreshed pre-merge reviews, also scrub part-list labels like `READY FOR ARCHITECT REVIEW`, progress-row text like `Architect review is next`, and design/index row text like `pending review` once PASS is recorded. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
+- Do check live entry docs, active fix reports, correction-evidence status lines, the correction part's own Status and handoff sections, downstream design handoff, index summaries, top-level Status lines, current-status sections, handoff text, parts lists, progress rows, and linked gate-status part files before and after patching. When adding a new review or re-review part, link it from the parent entry and update any index summary whose handoff wording would otherwise stay on the old gate; for fix re-review PASS, also scrub the corrected part's `READY FOR ... RE-REVIEW` status, plus parent/index "Developer rework next" wording, to the actual QA or Manager next gate. For refreshed pre-merge reviews, also scrub part-list labels like `READY FOR ARCHITECT REVIEW`, progress-row text like `Architect review is next`, and design/index row text like `pending review` once PASS is recorded. Do distinguish historical quoted findings from current contradictions. When a re-review passes after an initial REWORK, label the initial findings as historical and put the PASS link/status on the re-review, not "PASS per" the earlier failing review. Do keep durable gate-status locations in same state: reviewable, rework-required, manager-gate-ready, planning-open, approval-pending, approved, ready-for-QA, bug-fix-review-pass, implementation-re-review-pass, or blocked. Don't leave stale limitation, review-pending, awaiting-review, re-review-ready, handoff-closed, ready-for-review, ready-for-implementation, ready-for-re-review, or not-started wording after gate advances or while finding remains. Do grep `git diff` output and the patched file content for stale-status phrases inside IF/ELSE contingency branches that the patch did not touch; an unchanged contingency branch can still hide a stale phrase. Do prefix retained contingency branches with an explicit `Historical outcome (<date>): ...` label that names the actual path taken when only one branch applied. Don't rely on a single status-line edit to clear all stale wording in a part file.
 
 
 ## Improvement: Contingency-branch stale wording hides after status-line fix
@@ -184,7 +204,29 @@ Condition:
 
 Action:
 
-- Do verify production save, restore, eviction, metrics, or lifecycle path actually invokes behavior. Don't accept debug-only coverage, mirrored helper commit paths, or synthetic sleep windows as proof of a production branch. Do flag blocker when tests only exercise debug hooks, standalone APIs, or helper-owned critical sections for a contract the approved design assigns to the production flow. Do name the exact production branch that remains unexercised and require a hook that pauses or observes that real branch.
+- Do verify production save, restore, eviction, hot-pressure, metrics, or lifecycle path actually invokes behavior. Don't accept debug-only coverage, direct transaction-helper calls, mirrored helper commit paths, or synthetic sleep windows as proof of a production branch. Do flag blocker when tests bypass slot or pressure orchestration required by the approved row, even if the called helper is production code. Do name the exact production branch that remains unexercised and require a hook that pauses or observes that real branch.
+- For a guarded counter at a forbidden-work boundary, do require each negative to traverse the instrumented production helper after its baseline, assert exactly one named component delta and zero sibling deltas, then assert aggregate rejection. Don't accept direct member injection plus an aggregate-only assertion as proof that the production boundary is wired.
+- When the gate explicitly requires proof that hook removal or misplacement breaks tests, do run one focused mutation build per hook, restore source after each mutation, then rebuild and rerun the unmodified binary. Do record expected nonzero exits separately from the final clean PASS.
+
+## Improvement: Concurrent atomicity evidence needs visibility reasoning
+
+Condition:
+
+- Reviewing a concurrency test that asserts only final state after worker joins
+
+Action:
+
+- Do trace the production lock boundary across decision, file commit, descriptor, accounting, and metric mutation. Accept final-state reconciliation as no-partial-visibility proof only when the same lock excludes every concurrent controller transaction for that full interval. Otherwise require an observer or pause hook that checks intermediate visibility. Do reconcile candidate identities, total decisions across all tuples, and committed descriptors so aggregate counts cannot hide a duplicate decision and an omitted candidate.
+
+## Improvement: Metric taxonomy needs production tuple proof
+
+Condition:
+
+- Implementation exposes fixed metric enums and a cardinality test injects every enum tuple through a debug helper
+
+Action:
+
+- Do trace each design-required result/reason tuple to a real production decision branch and require focused or live evidence for that branch. Don't accept Cartesian enum injection as proof that production classifies oversized, disabled-layer, capacity, or failure outcomes correctly.
 
 
 ## Improvement: Skill path fallback
@@ -934,6 +976,18 @@ Condition:
 Action:
 
 - Do trace every approved design PASS/BLOCKED criterion into executable verdict predicates, not only into summary fields. Do map every named live evidence field and equality relation (for example `cached_tokens`, `prompt_tokens`, `timings.cache_n`, hit deltas, metric rows, artifact counts) to a parser, assertion, and report row. Do require presence/minimum counts for every design-required workload class before PASS/PASS-candidate, then require the class-specific evidence for those rows. Do flag a blocking finding when the runner records required evidence counts or statuses but can still return PASS without proving them, or when it validates only rows that happen to exist while missing required classes can pass. Don't accept comments, README text, dry-run flag checks, or weaker proxy predicates as proof that live verdict logic enforces bounded miss, redaction, metric, artifact, token-reporting, or workload-class requirements.
+- For execution-evidence review, also trace every claimed request or negative check to an actual helper call and every claimed artifact group to an on-disk file. Treat a passing node as incomplete when its prose claims tamper, retry, manifest, or redaction evidence that the node never executes or preserves.
+
+
+## Improvement: Process-local identifiers can repeat across isolated runs
+
+Condition:
+
+- Reviewing a fresh-process isolation gate where payload IDs, generations, ports, sessions, run IDs, and proofs must be fresh, but deterministic process-local counters restart at the same numeric values
+
+Action:
+
+- Do distinguish fresh allocation from numeric uniqueness. Require separate process identities, sessions, run IDs, proof bindings, roots, and ports, then verify each repeated counter value is scoped to its fresh process. Don't reject valid isolation because deterministic counters restart; don't describe equal numeric IDs or generations as distinct without explaining their process scope.
 
 
 ## Improvement: Parallel decision IDs across design and tracker
@@ -964,6 +1018,16 @@ Condition:
 Action:
 - Do require focused deterministic unit assertions for the stale/duplicate state transitions and counter stability. Don't accept heavy rerun evidence or timing-dependent async behavior as the only proof path.
 
+## Improvement: Persist expensive-run inputs before validation
+
+Condition:
+
+- Reviewing a model-backed or otherwise expensive run that blocks on an assertion while raw response, parsed metrics, or inventory exists only in process memory
+
+Action:
+
+- Do require field-complete, redacted evidence writes immediately before the first validation that can stop the run. Do authorize at most one capture-only diagnostic under existing caps, with a fixed stop before proof or mutation. Don't infer missing rows from logs or relax an assertion until the captured response is reviewed.
+
 
 ## Improvement: Placeholder tests are not acceptance evidence
 
@@ -972,6 +1036,15 @@ Condition:
 
 Action:
 - Do inspect the test body, not only its name, registration, compile status, or coverage inclusion. If the function only prints, asserts `true`, uses tautologies such as unsigned `value >= 0`, or guards the real assertion behind `if (counter > 0)` so the required behavior can disappear without failure, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
+- For HTTP route suites, do verify each named security, retry, corruption, race,
+  and terminal-failure case creates that condition. Do not accept a healthy
+  request, sequential request, wrong-token request, or successful one-shot
+  consumption as proof of a different named contract. For negative auth mocks,
+  require the mock to inspect the raw credential before returning rejection;
+  a mock that ignores its request and always rejects does not prove tampering,
+  and a redacted saved request cannot recover that proof. Require the raw
+  assertion to match the exact transformed credential, differ from the valid
+  credential, and observe the expected call count.
 
 
 ## Improvement: User hints are hypotheses, not requirements
@@ -1549,7 +1622,7 @@ Condition:
 
 Action:
 
-- Do require executable extraction commands or a named evidence-only extractor with fixed output paths and accepted regex/schema rules. Don't accept prose bullets such as "grep for labels" or "report p50/p99" when QA would have to choose patterns, files, thresholds, or destination paths. Do flag as BLOCKING when stale-binary proof names a timestamp rule but omits the source-file baseline to compare against.
+- Do require executable extraction commands or a named evidence-only extractor with fixed output paths and accepted regex/schema rules. Don't accept prose bullets such as "grep for labels" or "report p50/p99" when QA would have to choose patterns, files, thresholds, or destination paths. Do flag as BLOCKING when stale-binary proof names a timestamp rule but omits the source-file baseline to compare against. When source metadata is newer than the compiled object or binary, don't waive freshness from a reported move-and-reverse edit unless a durable pre-edit hash proves current bytes equal the compiler input; otherwise require one fresh bounded rebuild and focused rerun.
 
 
 ## Improvement: Verify Developer line citations against actual file before quoting
@@ -1751,3 +1824,541 @@ Condition:
 Action:
 
 - Do count actual `test_*();` calls in `main()` and compare to the printed footer before deciding gate impact. Treat a stale footer as non-blocking when real test execution passes and product behavior is unaffected, but record it as a cleanup item when the count is misleading.
+
+## Improvement: Release test fixes must activate setup and verdict checks
+
+Condition:
+- When a Release test crashes because `assert` compiled out side-effecting setup
+
+Action:
+- Do inspect the full failing test and count every `assert`. Require explicit checks for all side-effecting calls, container cardinality before iterator or element access, and every result or metric assertion needed for the verdict. Don't approve a fix that only makes setup execute while leaving postconditions compiled out. Verify `NDEBUG` ordering at the first `<cassert>` inclusion; a later `#undef NDEBUG` cannot redefine `assert`.
+
+## Improvement: Bounded metrics require every label domain
+
+Condition:
+
+- Re-reviewing an observability correction that claims public Prometheus labels are bounded
+
+Action:
+
+- Do enumerate every label on each metric family and verify a complete fixed value set for each one. Don't close the finding when result and reason values are fixed but another label, such as mode, remains unspecified.
+
+## Improvement: Untracked script review needs an alternate baseline
+
+Condition:
+
+- Reviewing a narrow fix in a canonical script that is untracked, so Git cannot show the fix hunk against HEAD
+
+Action:
+
+- Do verify the current helper and call order directly, compare preserved guards against the latest approved review or correction record, and run focused positive and negative probes for every claimed branch. Do state that Git had no tracked baseline; don't describe a whole-file no-index view as the canonical fix diff.
+
+## Improvement: Live test seams must mutate setup only
+
+Condition:
+
+- Designing a model-backed test seam for a production pressure, eviction, transaction, metric, or accounting path
+
+Action:
+
+- Do compile the seam out by default, require separate runtime opt-in and loopback authorization, validate all state before mutation, and let it change only fixture setup such as budgets or rank. Do require the normal production transaction to produce outcomes and public evidence. Don't let the seam call demotion, eviction, decision, metric, log, or accounting helpers directly.
+
+## Improvement: Idle-only live seams need dispatch serialization
+
+Condition:
+
+- Reviewing a live test control route that may mutate cache setup only when all
+  model slots are idle
+
+Action:
+
+- Do require one server-side latch or critical section that blocks new
+  completion dispatch while it verifies idle state and runs the control
+  transaction. Do require one-shot state to become terminal before mutation so
+  a post-mutation failure cannot authorize a retry. Don't accept an idle
+  snapshot followed by a separate controller lock as race-free proof.
+
+## Improvement: Live seam ranking must cover each residency domain
+
+Condition:
+
+- Reviewing a setup-only pressure seam that controls both hot-pressure order
+  and cold-victim order while payload residency is mutually exclusive
+
+Action:
+
+- Do trace each requested rank field to the production selector's residency
+  predicate. Require separate complete eligible sets, ownership checks,
+  uniqueness rules, and no-extra checks for hot candidates and cold victims.
+  Don't accept one hot-only exact-set schema as authority to rank cold-only
+  victims.
+
+## Improvement: Fail-closed coverage probes must name real final artifacts
+
+Condition:
+- When reviewing a coverage-runner correction that injects a merge failure
+
+Action:
+- Do trace the runner's actual merged XML and report paths, require a literal
+  nonzero-exit fixture, and verify fresh success and failure trees separately
+  under every required shell. Do distinguish specified expected results from
+  commands actually run. Don't accept absence of a stale or wrong artifact name
+  as fail-closed proof.
+
+## Improvement: Exact-ID control seams need bootstrap discovery
+
+Condition:
+- When a guarded live control request requires complete internal IDs and owners
+  that no approved public artifact exposes before the first mutation
+
+Action:
+- Do require a non-mutating, non-consuming discovery operation under the same
+  compile/runtime, auth, admission, and cache locks before approving the schema.
+  Do bind apply to a stable generation and opaque snapshot token, then revalidate
+  exact identities, kind-specific owners, residencies, ranks, omissions, and
+  extras atomically before mutation. Do make discovery, apply, snapshots, and
+  production selection share the same candidate builders, including per-incoming
+  owner exclusions. Don't accept metric, filename, or partial-log inference as
+  proof of complete live identity sets.
+
+## Improvement: Shared discovery builders must be pure
+
+Condition:
+- When non-mutating discovery must reuse a production candidate builder
+
+Action:
+- Do inspect the builder for counter, metric, LRU, rank, and diagnostic side
+  effects. Require a pure enumeration core and production-only observation
+  wrapper when any side effect exists. Also compare every added eligibility
+  predicate with current production code; don't call a narrowed integrity
+  predicate production-exact without an approved behavior change.
+
+## Improvement: Discovery corrections must update the active QA contract
+
+Condition:
+- When a guarded control design changes an apply-only request into discovery
+  plus snapshot-bound apply, with per-incoming candidate sets or generation
+  evidence
+
+Action:
+- Do cross-read the active test-plan schema and named evidence map. Require it
+  to replace the old request shape, preserve prior security and normal-path
+  tests, and add exact names for discovery purity, staleness, integrity,
+  generation, token, and before/after cases. Verify per-incoming exact sets,
+  mixed-kind same-owner allowance, live row assertions, coverage denominator,
+  shell probes, and threshold remain binding before passing the correction gate.
+
+## Improvement: Mutation generation cannot be replaced by state polling
+
+Condition:
+- When snapshot freshness requires every mutation to advance one monotonic
+  generation, but implementation hashes state only at discover or apply time
+
+Action:
+- Do enumerate direct entry, descriptor, residency, rank, forest, slot-ref,
+  completion, recovery, rollback, cleanup, and budget write sites and verify each
+  advances generation in the same lock. Treat a control-time state digest as
+  noncompliant: it can omit fields and cannot detect changed-then-restored state.
+
+## Improvement: Driver self-tests may bypass scenario preflight
+
+Condition:
+- When implementation evidence uses a script self-test to claim live scenario
+  assertion completeness
+
+Action:
+- Do trace where the self-test exits relative to argument validation, measured
+  budget preconditions, workload setup, and live assertions. Run or inspect each
+  scenario preflight separately. Don't accept helper-only metric and log tests as
+  proof that a model-backed scenario is executable.
+
+## Improvement: Owner-reassignment seams must respect kind-link cardinality
+
+Condition:
+- When a guarded setup reassigns cold descriptor owners to make production's
+  incoming-owner exclusion produce an empty victim set
+
+Action:
+- Do validate the complete discovered set, require at most one descriptor per
+  payload kind, and require the destination's exact/checkpoint link to be empty
+  before mutation. For checkpoint moves, prove destination namespace, tokens,
+  span, boundary metadata, checksum, pair state, and runtime draft compatibility
+  before consumption. Require an executable workload that can produce the exact
+  collision-free kind set under real checkpoint spacing and context limits. Do
+  verify the named model/runtime passes the production checkpoint-creation gate;
+  a larger context cannot enable checkpoints for a plain-transformer runtime
+  that fails model or sequence-removal eligibility. Require literal checked-in
+  request content when a plan calls a workload fixed or reproducible.
+  Don't overwrite a kind link, orphan a descriptor, or treat descriptor-owner
+  mutation alone as integrity-preserving setup.
+
+## Improvement: Superseded evidence may retain old contract values
+
+Condition:
+- When a correction changes a capacity or fixture value after an implementation
+  evidence report recorded a failed run under the old value
+
+Action:
+- Do preserve the evidence report as historical proof, but require the new
+  correction and review to name the supersession explicitly. Treat an old-value
+  sentence as advisory only when active entry docs and handoff text are
+  unambiguous; block when downstream instructions could still follow it.
+
+## Improvement: Separate measurement and canonical startup budgets
+
+Condition:
+- When measured high startup budgets prove sizes and capability but prevent the
+  residency transition required by a later canonical preflight
+
+Action:
+- Do state measurement and canonical budget contracts separately, derive every
+  integer MiB value from exact resident and immutable serialized bytes, require
+  checked safety and coexistence inequalities, and sweep active docs for stale
+  wording that fixes both passes to the measurement budget. Don't require the
+  measurement pass to exhibit residency that only canonical pressure creates.
+
+## Improvement: Complete-pair budget inputs need executable provenance
+
+Condition:
+- When a startup-budget correction derives one-fit/two-not limits from hot
+  discovery rows while the contract requires complete resident and serialized
+  target/draft pairs
+
+Action:
+- Do verify each measured row's payload kind, pair state, resident aggregation,
+  and serialized-byte field in the raw artifact. Require an executable exact
+  serialized-size path when hot rows report null and no cold object exists.
+  Count target-only as complete only when same-process evidence proves the
+  runtime has no draft and its pair matcher accepts target-only with draft
+  disabled. Require normal production demotion plus final file, immutable
+  header, descriptor byte value, byte-map, and filesystem reconciliation for
+  every serialized formula input. Bind each input to workload role, payload
+  kind, target/draft components, and the exact pressure step that consumes it.
+  Before approval, trace entry-level resident aggregation, payload-kind order,
+  victim-owner exclusion, and cold-room-making through the proposed request
+  sequence; prove production can reach the required canonical inventory.
+  When measurement and canonical use different processes, label measurement
+  values as calibration only and require production-owned canonical evidence
+  for every final serialized input. For a capacity-rejected object that leaves
+  no final cold file, require a bounded record of its immutable prepared size
+  before cleanup, bound to the canonical process, generation, owner, kind, and
+  pressure step. When exact and checkpoint preparation is sequential, require
+  the first boundary to validate one-object fit and the second boundary to
+  freeze both ordered records and validate the sum inequality before the
+  decisive admission or eviction; reject the affected object on drift. Don't
+  demand same-process formula provenance while providing
+  only a cold-empty pre-apply proof surface.
+  Don't approve a complete-pair example from unproved target-only rows, a
+  measurement path that estimates, copies, or creates serialized bytes through
+  guarded ownership apply, or formulas that size one descriptor while pressure
+  operates on a multi-descriptor entry. When capture occurs inside one normal
+  multi-kind pressure pass, define discovery, post-setup, per-boundary, and
+  terminal generation relations plus the retrieval-staleness rule. Bind every
+  record to one immutable apply-created test session and run, its own observed
+  generation, and one monotonic expected step; retrieval must validate the exact
+  chain and current final generation, not one generation across mutations.
+  Require a guarded terminal latch to propagate through the existing demotion,
+  kind marking, entry marking, pressure loop, update, and control response so a
+  failed boundary cannot emit an ordinary capacity decision, admit or unlink
+  the object, or process the remaining kind. Verify the design names the actual
+  default-OFF live-seam compile macro rather than a broader test-hook macro.
+  Freeze terminal generation and HMAC only after the full production update
+  returns and all update-owned mutations finish. Require every inner pressure
+  layer to return immediately on the guarded latch before post-loop warnings
+  or diagnostics. Before arming the next payload-kind step, require accounting
+  and branch synchronization for any committed prior kind so abort cannot leave
+  stale owner views. Treat that accounting-and-sync boundary as one explicit
+  generation-owned mutation: advance after both views verify, then bind and arm
+  the next step to that value. Before approving an explicit boundary advance,
+  trace every called helper for direct or macro-owned generation side effects.
+  If refresh or sync already advances, require a generation-neutral validation
+  path or use the completed production state; don't add a second advance.
+  When production already refreshed and synchronized that state, validate its
+  exact fields read-only and abort before the next step on mismatch.
+  Don't store a pre-sync generation after helpers that mutate cached entry or
+  branch fields without their own generation hook.
+  When production owns branch synchronization only after a multi-kind batch,
+  exclude branch aggregate from the midpoint proof, let common sync run after a
+  later-kind fault, and validate branches after the batch or transaction. Apply
+  the same common-sync rule to any post-earlier-kind midpoint fault that skips
+  the later kind; otherwise the committed entry and stale branch can diverge.
+  Record actual production generation observations; when common sync changes a
+  stale branch and owns a normal generation hook, require its completion
+  generation to follow the earlier-kind return. Don't permit equality or invent
+  a seam-only advance. In fault assertions after an earlier-kind commit, expect
+  that kind's legitimate decision and transaction deltas; forbid only the
+  skipped later-kind and post-latch effects.
+
+## Improvement: Split impossible live seam setup from focused seam proof
+
+Condition:
+- When a live cache test requires a guarded ownership precursor that conflicts
+  with production payload-kind order or occupied kind-link rules
+
+Action:
+- Do prove the conflict from exact production order, owner exclusion, and link
+  cardinality. Keep guarded mutation coverage focused, then use the smallest
+  natural production sequence for model-backed evidence when it proves the same
+  policy invariant. Require baseline and post-setup diffs so the seam changes
+  only budgets/order before one normal production transition. Don't keep
+  recalibrating an unreachable live precursor.
+
+## Improvement: Route fixtures need model capability parity before approval
+
+Condition:
+- When a route test expects model-created cache state that a controller test
+  can construct directly, such as a same-owner exact and checkpoint pair
+
+Action:
+- Do require the exact model, startup flags, literal admission bytes, endpoint,
+  resource caps, and a bounded non-mutating capability preflight before
+  approving the route test. Do require isolated process state and a no-skip
+  result for the exact gate nodes. Don't infer route feasibility from controller
+  PASS, helper comments, model metadata alone, or a fallback fixture.
+
+## Improvement: Capability logs require an enabling selector
+
+Condition:
+- When a model-backed fixture contract requires a startup capability log or
+  runtime mode that is disabled by default
+
+Action:
+- Do trace the exact parser spelling, default value, enum mapping, startup
+  branch, log macro, severity, and default verbosity before approving the
+  command list. Require explicit bounded test verbosity when a binding literal
+  is above the default level. Require the command artifact to prove both
+  selectors and the runtime artifact to prove a positive capability-owned
+  component. Don't accept model metadata or expected log text when approved
+  argv cannot emit it.
+
+## Improvement: Per-candidate set keys need constructor provenance
+
+Condition:
+- When a discovery schema has per-candidate sets whose key names can be
+  mistaken for a separate workload actor or latest request owner
+
+Action:
+- Do trace the snapshot constructor, nested selector predicate, apply lookup,
+  and proof expansion together. Require each set key to equal the source row it
+  indexes when production copies those fields; apply different-owner rules
+  only to nested candidates. Do list cross-array uniqueness and same-owner
+  kind-link allowances explicitly before approving a live assertion. Don't
+  infer field meaning from names such as `incoming_owner_entry_id`.
+
+## Improvement: Proof reachability does not close fault-route readiness
+
+Condition:
+- When a proof-only model smoke reaches the exact apply inputs and the next
+  proposed gate runs mutation faults
+
+Action:
+- Do map every route assertion back to the original fault contract, including
+  terminal entry, branch, descriptor, file, byte-map, topology, decision,
+  transaction, diagnostic, later-work, and generation effects. Require the
+  authenticated terminal proof to expose every state and delta the route must
+  assert. Don't authorize fault execution from apply reachability, generation
+  order, and aggregate commit counts alone.
+
+## Improvement: Zero-effect proof fields need observed provenance
+
+Condition:
+- When authenticated terminal evidence claims a production effect delta is zero
+
+Action:
+- Do trace each field to a baseline comparison, production event counter, or
+  independently observable artifact. Reject literal zero serialization and
+  tests that only assert the generated constant. For changed-then-restored
+  effects, require an event observation as well as terminal state comparison.
+
+## Improvement: Test-helper counters can include wrapper effects
+
+Condition:
+- When a focused test drives a production transaction through a debug wrapper
+  and proposes exact counter assertions
+
+Action:
+- Do trace counter writes in both the production transaction and the wrapper,
+  then require exact before/after progression. Use state, descriptor, and
+  storage reconciliation to prove the production effect when a generic counter
+  also includes synthetic wrapper increments. Don't treat the counter name as
+  proof of single-owner accounting.
+
+## Improvement: Correct stale comments with changed test expectations
+
+Condition:
+- When a test correction replaces an obsolete policy expectation but retains
+  historical comments beside the changed setup or assertions
+
+Action:
+- Do compare every nearby behavior comment with the corrected execution path.
+  Require a comment-only correction when prose still describes the opposite
+  outcome, even if assertions and evidence pass. Keep the correction isolated,
+  reconstruct its before/after forms, and compare comment-stripped executable
+  text before waiving a rebuild. Reconfirm any reused binary's input hashes and
+  freshness before reopening a downstream execution gate.
+
+## Improvement: Separate shared pytest preload from node-owned model evidence
+
+Condition:
+- When a model-backed pytest node fails in an autouse shared-model preload before
+  its own helper starts, and an environment variable can bypass that preload
+
+Action:
+- Do trace the variable's only reader and the node helper's model launch
+  independently. Approve the bypass only when it suppresses an unrelated preset
+  while the node still validates, launches, exercises, and captures its required
+  model. Bind the variable and exact command in rerun evidence. Don't treat a
+    shared-preload bypass as weakened model evidence when node-owned inference
+    remains mandatory, and don't approve it when the row relies on that preload.
+
+## Improvement: Pair proof drivers must request both concrete IDs
+
+Condition:
+- When a live driver needs ordered exact and checkpoint proof rows but discovery
+  exposes only the entry-level exact candidate
+
+Action:
+- Do trace the proof builder to determine whether it expands owner links or
+  returns only requested IDs. Require an approved non-mutating source for the
+  checkpoint ID and send both concrete IDs in canonical order when no expansion
+  exists. Then require authenticated terminal-proof retrieval and compare its
+  session, run, generation chain, HMAC, bindings, accounting, and state with the
+  apply result. Require the driver to prove retrieval success and consumption,
+  compare the defined canonical response bytes rather than parsed-object
+  reserialization, and assert every proof-owned accounting, diagnostic, and
+  forbidden-effect field with rejecting mutations. Don't accept a two-row
+  assertion after a one-ID proof request or treat an uninspected terminal-proof
+  object as terminal evidence.
+
+## Improvement: Terminal proof positives need negative-group parity
+
+Condition:
+- When a pure self-test claims complete coverage for a large authenticated
+  terminal proof assertion
+
+Action:
+- Do map each assertion group to an isolated rejecting mutation, including
+  identity and status, generation order, records, retained state, descriptor
+  and file accounting, staging and topology, decisions, transactions,
+  diagnostics, observed effects, forbidden effects, consumption, raw bytes,
+  and redaction. For every new proof field, verify every assertion surface that
+  claims the common contract, including C++ controller helpers and route
+  drivers; don't accept a driver-only negative matrix when the controller common
+  predicate omits the same field. For redaction, pass each real secret in a
+  nonempty log and require rejection; an empty-log positive is not leak
+  detection. Run the unchanged positive fixture before the negative loop,
+  restore every shared fixture mutation in `finally`, and confirm the full
+  matrix in both supported shells. Don't accept broad success-fixture coverage
+  when removal of an assertion group would leave any claimed assertion surface
+  green.
+
+## Improvement: Canonical argv guards need parser and environment parity
+
+Condition:
+- When a canonical live driver must select exactly one runtime mode and reject
+  aliases or environment overrides
+
+Action:
+- Do enumerate aliases and environment names from the production argument
+  registry, not from memory. Require exact anchor-relative placement, including
+  rejection when the anchor is absent. Put environment rejection in a pure
+  helper and test save/set/assert/restore negatives in every supported shell.
+  Don't accept an argv-only check when parser environment variables can add the
+  same selector or a forbidden companion model outside argv.
+
+## Improvement: Startup literal fixes need shared ordinal proof
+
+Condition:
+- When a live driver replaces a stale startup log marker with a current success
+  record while retaining other capability markers
+
+Action:
+- Do trace the new and old literals to separate production log sites, require
+  the live gate and pure tests to call one ordinal helper, and require isolated
+  negatives for the old marker, regex-shaped text, wrong case, timing-only
+  readiness, and every missing companion marker. Do verify later proof checks
+  still require their original cardinality and nonzero components. Don't accept
+  alternation, fallback, regex, or timing as equivalent capability proof.
+
+## Improvement: Nested PowerShell parser checks need protected variables
+
+Condition:
+- When running PowerShell parser API checks from an outer PowerShell command
+  against a script under review
+
+Action:
+- Do quote the inner `-Command` body so `$tokens`, `$errors`, and redirection
+  targets are interpreted only by the inner shell. Prefer a single-quoted
+  scriptblock wrapper from the outer command. If a parser command fails with
+  `[ref]` arguments missing or empty redirection, classify it as command quoting
+  failure and rerun before judging the script.
+
+## Improvement: Terminal LRU evidence separates hot membership from retained topology
+
+Condition:
+- When a cache pressure proof reports a valid source transition from one hot-LRU membership to zero while lookup, branch, owner, and cold payload state remain retained
+
+Action:
+- Do verify topology deltas use a signed JSON integer domain, require `1 -> 0` as `-1`, and keep hot-policy membership separate from lookup and branch retention. For an over-budget terminal state, require source resident bytes to be zero and require live-reference rows to reconcile the complete remaining resident total against the applied budget. Add isolated negatives for retained membership, zero delta, unsigned wrap, source-owner substitution, and unexplained bytes. Don't classify cold-only removal from the hot LRU as metadata loss.
+
+## Improvement: Retired symbol audits must classify comments separately
+
+Condition:
+- When reviewing a stale API port or target-set audit for removed async/test-only symbols
+
+Action:
+- Do search the exact gated target set, not only the repaired file. Classify each hit as an active call, declaration, or comment before deciding the gate. Treat active calls as blocking; treat comments as non-blocking only when they explicitly document retirement or historical context and cannot compile into behavior.
+
+## Improvement: PowerShell empty CSV fixes need typed-boundary coverage
+
+Condition:
+- When reviewing a PowerShell driver fix for empty `Import-Csv` output or
+  header-only inventory files
+
+Action:
+- Do verify `$null`, header-only CSV imports, and typed `[object[]]` parameters
+  at the exact assertion boundary in both PowerShell 7 and Windows PowerShell 5.
+  Require assertions to count real filtered rows, such as `.cold` file rows,
+  when emptiness is semantic. Don't accept producer normalization alone if a
+  later typed parameter can reintroduce a null placeholder.
+
+## Improvement: Neighboring delta assertions need topology math
+
+Condition:
+- When reviewing a driver fix that changes one row's descriptor, residency, or
+  counter deltas and a neighboring row appears suspicious
+
+Action:
+- Do reconstruct each row's before/after topology from hot descriptors, cold
+  descriptors, evicted tombstones, files, and owner exclusions before calling it
+  regression. Do keep distinct rows' net deltas separate: incoming demotion plus
+  multi-victim cold eviction can legitimately differ from same-owner exact/cold
+  plus checkpoint eviction or oversized hot-only eviction. Require pure
+  negatives for the corrected row's stale tuple without changing neighboring
+  assertions unless their own evidence or design contract is wrong.
+
+## Improvement: Untracked driver fixes need direct semantic diff
+
+Condition:
+- When reviewing a PowerShell or test-driver fix whose file is untracked, or
+  when unrelated product files are already dirty, so `git diff` cannot isolate
+  the task-local change
+
+Action:
+- Do verify the current file directly with targeted `rg`/line reads around the
+  changed helpers and call sites, then run the relevant parser and pure
+  self-tests in every supported shell. Do record that product/test files may be
+  dirty outside the review scope and explicitly exclude them from the approval.
+  Don't infer driver-only status from an empty `git diff` on an untracked file,
+  and don't approve dirty product files while passing a driver-only fix.
+
+## Improvement: Entry/index docs at the 300-line limit need in-place links
+
+Condition:
+- When adding a review or gate part and the parent entry document or
+  `document-index.md` is already at the 300-line limit
+
+Action:
+- Do update existing status, summary, or index rows in place instead of
+  appending new lines. Verify line counts after editing and record the exact
+  line count. Don't exceed the split-rule limit just to add a new handoff link.

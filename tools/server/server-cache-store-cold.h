@@ -6,6 +6,74 @@
 #include <unordered_set>
 #include <vector>
 
+using cold_tx_id = uint64_t;
+
+struct cold_descriptor_snapshot {
+    uint64_t payload_id = 0;
+    uint8_t pair_state = 0;
+    uint8_t format_version = 1;
+    uint64_t target_size_bytes = 0;
+    uint64_t draft_size_bytes = 0;
+    uint64_t target_checksum = 0;
+    uint64_t draft_checksum = 0;
+};
+
+struct prepared_cold_object {
+    cold_descriptor_snapshot descriptor;
+    uint64_t exact_bytes = 0;
+    std::filesystem::path staging_path;
+    std::filesystem::path final_path;
+};
+
+enum class cold_prepare_result_code { success, not_configured, write_error, validation_error, size_overflow };
+struct cold_prepare_result {
+    cold_prepare_result_code code = cold_prepare_result_code::write_error;
+    prepared_cold_object object;
+    explicit operator bool() const { return code == cold_prepare_result_code::success; }
+};
+enum class cold_validate_result { valid, missing, invalid_path, invalid_size, invalid_contents };
+
+struct cold_recovered_owner { uint64_t entry_id = 0; uint8_t owner_link = 0; };
+struct cold_recovered_descriptor {
+    cold_descriptor_snapshot file;
+    uint8_t payload_kind = 0;
+    cold_recovered_owner owner;
+    uint64_t created_sequence = 0, last_validated_sequence = 0;
+    int64_t token_span_start = 0, token_span_end = 0;
+    int64_t position_start = 0, position_end = 0;
+    bool checkpoint_boundary_required = false, checkpoint_boundary_native = false;
+    int32_t checkpoint_boundary_kind = 0;
+    uint64_t boundary_checksum = 0;
+    std::string boundary_id, workload_profile;
+};
+struct cold_recovered_victim {
+    cold_recovered_descriptor descriptor;
+    uint64_t exact_bytes = 0;
+    std::filesystem::path quarantine_path;
+    bool committed_tombstone = false;
+};
+struct cold_recovered_commit {
+    cold_tx_id tx_id = 0;
+    cold_recovered_descriptor incoming_descriptor;
+    uint64_t incoming_exact_bytes = 0;
+    std::filesystem::path incoming_final_path;
+    uint64_t logical_bytes_before = 0, victim_bytes = 0, logical_bytes_after = 0;
+    std::vector<cold_recovered_victim> victims;
+};
+enum class cold_tx_state : uint8_t { prepared, quarantined, published, committed };
+struct cold_tx_manifest : cold_recovered_commit {
+    cold_tx_state state = cold_tx_state::prepared;
+    prepared_cold_object incoming;
+};
+struct cold_victim { uint64_t payload_id = 0; std::filesystem::path final_path; std::filesystem::path quarantine_path; };
+struct cold_cleanup_result { bool success = true; size_t files_removed = 0; };
+struct cold_store_recovery_result {
+    std::vector<cold_recovered_commit> claims;
+    std::vector<cold_recovered_commit> committed;
+    cold_cleanup_result precommit_cleanup;
+    bool mutation_disabled = false;
+};
+
 // Cold payload store: manages versioned filesystem files for demoted payloads.
 // Disabled unless a root path is configured via configure().
 //
@@ -90,16 +158,6 @@ struct io_completion_result {
 // Descriptor snapshot for cold store operations.
 // This is a simplified version of payload_descriptor that contains only the fields
 // needed for cold file serialization, avoiding a dependency on the full descriptor type.
-struct cold_descriptor_snapshot {
-    uint64_t payload_id = 0;
-    uint8_t  pair_state = 0;  // payload_pair_state value
-    uint8_t  format_version = 1;
-    uint64_t target_size_bytes = 0;
-    uint64_t draft_size_bytes = 0;
-    uint64_t target_checksum = 0;
-    uint64_t draft_checksum = 0;
-};
-
 class server_cache_store_cold {
 public:
     server_cache_store_cold() = default;
@@ -124,6 +182,19 @@ public:
                    const std::vector<uint8_t> & target_bytes,
                    const std::vector<uint8_t> & draft_bytes,
                    const cold_descriptor_snapshot & descriptor_snapshot);
+
+    cold_prepare_result prepare(uint64_t payload_id,
+            const std::vector<uint8_t> & target_bytes,
+            const std::vector<uint8_t> & draft_bytes,
+            const cold_descriptor_snapshot & descriptor_snapshot);
+    cold_validate_result validate_prepared(const prepared_cold_object & object) const;
+    cold_store_recovery_result recover_transactions();
+    bool quarantine(const cold_victim & victim, const cold_tx_id & tx_id);
+    bool publish(prepared_cold_object & object, const cold_tx_id & tx_id);
+    bool write_manifest(const cold_tx_manifest & manifest);
+    bool mark_committed(cold_tx_manifest & manifest);
+    cold_cleanup_result cleanup(cold_tx_manifest & manifest);
+    bool apply_claims(const cold_recovered_commit & committed);
 
     // Read and validate a cold file.
     // Returns true on success and populates target_bytes, draft_bytes, and descriptor_out.
@@ -155,10 +226,22 @@ public:
     const std::string & root_path() const { return root_path_; }
 
 #ifdef LLAMA_SERVER_CACHE_TESTS
+    enum class debug_tx_fault {
+        none, manifest, quarantine, publish, commit_marker, cleanup,
+        descriptor_apply, victim_unlink, manifest_unlink,
+    };
     // Test hooks for fault injection
     void debug_set_write_failure_for_tests(bool fail) { debug_write_failure_ = fail; }
     void debug_set_read_failure_for_tests(bool fail) { debug_read_failure_ = fail; }
     void debug_set_validation_failure_for_tests(io_failure_reason reason) { debug_validation_failure_ = reason; }
+    void debug_set_tx_fault_for_tests(debug_tx_fault fault, size_t occurrence = 1) {
+        debug_tx_fault_ = fault;
+        debug_tx_fault_occurrence_ = occurrence;
+        debug_tx_fault_seen_ = 0;
+    }
+    bool debug_fail_descriptor_apply_for_tests() {
+        return debug_hit_tx_fault(debug_tx_fault::descriptor_apply);
+    }
 #endif
 
 private:
@@ -167,6 +250,9 @@ private:
 
     // Derive the staging file path from a payload_id
     std::string staging_path(uint64_t payload_id) const;
+    std::string manifest_path(cold_tx_id tx_id) const;
+    std::string claims_path() const;
+    bool remove_claim(uint64_t payload_id);
 
     // Derive the file path from a cold_ref (which is the payload_id)
     std::string ref_to_path(cold_ref ref) const;
@@ -198,5 +284,12 @@ private:
     bool debug_write_failure_ = false;
     bool debug_read_failure_ = false;
     io_failure_reason debug_validation_failure_ = io_failure_reason::none;
+    debug_tx_fault debug_tx_fault_ = debug_tx_fault::none;
+    size_t debug_tx_fault_occurrence_ = 1;
+    size_t debug_tx_fault_seen_ = 0;
+    bool debug_hit_tx_fault(debug_tx_fault fault) {
+        if (debug_tx_fault_ != fault) return false;
+        return ++debug_tx_fault_seen_ == debug_tx_fault_occurrence_;
+    }
 #endif
 };

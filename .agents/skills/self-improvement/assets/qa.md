@@ -1,5 +1,13 @@
 # QA improvement memory
 
+## Improvement: validate rendered metric label uniqueness
+
+Condition:
+- When focused typed-cardinality tests pass but a live Prometheus scrape is required for fixed-label acceptance
+
+Action:
+- Do inspect rendered sample labels for duplicate keys, not only tuple counts and allowed values. A sample such as `mode="hybrid",mode="hybrid"` fails the exporter contract even when internal typed metrics and cardinality tests pass.
+
 ## Improvement: distinguish Manager claim of N converted call sites from actual diff conversions
 
 Condition:
@@ -52,6 +60,7 @@ Condition:
 
 Action:
 - Search runner scripts and focused test sources for those exact IDs or required behaviors. Compare implemented assertions with plan. When a plan relies on wrapper dry-run or readiness output, compare the dry-run-validated flags and fixture paths with the actual live child-process argument list and row-script parameters; do not accept synthetic dry-run logging as proof of live execution behavior. Also compare required evidence filenames from the plan and wrapper row gates against what each row script can actually write, especially before/after metrics files. Split public-harness coverage from acceptance rows needing focused, draft-fixture, stats-capable, or fault-injection evidence. Map every PASS claim to specific test names or source lines. Update runner PASS/BLOCKED logic only when current task requires automation changes.
+- For each named scenario guard, require its exact success tuple and forbidden deltas. A generic check for any family series or transaction can PASS on rollback, error, bypass, or eviction and does not prove the scenario name. Verify that every required before/after, delta, inventory, and structured state artifact is written without ad hoc reconstruction.
 
 
 ## Improvement: reconcile runner summaries with evidence
@@ -232,6 +241,14 @@ Condition:
 
 Action:
 - Classify fixture row as FAIL rather than fixture-unavailable BLOCKED/SKIP. Preserve request, response, metrics, and startup artifacts. Separately note any focused substitute evidence that still passed, but do not let focused PASS evidence override the required live model-backed acceptance row.
+
+## Improvement: calibrate oversized live rows from measured objects
+
+Condition:
+- When a canonical live scenario must emit an oversized-capacity reason and accepts caller-selected integer MiB budgets
+
+Action:
+- Do first run a successful demotion that records the exact prepared cold-object size and resident pair bytes, then select positive budgets below both measured values. Do not infer oversized pressure from a small nominal budget or request count. If the canonical runner cannot expose those measurements before enforcing its tuple, preserve both attempts and classify the live row BLOCKED by harness evidence rather than claiming the focused reason-selection test proves the live row.
 
 
 ## Improvement: prove public checkpoint admission before restore claims
@@ -1214,3 +1231,127 @@ Condition:
 
 Action:
 - Do first inspect `/apply-template` outputs and token arrays for turn1, assistant replay, and turn2 to find the exact mismatch. If the mismatch is template history rewriting rather than cache behavior, use a run-local stable chat template for the live row and save that template as an artifact. Keep the same model, prove prefix compatibility with `/apply-template` plus `/tokenize`, and then classify cache fields, hit delta, and prefix metrics from that corrected workload. Do not classify a product bug until the strict prefix proof passes.
+
+## Improvement: driver validation must guard empty/null result arrays
+
+Condition:
+
+- A live QA runner adds strict validation over arrays that may validly be empty, such as metric rows from `Where-Object`, cold inventories from `Get-ChildItem`, or header-only CSV imports, and the validation wraps them with `@(...)` before testing `.Count`
+
+Action:
+
+- Do require the validation to normalize empty results to a real empty array before `.Count` checks or iteration: use `@(... | Where-Object { $null -ne $_ })`, explicit `[string]::IsNullOrWhiteSpace` guards for text rows, or `if ($null -eq $value) { @() } else { @($value) }` for object inventories. `Where-Object`, `Get-ChildItem`, and `Import-Csv` over a header-only file can return `$null`; `@($null)` has count `1` and can trigger false failures such as "Malformed metric row" or "cold-empty setup mismatch". When this happens, verify product behaviour directly from saved metrics, responses, inventories, and logs, then classify the failure as a test-harness regression and hand it to Developer for script-only repair; do not call it a product defect or run downstream gates that require the failed assertion to pass.
+
+## Improvement: OpenCppCoverage can produce a real but EMPTY `.cov` when target sources are not in the instrumented module set
+
+Condition:
+
+- Coverage gate requires at least one real `.cov` smoke before any percentage, and OpenCppCoverage exits 0 and emits a `.cov` (and Cobertura XML), but the changed product lines show as `lines-valid="0"` with empty `<packages/>`
+
+Action:
+
+- Do not report `line-rate="1"` as 100% coverage; that is the vacuous 0/0 root attribute. After any OpenCppCoverage run, parse the Cobertura XML `<coverage>` attributes `lines-valid` and `lines-covered`; classify coverage as BLOCKED-infrastructure when `lines-valid=0`, even though a `.cov` file exists on disk. The common cause is module mismatch: the `--sources` targets (e.g. `tools/server/server-cache-hybrid.cpp`) compile into `server-context.lib` / `llama-server.exe`, not into the focused test exe, so OpenCppCoverage's `--modules` filter for the test process instruments none of them while the test exercises the logic through its own compiled-in copies/shims. To get real changed-line coverage, run the server-probe phase against `llama-server.exe` (which links the production sources as real modules), export per-run binary `.cov`, and merge with `--input_coverage`. Record the empty `.cov` path and console log tail as evidence; do not extrapolate a percentage and do not claim the gate passed.
+
+## Improvement: distinguish Cobertura root rate from wrapper-approved denominator rate
+
+Condition:
+- When a coverage wrapper merges OpenCppCoverage Cobertura XML and then computes a stage-specific approved denominator table from selected source basenames
+
+Action:
+- Do report both values when they differ. Use the wrapper's approved denominator rows, positive approved `Valid` total, and threshold verdict for the stage gate, while recording the Cobertura root `line-rate` and `lines-valid` as diagnostic whole-XML values. Do not fail a valid approved-denominator gate solely because the root XML includes additional emitted rows with a lower aggregate rate.
+
+## Improvement: classify strict decision-family helper failures from exact tuple evidence
+
+Condition:
+- A Stage 39 live driver fails inside a shared decision or transaction helper because the total metric-family delta is stricter than the row-specific expected tuple set
+
+Action:
+- Do inspect before/after metrics, apply response `decision_deltas` and `transaction_deltas`, fixed-field apply logs, and row design text before choosing product versus driver classification. Report every exact tuple and the helper's total-family expectation. If product evidence matches the row design but the helper rejects additional required tuples, classify as a driver assertion or contract mismatch and stop downstream coverage gates that require the assertion PASS.
+
+## Improvement: reject nonzero canonical coverage merge before percentage parsing
+
+Condition:
+- A canonical coverage wrapper completes focused and server-probe captures, then its merge process exits nonzero but still leaves a Cobertura file
+
+Action:
+- Do classify coverage as blocked on the canonical merge invocation and record the merge exit plus stderr before reading any percentage. A leftover `lines-valid="0"` file is diagnostic output, not a valid merged denominator. Do not let wrapper continuation, a 0/0 report, or a shell exit-code capture hide the failed merge.
+
+## Improvement: patch large QA corrections in verified sections
+
+Condition:
+- When replacing a large stale QA-plan block in a dirty file and one context mismatch would reject the whole patch
+
+Action:
+- Do print the exact numbered source section first, then apply small section-level patches and validate stale phrases after each replacement. Keep file creation and index edits separate until the main correction lands.
+
+## Improvement: compare live-run request defaults with binding caps
+
+Condition:
+- When a model-backed QA driver has a binding request, chat, time, memory, or artifact cap but its parameter default or README example may predate that cap
+
+Action:
+- Do inspect the workload loop and cap check before the first costly invocation, then pass an explicit value within the binding cap. If an oversized invocation stops only at the documented preflight cap, classify it as an execution defect, preserve it, and rerun in a fresh artifact directory without changing product verdicts.
+
+## Improvement: preserve proof responses before component validation
+
+Condition:
+- When a live guarded driver obtains linked or explicit proof responses and then validates multi-field component invariants that may stop the sole authorized run
+
+Action:
+- Do write redacted raw proof responses before calling the validation helper. If validation fails, record the exact row and conjunct from saved evidence; do not infer a specific failed component only from discovery pair state or server save logs.
+
+## Improvement: diagnose strict startup-marker guards conjunct by conjunct
+
+Condition:
+- When a live QA driver rejects startup proof even though the expected capability appears active
+
+Action:
+- Do evaluate every required startup-log regex separately and preserve both the expected and emitted marker text. If behavior evidence such as checkpoint creation and target-plus-draft saves is present but one literal marker changed, classify the row as a driver log-contract blocker before any product assertion, not as missing capability or a product failure.
+
+## Improvement: recover clean builds after launcher timeout
+
+Condition:
+- When the shell wrapper times out during a required clean build but its CMake or MSBuild child remains active
+
+Action:
+- Do preserve the first attempt as setup evidence, wait for the exact child to finish, and run the identical build command again on the same untouched tree to capture an authoritative exit code and binary freshness. Do not start tests or a second concurrent build while the first child is active.
+
+## Improvement: use fresh build roots when cleanup is blocked
+
+Condition:
+- When a required clean build would normally remove an existing build directory, but the shell policy blocks recursive deletion before any configure or build command runs
+
+Action:
+- Do preserve the rejected cleanup as setup context, choose a fresh never-existing build directory for the session, pass that exact build directory to all later driver and coverage commands, and record the reason in the report. Do not reuse an existing build tree as clean evidence.
+
+## Improvement: isolate terminal and metric mismatches field by field
+
+Condition:
+- When a canonical driver reports a generic terminal state, effect, topology, descriptor, residency, or metric-delta mismatch but preserves the authenticated response or before/after metrics
+
+Action:
+- Do compare every actual map field or metric delta with the driver expectation and record the exact mismatched conjunct. For metric assertions, write a small before/after/delta artifact naming each checked family and expected value before classifying the failure. Preserve matching corrected fields separately so the next fix does not reopen already verified behavior.
+
+## Improvement: preflight exact proof schemas after production evidence expands
+
+Condition:
+- When a reviewed product correction adds component fields to a terminal proof map and the canonical driver enforces an exact property set
+
+Action:
+- Do compare the live producer field list with the driver's expected property list before opening a model-backed rerun. Require the driver to name and value-check every reviewed field; otherwise report a driver-contract gap before spending the sole authorized live node.
+
+## Improvement: treat auxiliary target compile failure as clean-build gate failure
+
+Condition:
+- When a QA rerun gate requires a fresh clean build of the full authorized target set, and that set includes named or implied auxiliary focused targets beyond the coverage wrapper's own list
+
+Action:
+- Do derive the full target set from the active Manager gate, test plan, script README, coverage wrapper, and latest comparable execution report before the first expensive step. Build every named or implied gate target before parser, pure, live, or coverage work. If any auxiliary target fails to compile, stop the session at the clean-build gate, classify the run as `FAIL`, and record the exact target and compiler errors. Do not narrow the build to only the coverage script's focused target list unless the Manager gate explicitly narrows the target set.
+
+## Improvement: pass absolute roots to coverage wrappers
+
+Condition:
+- When invoking a PowerShell coverage wrapper that forwards `-SourceRoot`, `-BuildDir`, `-OutDir`, or model paths into OpenCppCoverage arguments
+
+Action:
+- Do pass fully resolved absolute paths, or omit optional root arguments so the wrapper auto-detects absolute paths. Do not pass `-SourceRoot .` or other relative roots because OpenCppCoverage rejects `--sources` values containing `.` or `..`. If a relative-root mistake fails before any coverage target runs, preserve the bad invocation as QA setup evidence, rerun the same coverage block in a fresh root with absolute paths, and base the row outcome on that rerun.

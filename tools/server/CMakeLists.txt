@@ -4,6 +4,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
 set(TARGET server-context)
 
+option(LLAMA_STAGE39_LIVE_TEST_SEAM "Enable the guarded Stage 39 live pressure test seam" OFF)
+
 add_library(${TARGET} STATIC
     server-chat.cpp
     server-chat.h
@@ -45,12 +47,15 @@ if (WIN32)
         server-crash-handler.cpp
         server-crash-handler.h
     )
-    target_link_libraries(${TARGET} PUBLIC dbghelp)
+    target_link_libraries(${TARGET} PUBLIC dbghelp bcrypt)
 endif()
 
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(${TARGET} PRIVATE LLAMA_SERVER_CACHE_TESTS)
+if (LLAMA_STAGE39_LIVE_TEST_SEAM)
+    target_compile_definitions(${TARGET} PUBLIC LLAMA_STAGE39_LIVE_TEST_SEAM)
+endif()
 target_link_libraries(${TARGET} PUBLIC llama-common mtmd ${CMAKE_THREAD_LIBS_INIT})
 
 # llama-server-impl: server logic, reusable by app

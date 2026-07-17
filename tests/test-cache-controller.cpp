@@ -3943,19 +3943,9 @@ void test_stage23_target_draft_demotion_pressure_counts_both_payloads() {
     printf("  PASSED\n");
 }
 
-// Stage 24 D-EXEC-24-01 fix: when resident bytes already exceed the hot
-// budget, mark_payload_kind_evicted must skip the demote attempt and go
-// straight to immediate eviction. Otherwise the demote gate rejects with
-// "outstanding demotions exceed payload budget", the controller logs the
-// redundant "demotion failed, falling back to immediate eviction" warning,
-// and the eviction plan only frees one entry per cycle while new saves
-// keep arriving. Verify:
-//   1) no demotion_successes while the worker cannot drain (immediate evictions
-//      dominate the budget recovery instead of queue pressure),
-//   2) immediate evictions happen on every saved-overflow cycle,
-//   3) resident bytes drop to the budget.
-void test_stage24_over_budget_eviction_skips_demote() {
-    printf("test-cache-controller: Stage 24 over-budget eviction skips demote attempt...\n");
+// Stage 39: hot pressure must try cold retention before payload eviction.
+void test_stage39_over_budget_demotion_precedes_eviction() {
+    printf("test-cache-controller: Stage 39 over-budget demotion precedes eviction...\n");
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
@@ -3963,6 +3953,7 @@ void test_stage24_over_budget_eviction_skips_demote() {
 
     const std::string cold_dir =
         (std::filesystem::temp_directory_path() / "stage24_over_budget_evict_test").string();
+    std::filesystem::remove_all(cold_dir, std::error_code{});
     std::filesystem::create_directories(cold_dir);
     ctrl.debug_set_cold_store_for_tests(cold_dir);
     // Stage 28 R28-BUG-04 Phase C: async worker start/stop retired;
@@ -3978,13 +3969,270 @@ void test_stage24_over_budget_eviction_skips_demote() {
 
     json stats = ctrl.get_stats();
     const size_t resident = stats["resident_payload_bytes"].get<size_t>();
-    assert(resident <= 200);
-    assert(stats["n_payload_evictions"].get<size_t>() > 0);
+    require_or_abort(resident <= 200, "hot residency exceeds Stage 39 budget");
+    require_or_abort(stats["n_demotion_successes"].get<size_t>() == 6,
+                     "expected six cold demotions");
+    require_or_abort(stats["n_payload_evictions"].get<size_t>() == 0,
+                     "payload evicted while cold had room");
+    require_or_abort(stats["n_cold_payload_count"].get<size_t>() == 6,
+                     "expected six cold payloads");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 8,
+                     "payload pressure removed lookup entries");
 
     json final_stats = ctrl.get_stats();
-    assert(final_stats["resident_payload_bytes"].get<size_t>() <= 200);
+    require_or_abort(final_stats["resident_payload_bytes"].get<size_t>() <= 200,
+                     "final hot residency exceeds Stage 39 budget");
 
     std::filesystem::remove_all(cold_dir, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_payload_larger_than_hot_budget_can_retain_cold() {
+    printf("test-cache-controller: Stage 39 oversized hot payload retains in cold...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(200);
+
+    const std::string cold_dir =
+        (std::filesystem::temp_directory_path() / "stage39_oversized_hot_payload_test").string();
+    std::filesystem::remove_all(cold_dir, std::error_code{});
+    std::filesystem::create_directories(cold_dir);
+    ctrl.debug_set_cold_store_for_tests(cold_dir);
+    ctrl.debug_add_entry_for_tests(
+        create_tokens({601, 602}), false, "stage39-oversized-hot", 300, 0);
+
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["resident_payload_bytes"].get<size_t>() == 0,
+                     "oversized payload hot bytes were not released");
+    require_or_abort(stats["n_cold_payload_count"].get<size_t>() == 1,
+                     "oversized payload did not move to cold");
+    require_or_abort(stats["n_payload_evictions"].get<size_t>() == 0,
+                     "oversized payload was evicted while cold had room");
+
+    std::filesystem::remove_all(cold_dir, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_non_capacity_demotion_failure_retains_hot() {
+    printf("test-cache-controller: Stage 39 non-capacity demotion failure retains hot...\n");
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(100);
+    const auto cold_dir = std::filesystem::temp_directory_path() / "stage39_non_capacity_failure";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir, ec);
+    ctrl.debug_set_cold_store_for_tests(cold_dir.string());
+    ctrl.debug_cold_store_for_tests().debug_set_write_failure_for_tests(true);
+
+    ctrl.debug_add_entry_for_tests(create_tokens({611, 612}), false, "stage39-failure", 120, 0);
+
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["resident_payload_bytes"].get<size_t>() == 120,
+        "non-capacity demotion failure removed hot bytes");
+    require_or_abort(stats["n_payload_evictions"].get<size_t>() == 0,
+        "non-capacity demotion failure evicted payload");
+    size_t decisions = 0;
+    for (const auto & row : stats["cache_two_layer_decisions"]) {
+        decisions += row["value"].get<size_t>();
+        require_or_abort(row["result"] == "retained_hot" && row["reason"] == "io_error",
+            "non-capacity failure emitted wrong final decision");
+    }
+    require_or_abort(decisions == 1, "non-capacity failure emitted more than one final decision");
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_tp_08_same_entry_independent_descriptor_pressure();
+
+static size_t stage39_decision_count(const json & stats, const char * result, const char * reason) {
+    size_t count = 0;
+    for (const auto & row : stats["cache_two_layer_decisions"]) {
+        if (row["result"] == result && row["reason"] == reason) {
+            count += row["value"].get<size_t>();
+        }
+    }
+    return count;
+}
+
+void test_stage39_production_capacity_reason_selection() {
+    printf("test-cache-controller: Stage 39 production capacity reason selection...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_capacity_reasons";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+    std::filesystem::create_directories(root / "oversized", ec);
+    std::filesystem::create_directories(root / "filled", ec);
+
+    common_params params = create_test_params();
+    {
+        hybrid_cache_controller oversized(params, 100, 1000, nullptr, nullptr);
+        oversized.debug_set_hot_payload_budget_bytes_for_tests(100);
+        oversized.debug_set_cold_store_for_tests((root / "oversized").string());
+        oversized.debug_set_cold_budget_bytes_for_tests(1);
+        oversized.debug_add_entry_for_tests(
+            create_tokens({621, 622}), false, "stage39-oversized-both", 120, 0);
+        const json stats = oversized.get_stats();
+        require_or_abort(stage39_decision_count(stats, "evicted", "oversized_both") == 1,
+            "production pressure did not select oversized_both");
+        require_or_abort(stats["n_payload_evictions"].get<size_t>() == 1,
+            "oversized-both pressure did not preserve capacity eviction");
+    }
+    {
+        hybrid_cache_controller filled(params, 100, 1000, nullptr, nullptr);
+        filled.debug_set_hot_payload_budget_bytes_for_tests(100);
+        filled.debug_set_cold_store_for_tests((root / "filled").string());
+        filled.debug_set_cold_budget_bytes_for_tests(1024);
+        filled.debug_set_cold_accounting_for_tests(1024, 0);
+        filled.debug_add_entry_for_tests(
+            create_tokens({623, 624}), false, "stage39-both-filled", 120, 0);
+        const json stats = filled.get_stats();
+        require_or_abort(stage39_decision_count(stats, "evicted", "both_filled") == 1,
+            "production pressure did not select both_filled");
+        require_or_abort(stage39_decision_count(stats, "evicted", "oversized_both") == 0,
+            "non-oversized pressure selected oversized_both");
+    }
+    std::filesystem::remove_all(root, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_production_cold_disabled_bypass() {
+    printf("test-cache-controller: Stage 39 production cold-disabled bypass...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(100);
+    ctrl.debug_add_entry_for_tests(
+        create_tokens({625, 626}), false, "stage39-cold-disabled", 120, 0);
+
+    const json stats = ctrl.get_stats();
+    require_or_abort(stage39_decision_count(stats, "bypassed", "cold_disabled") == 1,
+        "production cold-disabled pressure did not emit bypass decision");
+    require_or_abort(stats["n_payload_evictions"].get<size_t>() == 1,
+        "cold-disabled bypass changed hot-only eviction");
+    require_or_abort(stats["resident_payload_bytes"].get<size_t>() == 0,
+        "cold-disabled hot-only eviction retained hot bytes");
+    printf("  PASSED\n");
+}
+
+void test_stage39_serialized_size_boundaries() {
+    printf("test-cache-controller: Stage 39 serialized size boundaries...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_size_boundaries";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+    const uint64_t exact = sizeof(cold_store_header) + 100;
+
+    auto run = [&](const char * name, uint64_t budget, size_t occupied, size_t quarantine) {
+        const auto dir = root / name;
+        std::filesystem::create_directories(dir, ec);
+        common_params params = create_test_params();
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        ctrl.debug_set_cold_store_for_tests(dir.string());
+        ctrl.debug_set_cold_budget_bytes_for_tests(budget);
+        ctrl.debug_add_entry_for_tests(create_tokens({701, 702}), false, name, 100, 0);
+        ctrl.debug_set_cold_accounting_for_tests(occupied, quarantine);
+        return std::pair<bool, json>{ctrl.debug_demote_first_payload_for_tests(), ctrl.get_stats()};
+    };
+
+    require_or_abort(run("exact", exact, 0, 0).first, "exact serialized size did not fit");
+    auto over = run("over", exact - 1, 0, 0);
+    require_or_abort(!over.first && over.second["resident_payload_bytes"].get<size_t>() == 100,
+        "one-byte-over admission did not retain hot payload");
+    require_or_abort(!run("overhead", 100, 0, 0).first,
+        "serialized format overhead was not charged");
+    auto overflow = run("overflow", UINT64_MAX, SIZE_MAX, 1);
+    require_or_abort(!overflow.first && overflow.second["resident_payload_bytes"].get<size_t>() == 100,
+        "checked-add overflow did not retain hot payload");
+    bool saw_overflow = false;
+    for (const auto & row : overflow.second["cache_two_layer_decisions"]) {
+        saw_overflow = saw_overflow || (row["result"] == "retained_hot" && row["reason"] == "size_overflow");
+    }
+    require_or_abort(saw_overflow, "checked-add overflow metric missing");
+    std::filesystem::remove_all(root, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_controller_transaction_fault_boundaries() {
+    printf("test-cache-controller: Stage 39 controller transaction fault boundaries...\n");
+    using fault = server_cache_store_cold::debug_tx_fault;
+    const std::array<fault, 4> rollback_faults = {
+        fault::manifest, fault::publish, fault::commit_marker, fault::quarantine,
+    };
+    const auto root = std::filesystem::temp_directory_path() / "stage39_tx_faults";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    for (size_t i = 0; i < rollback_faults.size(); ++i) {
+        const auto dir = root / std::to_string(i);
+        std::filesystem::create_directories(dir, ec);
+        common_params params = create_test_params();
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+        ctrl.debug_set_cold_store_for_tests(dir.string());
+        ctrl.debug_set_cold_budget_bytes_for_tests(sizeof(cold_store_header) + 80);
+        ctrl.debug_add_entry_for_tests(create_tokens({710 + (int) i}), false, "stage39-fault", 80, 0);
+        require_or_abort(ctrl.debug_demote_first_payload_for_tests(), "victim seed demotion failed");
+        ctrl.debug_add_entry_for_tests(create_tokens({720 + (int) i}), false, "stage39-fault", 80, 0);
+        ctrl.debug_cold_store_for_tests().debug_set_tx_fault_for_tests(rollback_faults[i]);
+        require_or_abort(!ctrl.debug_demote_first_payload_for_tests(), "transaction boundary fault committed");
+        require_or_abort(ctrl.get_stats()["resident_payload_bytes"].get<size_t>() == 80,
+            "transaction boundary fault did not retain incoming hot payload");
+        ctrl.debug_cold_store_for_tests().debug_set_tx_fault_for_tests(fault::none);
+        require_or_abort(std::filesystem::exists(dir / "1.cold"),
+            "transaction rollback lost prior cold owner");
+    }
+    std::filesystem::remove_all(root, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_multi_victim_fault_position_matrix() {
+    printf("test-cache-controller: Stage 39 multi-victim fault-position matrix...\n");
+    using fault = server_cache_store_cold::debug_tx_fault;
+    const auto root = std::filesystem::temp_directory_path() / "stage39_multi_victim_matrix";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+
+    struct matrix_row { fault point; size_t occurrence; bool committed; };
+    std::vector<matrix_row> rows;
+    for (size_t i = 1; i <= 3; ++i) rows.push_back({fault::quarantine, i, false});
+    rows.push_back({fault::publish, 1, false});
+    rows.push_back({fault::commit_marker, 1, false});
+    rows.push_back({fault::descriptor_apply, 1, true});
+    for (size_t i = 1; i <= 3; ++i) rows.push_back({fault::victim_unlink, i, true});
+    rows.push_back({fault::manifest_unlink, 1, true});
+
+    for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+        const auto dir = root / std::to_string(row_index);
+        std::filesystem::create_directories(dir, ec);
+        common_params params = create_test_params();
+        params.cache_cold_max_mib = 1;
+        {
+            hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, dir.string());
+            for (int i = 0; i < 3; ++i) {
+                ctrl.debug_add_entry_for_tests(create_tokens({800 + i}), false, "stage39-matrix", 40, 0);
+                require_or_abort(ctrl.debug_demote_first_payload_for_tests(), "Stage 39 matrix victim seed failed");
+            }
+            ctrl.debug_set_cold_budget_bytes_for_tests(sizeof(cold_store_header) + 100);
+            ctrl.debug_add_entry_for_tests(create_tokens({900}), false, "stage39-matrix", 100, 0);
+            ctrl.debug_cold_store_for_tests().debug_set_tx_fault_for_tests(rows[row_index].point, rows[row_index].occurrence);
+            const bool demoted = ctrl.debug_demote_first_payload_for_tests();
+            const bool post_apply = rows[row_index].point == fault::victim_unlink ||
+                rows[row_index].point == fault::manifest_unlink;
+            require_or_abort(post_apply ? demoted : !demoted,
+                "Stage 39 matrix fault returned wrong transaction result");
+        }
+        for (int replay = 0; replay < 2; ++replay) {
+            hybrid_cache_controller fresh(params, 100, 1000, nullptr, nullptr, dir.string());
+            const auto stats = fresh.get_stats();
+            const size_t expected = rows[row_index].committed ? 1 : 3;
+            require_or_abort(stats["n_cold_payload_count"].get<size_t>() == expected,
+                "Stage 39 matrix replay exposed partial descriptor state");
+            require_or_abort(stats["n_cold_payload_bytes"].get<size_t>() ==
+                expected * (sizeof(cold_store_header) + (rows[row_index].committed ? 100 : 40)),
+                "Stage 39 matrix replay accounting mismatch");
+        }
+    }
+    std::filesystem::remove_all(root, ec);
     printf("  PASSED\n");
 }
 
@@ -4177,6 +4425,1383 @@ static std::list<hybrid_cache_entry> & stage22_entries(hybrid_cache_controller &
 
 static std::unordered_map<uint64_t, payload_descriptor> & stage22_descriptors(hybrid_cache_controller & ctrl) {
     return ctrl.*stage22_get_private(stage22_descriptors_tag{});
+}
+
+static std::unordered_map<uint64_t, hot_payload_record> & stage22_hot_payloads_early(hybrid_cache_controller & ctrl) {
+    return ctrl.*stage22_get_private(stage22_hot_payloads_tag{});
+}
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+static stage39_live_pressure_inventory_row stage39_test_row(const json & row) {
+    stage39_live_pressure_inventory_row out;
+    out.payload_id = row.at("payload_id").get<uint64_t>();
+    out.owner_entry_id = row.at("owner_entry_id").get<uint64_t>();
+    out.payload_kind = row.at("payload_kind").get<std::string>();
+    out.pair_state = row.at("pair_state").get<std::string>();
+    out.residency = row.at("residency").get<std::string>();
+    out.protected_root = row.at("protected_root").get<bool>();
+    out.slot_reference_count = row.at("slot_reference_count").get<uint64_t>();
+    out.resident_bytes = row.at("resident_bytes").get<uint64_t>();
+    out.has_serialized_cold_bytes = !row.at("serialized_cold_bytes").is_null();
+    if (out.has_serialized_cold_bytes) out.serialized_cold_bytes = row.at("serialized_cold_bytes").get<uint64_t>();
+    out.hot_order = row.at("hot_order").get<uint64_t>();
+    out.cold_rank = row.at("cold_rank").get<uint64_t>();
+    out.eligible = row.at("eligible").get<bool>();
+    return out;
+}
+
+static stage39_live_pressure_request stage39_test_apply(const json & discovery) {
+    stage39_live_pressure_request request;
+    request.operation = "apply";
+    request.scenario = "tp39-04";
+    request.hot_budget_bytes = 64;
+    request.cold_budget_bytes = 64;
+    request.snapshot_generation = discovery.at("snapshot_generation").get<uint64_t>();
+    request.snapshot_token = discovery.at("snapshot_token").get<std::string>();
+    for (const auto & row : discovery.at("hot_candidates")) request.hot_candidates.push_back(stage39_test_row(row));
+    for (const auto & set : discovery.at("cold_sets")) {
+        stage39_live_pressure_cold_set out;
+        out.incoming_payload_id = set.at("incoming_payload_id").get<uint64_t>();
+        out.incoming_owner_entry_id = set.at("incoming_owner_entry_id").get<uint64_t>();
+        for (const auto & row : set.at("candidates")) out.candidates.push_back(stage39_test_row(row));
+        request.cold_sets.push_back(std::move(out));
+    }
+    request.incoming_payload_id = request.hot_candidates.front().payload_id;
+    request.incoming_owner_entry_id = request.hot_candidates.front().owner_entry_id;
+    uint64_t desired_order = 1000;
+    for (const auto & row : request.hot_candidates) {
+        request.desired_hot_orders.push_back({row.owner_entry_id, desired_order++});
+    }
+    const auto selected = std::find_if(request.cold_sets.begin(), request.cold_sets.end(), [&](const auto & set) {
+        return set.incoming_payload_id == request.incoming_payload_id &&
+            set.incoming_owner_entry_id == request.incoming_owner_entry_id;
+    });
+    if (selected != request.cold_sets.end()) {
+        for (const auto & row : selected->candidates) {
+            request.desired_cold_ranks.push_back({row.payload_id, 77});
+        }
+    }
+    return request;
+}
+
+static std::unique_ptr<hybrid_cache_controller> stage39_test_controller(const std::filesystem::path & root) {
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    auto ctrl = std::make_unique<hybrid_cache_controller>(params, 1, 1000, nullptr, nullptr, root.string());
+    ctrl->debug_add_entry_for_tests(create_tokens({3902, 3903}), false, "stage39-live", 128, 0);
+    return ctrl;
+}
+
+void test_stage39_live_pressure_discover_non_mutating() {
+    printf("test-cache-controller: Stage 39 live pressure discover non-mutating...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_control";
+    auto ctrl = stage39_test_controller(root);
+    const json stats_before = ctrl->get_stats();
+    stage39_live_pressure_request discover;
+    discover.operation = "discover";
+    const auto first = ctrl->stage39_live_pressure_control(discover);
+    const auto second = ctrl->stage39_live_pressure_control(discover);
+    require_or_abort(first.success && second.success && !first.consumed && !second.consumed,
+        "Stage 39 discovery consumed control");
+    require_or_abort(first.body == second.body, "Stage 39 stable discovery changed token or inventory");
+    require_or_abort(stats_before == ctrl->get_stats(), "Stage 39 discovery changed controller metrics or state");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_hot_enumeration_pure() {
+    printf("test-cache-controller: Stage 39 live pressure hot enumeration pure...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_hot_pure";
+    auto ctrl = stage39_test_controller(root);
+    const auto before = ctrl->get_stats().at("n_eviction_payload_blocked_refs");
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    require_or_abort(ctrl->stage39_live_pressure_control(discover).success,
+        "Stage 39 pure hot enumeration discovery failed");
+    require_or_abort(before == ctrl->get_stats().at("n_eviction_payload_blocked_refs"),
+        "Stage 39 pure hot enumeration recorded production blocked refs");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_mixed_kind_cold_exact_set() {
+    printf("test-cache-controller: Stage 39 mixed-kind cold exact set...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_mixed_kind";
+    auto ctrl = stage39_test_controller(root);
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true),
+        "Stage 39 mixed-kind checkpoint admission failed");
+    require_or_abort(ctrl->debug_demote_first_payload_for_tests(),
+        "Stage 39 mixed-kind exact demotion failed");
+    require_or_abort(ctrl->debug_demote_first_checkpoint_for_tests(),
+        "Stage 39 mixed-kind checkpoint demotion failed");
+    ctrl->debug_add_entry_for_tests(create_tokens({3904, 3905}), false, "stage39-live", 128, 0);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    const auto result = ctrl->stage39_live_pressure_control(discover);
+    require_or_abort(result.success && result.body.at("hot_candidates").size() == 1,
+        "Stage 39 mixed-kind discovery lacks incoming hot row");
+    const auto & candidates = result.body.at("cold_sets").front().at("candidates");
+    bool exact = false, checkpoint = false;
+    for (const auto & row : candidates) {
+        exact = exact || row.at("payload_kind") == "exact_blob";
+        checkpoint = checkpoint || row.at("payload_kind") == "checkpoint";
+    }
+    require_or_abort(exact && checkpoint && candidates.size() == 2,
+        "Stage 39 cold set omitted exact or checkpoint descriptor");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_snapshot_stale() {
+    printf("test-cache-controller: Stage 39 live pressure stale snapshot...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_stale";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    ctrl->debug_set_hot_payload_budget_bytes_for_tests(900 * 1024);
+    ctrl->debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
+    const auto stale = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!stale.success && !stale.consumed && stale.error == "stale_snapshot",
+        "Stage 39 changed-then-restored snapshot was accepted");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_apply_atomic_revalidation() {
+    printf("test-cache-controller: Stage 39 live pressure atomic revalidation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_revalidate";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    request.hot_candidates.front().resident_bytes++;
+    const auto rejected = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!rejected.success && !rejected.consumed && rejected.error == "stale_snapshot",
+        "Stage 39 exact-set mismatch consumed control");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_snapshot_wrong_token() {
+    printf("test-cache-controller: Stage 39 live pressure wrong snapshot token...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_wrong_token";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    request.snapshot_token[0] = request.snapshot_token[0] == '0' ? '1' : '0';
+    const auto rejected = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!rejected.success && !rejected.consumed && rejected.error == "stale_snapshot",
+        "Stage 39 wrong HMAC consumed control");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_snapshot_slot_ref_drift() {
+    printf("test-cache-controller: Stage 39 live pressure slot-ref drift...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_slot_ref";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    require_or_abort(ctrl->debug_acquire_first_branch_ref_for_tests(), "Stage 39 slot-ref acquire failed");
+    require_or_abort(ctrl->debug_release_first_branch_ref_for_tests(), "Stage 39 slot-ref release failed");
+    const auto rejected = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!rejected.success && !rejected.consumed && rejected.error == "stale_snapshot",
+        "Stage 39 changed-then-restored slot ref was accepted");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_before_after_generation() {
+    printf("test-cache-controller: Stage 39 live pressure before/after generation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_generations";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    stage39_live_pressure_result applied;
+    try {
+        applied = ctrl->stage39_live_pressure_control(request);
+    } catch (const std::exception & error) {
+        fprintf(stderr, "FAIL: Stage 39 control threw: %s\n", error.what());
+        std::abort();
+    }
+    require_or_abort(applied.success && applied.consumed && applied.pressure_started,
+        "Stage 39 valid live pressure control failed");
+    require_or_abort(applied.body.value("pressure_completed", false),
+        "Stage 39 pressure completion missing");
+    require_or_abort(applied.body.at("after_generation").get<uint64_t>() >
+        applied.body.at("before_generation").get<uint64_t>(), "Stage 39 generation did not advance");
+    require_or_abort(applied.body.at("before").contains("hot_candidates") &&
+        applied.body.at("before").contains("cold_sets") && applied.body.at("after").contains("hot_candidates") &&
+        applied.body.at("after").contains("cold_sets"), "Stage 39 response lacks separate snapshots");
+    auto terminal = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!terminal.success && terminal.consumed && terminal.error == "consumed",
+        "Stage 39 control was not terminal after mutation");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+static uint64_t stage39_test_generation(hybrid_cache_controller & ctrl) {
+    stage39_live_pressure_request discover;
+    discover.operation = "discover";
+    const auto result = ctrl.stage39_live_pressure_control(discover);
+    require_or_abort(result.success, "Stage 39 generation discovery failed");
+    return result.body.at("snapshot_generation").get<uint64_t>();
+}
+
+static stage39_live_pressure_request stage39_capture_snapshot(hybrid_cache_controller & ctrl) {
+    stage39_live_pressure_request discover;
+    discover.operation = "discover";
+    const auto result = ctrl.stage39_live_pressure_control(discover);
+    require_or_abort(result.success, "Stage 39 snapshot capture failed");
+    stage39_live_pressure_request request;
+    request.operation = "apply";
+    request.scenario = "tp39-04";
+    request.hot_budget_bytes = 64;
+    request.cold_budget_bytes = 64;
+    request.snapshot_generation = result.body.at("snapshot_generation").get<uint64_t>();
+    request.snapshot_token = result.body.at("snapshot_token").get<std::string>();
+    return request;
+}
+
+static void stage39_require_snapshot_stale(
+        hybrid_cache_controller & ctrl,
+        const stage39_live_pressure_request & request,
+        const char * message) {
+    stage39_live_pressure_request discover;
+    discover.operation = "discover";
+    const auto after = ctrl.stage39_live_pressure_control(discover);
+    require_or_abort(after.success &&
+        after.body.at("snapshot_generation").get<uint64_t>() > request.snapshot_generation &&
+        after.body.at("snapshot_token").get<std::string>() != request.snapshot_token,
+        message);
+    const auto stale = ctrl.stage39_live_pressure_control(request);
+    require_or_abort(!stale.success && !stale.consumed && stale.error == "stale_snapshot", message);
+    printf("  snapshot evidence: before_generation=%" PRIu64 " after_generation=%" PRIu64
+           " token_changed=1 stale_rejected=1\n",
+        request.snapshot_generation, after.body.at("snapshot_generation").get<uint64_t>());
+}
+
+static void stage39_link_recovered_owner_for_snapshot(
+        hybrid_cache_controller & ctrl,
+        uint64_t payload_id,
+        uint64_t owner_entry_id) {
+    hybrid_cache_entry owner;
+    owner.entry_id = owner_entry_id;
+    owner.payload_id = payload_id;
+    stage22_entries(ctrl).push_back(std::move(owner));
+}
+
+static size_t stage39_write_committed_recovery_for_test(const std::filesystem::path & root, uint64_t payload_id) {
+    std::filesystem::create_directories(root);
+    server_cache_store_cold store;
+    require_or_abort(store.configure(root.string(), COLD_STORE_FORMAT_VERSION_1),
+        "Stage 39 recovery store configure failed");
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = payload_id;
+    snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_only);
+    const std::vector<uint8_t> target(128, 0x39);
+    auto prepared = store.prepare(payload_id, target, {}, snapshot);
+    require_or_abort(static_cast<bool>(prepared), "Stage 39 recovery prepare failed");
+    cold_tx_manifest manifest{};
+    manifest.tx_id = payload_id + 1000;
+    manifest.state = cold_tx_state::published;
+    manifest.incoming_descriptor.file = prepared.object.descriptor;
+    manifest.incoming_descriptor.payload_kind = static_cast<uint8_t>(payload_kind::exact_blob);
+    manifest.incoming_descriptor.owner = {payload_id + 2000, 0};
+    manifest.incoming_exact_bytes = prepared.object.exact_bytes;
+    manifest.incoming_final_path = prepared.object.final_path;
+    manifest.logical_bytes_after = prepared.object.exact_bytes;
+    manifest.incoming = prepared.object;
+    require_or_abort(store.write_manifest(manifest) && store.publish(prepared.object, manifest.tx_id) &&
+        store.mark_committed(manifest), "Stage 39 committed recovery setup failed");
+    return prepared.object.exact_bytes;
+}
+
+void test_stage39_live_pressure_normal_cold_cleanup_generation() {
+    printf("test-cache-controller: Stage 39 normal cold cleanup generation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_normal_cleanup";
+    std::filesystem::remove_all(root, std::error_code{});
+    std::filesystem::create_directories(root);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr, root.string());
+    ctrl.debug_add_entry_for_tests(create_tokens({3902, 3903}), false, "stage39-live", 128, 0);
+    const auto request = stage39_capture_snapshot(ctrl);
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = 39010;
+    snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_only);
+    const std::vector<uint8_t> target(128, 0x39);
+    const cold_ref ref = ctrl.debug_cold_store_for_tests().write(snapshot.payload_id, target, {}, snapshot);
+    require_or_abort(ref == snapshot.payload_id, "Stage 39 cleanup cold-file setup failed");
+    payload_descriptor descriptor{};
+    descriptor.payload_id = snapshot.payload_id;
+    descriptor.kind = payload_kind::exact_blob;
+    descriptor.pair_state = payload_pair_state::target_only;
+    descriptor.residency = payload_residency_state::cold;
+    descriptor.store_ref.id = ref;
+    descriptor.owner_entry_id = 49010;
+    stage22_descriptors(ctrl)[descriptor.payload_id] = descriptor;
+    ctrl.tx_update();
+    require_or_abort(stage22_descriptors(ctrl).count(snapshot.payload_id) == 0 &&
+        !std::filesystem::exists(root / "9862.cold"), "Stage 39 normal cold cleanup did not execute");
+    stage39_require_snapshot_stale(ctrl, request,
+        "Stage 39 normal cold cleanup did not stale generation and token");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_committed_recovery_generation() {
+    printf("test-cache-controller: Stage 39 committed recovery generation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_committed_recovery";
+    std::filesystem::remove_all(root, std::error_code{});
+    std::filesystem::create_directories(root);
+    common_params before_params = create_test_params();
+    before_params.cache_cold_max_mib = 1;
+    auto before_ctrl = std::make_unique<hybrid_cache_controller>(
+        before_params, 1, 1000, nullptr, nullptr, root.string());
+    const auto request = stage39_capture_snapshot(*before_ctrl);
+    before_ctrl.reset();
+    const size_t exact_bytes = stage39_write_committed_recovery_for_test(root, 39020);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr, root.string());
+    const auto stats = ctrl.get_stats();
+    require_or_abort(ctrl.debug_cache_generation_for_tests() >= 2 &&
+        stats.at("n_cold_payload_descriptors").get<size_t>() == 1 &&
+        stats.at("n_cold_payload_bytes").get<size_t>() == exact_bytes,
+        "Stage 39 committed recovery did not reconstruct descriptor accounting or generation");
+    require_or_abort(ctrl.debug_recovery_generation_for_tests() > request.snapshot_generation &&
+        ctrl.debug_recovery_cleanup_generation_for_tests() > ctrl.debug_recovery_generation_for_tests(),
+        "Stage 39 committed recovery and replay cleanup generations were not distinct");
+    printf("  recovery evidence: reconstruction_generation=%" PRIu64 " cleanup_generation=%" PRIu64 "\n",
+        ctrl.debug_recovery_generation_for_tests(), ctrl.debug_recovery_cleanup_generation_for_tests());
+    stage39_link_recovered_owner_for_snapshot(ctrl, 39020, 41020);
+    stage39_require_snapshot_stale(ctrl, request,
+        "Stage 39 committed recovery did not stale generation and token");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_committed_cleanup_generation() {
+    printf("test-cache-controller: Stage 39 committed cleanup generation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_committed_cleanup";
+    std::filesystem::remove_all(root, std::error_code{});
+    std::filesystem::create_directories(root);
+    common_params before_params = create_test_params();
+    before_params.cache_cold_max_mib = 1;
+    auto before_ctrl = std::make_unique<hybrid_cache_controller>(
+        before_params, 1, 1000, nullptr, nullptr, root.string());
+    const auto request = stage39_capture_snapshot(*before_ctrl);
+    before_ctrl.reset();
+    (void) stage39_write_committed_recovery_for_test(root, 39030);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    hybrid_cache_controller ctrl(params, 1, 1000, nullptr, nullptr, root.string());
+    const auto replay = ctrl.debug_cold_store_for_tests().recover_transactions();
+    require_or_abort(ctrl.debug_cache_generation_for_tests() >= 3 && replay.committed.empty() &&
+        replay.claims.size() == 1,
+        "Stage 39 committed cleanup did not advance generation or remove replay state");
+    require_or_abort(ctrl.debug_recovery_generation_for_tests() > request.snapshot_generation &&
+        ctrl.debug_recovery_cleanup_generation_for_tests() > ctrl.debug_recovery_generation_for_tests() &&
+        ctrl.debug_cache_generation_for_tests() == ctrl.debug_recovery_cleanup_generation_for_tests(),
+        "Stage 39 committed replay cleanup generation was not distinct from reconstruction");
+    printf("  cleanup evidence: reconstruction_generation=%" PRIu64 " cleanup_generation=%" PRIu64 "\n",
+        ctrl.debug_recovery_generation_for_tests(), ctrl.debug_recovery_cleanup_generation_for_tests());
+    stage39_link_recovered_owner_for_snapshot(ctrl, 39030, 41030);
+    stage39_require_snapshot_stale(ctrl, request,
+        "Stage 39 committed cleanup did not stale generation and token");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_inventory_integrity_retryable() {
+    printf("test-cache-controller: Stage 39 inventory integrity retryable...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_integrity";
+    auto ctrl = stage39_test_controller(root);
+    ctrl->debug_set_cold_accounting_for_tests(1, 0);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    const auto rejected = ctrl->stage39_live_pressure_control(discover);
+    require_or_abort(!rejected.success && !rejected.consumed && rejected.error == "inventory_integrity_error",
+        "Stage 39 integrity failure was not retryable");
+    ctrl->debug_set_cold_accounting_for_tests(0, 0);
+    require_or_abort(ctrl->stage39_live_pressure_control(discover).success,
+        "Stage 39 integrity retry did not recover");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_snapshot_changed_restored() {
+    printf("test-cache-controller: Stage 39 changed-restored snapshot...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_changed_restored";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    ctrl->debug_set_hot_payload_budget_bytes_for_tests(900 * 1024);
+    ctrl->debug_set_hot_payload_budget_bytes_for_tests(1024 * 1024);
+    const auto rejected = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!rejected.success && rejected.error == "stale_snapshot" && !rejected.consumed,
+        "Stage 39 restored state recreated an old snapshot");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_snapshot_budget_drift() {
+    printf("test-cache-controller: Stage 39 budget snapshot drift...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_budget_drift";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    ctrl->debug_set_cold_budget_bytes_for_tests(900 * 1024);
+    const auto rejected = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!rejected.success && rejected.error == "stale_snapshot" && !rejected.consumed,
+        "Stage 39 budget drift did not stale snapshot");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_generation_mutation_matrix() {
+    printf("test-cache-controller: Stage 39 generation mutation matrix...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_generation_matrix";
+    auto ctrl = stage39_test_controller(root);
+    uint64_t generation = stage39_test_generation(*ctrl);
+    auto require_advanced = [&](const char * family) {
+        const uint64_t current = stage39_test_generation(*ctrl);
+        require_or_abort(current > generation, family);
+        generation = current;
+    };
+    ctrl->debug_add_entry_for_tests(create_tokens({3910, 3911}), false, "stage39-live", 128, 0);
+    require_advanced("Stage 39 entry/descriptor/index/forest generation did not advance");
+    require_or_abort(ctrl->debug_refresh_entry_for_tests(create_tokens({3902, 3903}), true, "stage39-live"),
+        "Stage 39 refresh setup failed");
+    require_advanced("Stage 39 recency/protection generation did not advance");
+    require_or_abort(ctrl->debug_acquire_first_branch_ref_for_tests(), "Stage 39 slot acquire failed");
+    require_advanced("Stage 39 slot acquire generation did not advance");
+    require_or_abort(ctrl->debug_release_first_branch_ref_for_tests(), "Stage 39 slot release failed");
+    require_advanced("Stage 39 slot release generation did not advance");
+    ctrl->debug_set_hot_payload_budget_bytes_for_tests(900 * 1024);
+    require_advanced("Stage 39 budget generation did not advance");
+    require_or_abort(!ctrl->debug_admit_checkpoint_for_tests(64, 0, true),
+        "Stage 39 rollback injection unexpectedly succeeded");
+    require_advanced("Stage 39 descriptor rollback generation did not advance");
+    require_or_abort(ctrl->debug_demote_first_payload_for_tests(), "Stage 39 demotion setup failed");
+    require_advanced("Stage 39 dispatch/completion/residency generation did not advance");
+
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true),
+        "Stage 39 rollback checkpoint setup failed");
+    require_advanced("Stage 39 recovery descriptor setup generation did not advance");
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto rollback_snapshot = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    ctrl->debug_cold_store_for_tests().debug_set_write_failure_for_tests(true);
+    require_or_abort(!ctrl->debug_demote_first_checkpoint_for_tests(),
+        "Stage 39 full rollback fault unexpectedly committed");
+    ctrl->debug_cold_store_for_tests().debug_set_write_failure_for_tests(false);
+    require_advanced("Stage 39 full rollback generation did not advance");
+    const auto rollback_stale = ctrl->stage39_live_pressure_control(rollback_snapshot);
+    require_or_abort(!rollback_stale.success && !rollback_stale.consumed && rollback_stale.error == "stale_snapshot",
+        "Stage 39 changed-restored rollback recreated old snapshot");
+
+    auto prune_ctrl = stage39_test_controller(root / "prune");
+    require_or_abort(prune_ctrl->debug_evict_first_payload_for_tests(), "Stage 39 metadata prune setup failed");
+    prune_ctrl->debug_set_branch_metadata_soft_max_for_tests(1);
+    const uint64_t prune_generation = stage39_test_generation(*prune_ctrl);
+    const size_t pruning_before = prune_ctrl->get_stats().at("cache_branch_pruning_total").get<size_t>();
+    prune_ctrl->tx_update();
+    require_or_abort(stage39_test_generation(*prune_ctrl) > prune_generation,
+        "Stage 39 forest metadata prune generation did not advance");
+    require_or_abort(prune_ctrl->get_stats().at("cache_branch_pruning_total").get<size_t>() > pruning_before,
+        "Stage 39 forest metadata prune did not execute");
+
+    const auto cleanup_root = root / "startup-cleanup";
+    std::error_code cleanup_ec;
+    std::filesystem::create_directories(cleanup_root, cleanup_ec);
+    {
+        std::ofstream orphan(cleanup_root / "deadbeef.cold", std::ios::binary);
+        orphan << "orphan";
+    }
+    common_params cleanup_params = create_test_params();
+    cleanup_params.cache_cold_max_mib = 1;
+    hybrid_cache_controller cleanup_ctrl(cleanup_params, 1, 1000, nullptr, nullptr, cleanup_root.string());
+    require_or_abort(stage39_test_generation(cleanup_ctrl) > 1 &&
+        !std::filesystem::exists(cleanup_root / "deadbeef.cold"),
+        "Stage 39 startup recovery/cleanup generation did not advance");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_idle_dispatch_race() {
+    printf("test-cache-controller: Stage 39 idle dispatch race...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_idle_race";
+    auto ctrl = stage39_test_controller(root);
+    const uint64_t before = stage39_test_generation(*ctrl);
+    std::atomic<bool> discovery_ok{false};
+    std::thread discoverer([&]() {
+        stage39_live_pressure_request discover; discover.operation = "discover";
+        discovery_ok = ctrl->stage39_live_pressure_control(discover).success;
+    });
+    ctrl->debug_add_entry_for_tests(create_tokens({3920, 3921}), false, "stage39-live", 128, 0);
+    discoverer.join();
+    require_or_abort(discovery_ok && stage39_test_generation(*ctrl) > before,
+        "Stage 39 discovery/mutation serialization failed");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_terminal_after_mutation_failure() {
+    printf("test-cache-controller: Stage 39 terminal after mutation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_terminal";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    const auto snapshot = ctrl->stage39_live_pressure_control(discover).body;
+    auto request = stage39_test_apply(snapshot);
+    ctrl->debug_fail_stage39_setup_after_first_write_for_tests();
+    const auto failed = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!failed.success && failed.consumed && !failed.pressure_started &&
+        failed.error == "terminal_setup_failure", "Stage 39 injected setup failure was not terminal");
+    require_or_abort(failed.body.at("after_generation").get<uint64_t>() >
+        failed.body.at("before_generation").get<uint64_t>(),
+        "Stage 39 setup rollback rewound generation");
+    require_or_abort(failed.body.at("after").at("hot_candidates").front().at("hot_order") ==
+        snapshot.at("hot_candidates").front().at("hot_order"),
+        "Stage 39 setup rollback did not restore hot order");
+    const auto terminal = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!terminal.success && terminal.consumed && terminal.error == "consumed",
+        "Stage 39 setup failure did not consume one-shot control");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_normal_tx_update_success() {
+    printf("test-cache-controller: Stage 39 normal tx_update success...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_tx_update";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(result.success && result.pressure_started && result.body.value("pressure_completed", false),
+        "Stage 39 normal tx_update did not complete");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_tp39_02_multi_victim() {
+    printf("test-cache-controller: Stage 39 TP-39-02 guarded multi-victim...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_tp3902";
+    auto ctrl = stage39_test_controller(root);
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(2), true),
+        "TP-39-02 checkpoint setup failed");
+    require_or_abort(ctrl->debug_demote_first_payload_for_tests() && ctrl->debug_demote_first_checkpoint_for_tests(),
+        "TP-39-02 cold victim setup failed");
+    ctrl->debug_add_entry_for_tests(create_tokens({3930, 3931}), false, "stage39-live", 256, 0);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    const auto snapshot = ctrl->stage39_live_pressure_control(discover).body;
+    const auto before_stats = ctrl->get_stats();
+    auto request = stage39_test_apply(snapshot);
+    request.scenario = "tp39-02";
+    request.hot_budget_bytes = 128;
+    request.cold_budget_bytes = 320;
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(result.success && result.pressure_started &&
+        result.body.at("before").at("cold_sets").front().at("candidates").size() == 2,
+        "TP-39-02 did not execute complete multi-victim production pressure");
+    const auto & victims = result.body.at("before").at("cold_sets").front().at("candidates");
+    require_or_abort(victims.at(0).at("payload_id").get<uint64_t>() < victims.at(1).at("payload_id").get<uint64_t>(),
+        "TP-39-02 equal-rank victim order did not use payload ID");
+    const auto after_stats = ctrl->get_stats();
+    require_or_abort(after_stats.at("n_entries") == before_stats.at("n_entries") &&
+        after_stats.at("branch_forest").at("total_nodes") == before_stats.at("branch_forest").at("total_nodes") &&
+        after_stats.at("cache_branch_pruning_total") == before_stats.at("cache_branch_pruning_total"),
+        "TP-39-02 changed retained entry or branch topology");
+    const size_t evicted_descriptors = after_stats.at("n_evicted_payload_descriptors").get<size_t>();
+    const size_t cold_descriptors = after_stats.at("n_cold_payload_descriptors").get<size_t>();
+    if (evicted_descriptors < 2 || cold_descriptors != 1) {
+        fprintf(stderr, "FAIL: TP-39-02 descriptor state mismatch: evicted=%zu cold=%zu\n",
+            evicted_descriptors, cold_descriptors);
+        std::abort();
+    }
+    size_t decisions_before = 0, commits_before = 0;
+    for (const auto & row : before_stats.at("cache_two_layer_decisions")) {
+        if (row.at("result") == "retained_cold" && row.at("reason") == "cold_room_made") {
+            decisions_before += row.at("value").get<size_t>();
+        }
+    }
+    for (const auto & row : before_stats.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits_before += row.at("value").get<size_t>();
+        }
+    }
+    size_t decisions_after = 0, commits_after = 0;
+    for (const auto & row : after_stats.at("cache_two_layer_decisions")) {
+        if (row.at("result") == "retained_cold" && row.at("reason") == "cold_room_made") {
+            decisions_after += row.at("value").get<size_t>();
+        }
+    }
+    for (const auto & row : after_stats.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits_after += row.at("value").get<size_t>();
+        }
+    }
+    require_or_abort(decisions_after == decisions_before + 1 && commits_after == commits_before + 1,
+        "TP-39-02 exact decision/transaction delta mismatch");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_tp39_03_both_filled() {
+    printf("test-cache-controller: Stage 39 TP-39-03 guarded both-filled...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_tp3903";
+    auto ctrl = stage39_test_controller(root);
+    auto & source = stage22_entries(*ctrl).front();
+    source.metadata.compatibility_key = "stage39-tp03-compatible";
+    source.metadata.preparation_id = "stage39-tp03-preparation";
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(1), true),
+        "TP-39-03 checkpoint setup failed");
+    require_or_abort(ctrl->debug_demote_first_checkpoint_for_tests(),
+        "TP-39-03 checkpoint demotion failed");
+    ctrl->debug_add_entry_for_tests(create_tokens({3902, 3941}), false, "stage39-live", 128, 0);
+    auto & destination = stage22_entries(*ctrl).back();
+    destination.metadata.compatibility_key = source.metadata.compatibility_key;
+    destination.metadata.preparation_id = source.metadata.preparation_id;
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    const auto discovery = ctrl->stage39_live_pressure_control(discover).body;
+    auto request = stage39_test_apply(discovery);
+    const auto incoming = std::find_if(request.hot_candidates.begin(), request.hot_candidates.end(), [&](const auto & row) {
+        return row.owner_entry_id == destination.entry_id;
+    });
+    require_or_abort(incoming != request.hot_candidates.end(), "TP-39-03 incoming owner missing");
+    request.incoming_payload_id = incoming->payload_id;
+    request.incoming_owner_entry_id = incoming->owner_entry_id;
+    for (auto & order : request.desired_hot_orders) {
+        order.desired_hot_order = order.owner_entry_id == request.incoming_owner_entry_id ? 1000 : 1001;
+    }
+    const auto before_stats = ctrl->get_stats();
+    request.scenario = "tp39-03";
+    request.tp39_03_cold_owner_setup = "selected_incoming_owner";
+    request.desired_cold_ranks.clear();
+    request.hot_budget_bytes = 200;
+    const auto selected = std::find_if(request.cold_sets.begin(), request.cold_sets.end(), [&](const auto & set) {
+        return set.incoming_owner_entry_id == request.incoming_owner_entry_id;
+    });
+    require_or_abort(selected != request.cold_sets.end() && selected->candidates.size() == 1 &&
+        selected->candidates.front().payload_kind == "checkpoint",
+        "TP-39-03 compatible complete checkpoint set missing");
+    request.cold_budget_bytes = selected->candidates.front().serialized_cold_bytes;
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(result.success && result.pressure_started &&
+        result.body.at("tp39_03_owner_reassignment").at("applied") &&
+        result.body.at("tp39_03_owner_reassignment").at("candidate_count") == 1,
+        "TP-39-03 did not execute checkpoint owner reassignment");
+    const auto after_stats = ctrl->get_stats();
+    size_t decisions = 0;
+    for (const auto & row : after_stats.at("cache_two_layer_decisions")) {
+        if (row.at("result") == "evicted" && row.at("reason") == "both_filled") decisions += row.at("value").get<size_t>();
+    }
+    require_or_abort(decisions == 1 &&
+        after_stats.at("n_payload_evictions").get<size_t>() == before_stats.at("n_payload_evictions").get<size_t>() + 1 &&
+        after_stats.at("n_entries") == before_stats.at("n_entries") &&
+        after_stats.at("branch_forest").at("total_nodes") == before_stats.at("branch_forest").at("total_nodes") &&
+        after_stats.at("cache_branch_pruning_total") == before_stats.at("cache_branch_pruning_total") &&
+        std::none_of(result.body.at("after").at("hot_candidates").begin(),
+            result.body.at("after").at("hot_candidates").end(), [&](const json & row) {
+                return row.at("payload_id").get<uint64_t>() == request.incoming_payload_id;
+            }),
+        "TP-39-03 exact eviction/accounting/topology result mismatch");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_tp39_03_tag_isolation() {
+    printf("test-cache-controller: Stage 39 TP-39-03 tag isolation...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_tp3903_tag";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    request.scenario = "tp39-03";
+    auto missing = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!missing.success && !missing.consumed &&
+        missing.error == "invalid_tp39_03_owner_reassignment", "TP-39-03 missing tag consumed seam");
+    request.scenario = "tp39-04";
+    request.tp39_03_cold_owner_setup = "selected_incoming_owner";
+    auto leaked = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!leaked.success && !leaked.consumed &&
+        leaked.error == "invalid_tp39_03_owner_reassignment", "TP-39-03 tag leaked to another scenario");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_tp39_03_owner_rollback_matrix() {
+    printf("test-cache-controller: Stage 39 TP-39-03 owner rollback matrix...\n");
+    for (size_t fault = 1; fault <= 7; ++fault) {
+        const auto root = std::filesystem::temp_directory_path() /
+            ("stage39_live_pressure_tp3903_rollback_" + std::to_string(fault));
+        auto ctrl = stage39_test_controller(root);
+        auto & source = stage22_entries(*ctrl).front();
+        source.metadata.compatibility_key = "stage39-tp03-compatible";
+        source.metadata.preparation_id = "stage39-tp03-preparation";
+        require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(1), true) &&
+            ctrl->debug_demote_first_checkpoint_for_tests(), "TP-39-03 rollback checkpoint setup failed");
+        ctrl->debug_add_entry_for_tests(create_tokens({3902, 3941}), false, "stage39-live", 128, 0);
+        auto & destination = stage22_entries(*ctrl).back();
+        destination.metadata.compatibility_key = "stage39-tp03-compatible";
+        destination.metadata.preparation_id = "stage39-tp03-preparation";
+        stage39_live_pressure_request discover; discover.operation = "discover";
+        const auto snapshot = ctrl->stage39_live_pressure_control(discover).body;
+        auto request = stage39_test_apply(snapshot);
+        const auto incoming = std::find_if(request.hot_candidates.begin(), request.hot_candidates.end(),
+            [&](const auto & row) { return row.owner_entry_id == destination.entry_id; });
+        require_or_abort(incoming != request.hot_candidates.end(), "TP-39-03 rollback incoming missing");
+        request.scenario = "tp39-03";
+        request.tp39_03_cold_owner_setup = "selected_incoming_owner";
+        request.incoming_payload_id = incoming->payload_id;
+        request.incoming_owner_entry_id = incoming->owner_entry_id;
+        request.desired_cold_ranks.clear();
+        for (auto & order : request.desired_hot_orders) {
+            order.desired_hot_order = order.owner_entry_id == request.incoming_owner_entry_id ? 1000 : 1001;
+        }
+        const auto selected = std::find_if(request.cold_sets.begin(), request.cold_sets.end(),
+            [&](const auto & set) { return set.incoming_owner_entry_id == request.incoming_owner_entry_id; });
+        require_or_abort(selected != request.cold_sets.end() && selected->candidates.size() == 1,
+            "TP-39-03 rollback cold set missing");
+        request.hot_budget_bytes = 200;
+        request.cold_budget_bytes = selected->candidates.front().serialized_cold_bytes;
+        const auto stats_before = ctrl->get_stats();
+        ctrl->debug_fail_stage39_owner_setup_write_for_tests(fault);
+        const auto failed = ctrl->stage39_live_pressure_control(request);
+        require_or_abort(!failed.success && failed.consumed && !failed.pressure_started &&
+            failed.error == "terminal_setup_failure" &&
+            failed.body.at("after_generation").get<uint64_t>() > failed.body.at("before_generation").get<uint64_t>() &&
+            failed.body.at("before") == failed.body.at("after") &&
+            failed.body.at("tp39_03_owner_reassignment").at("rolled_back"),
+            "TP-39-03 owner rollback did not restore exact pre-state");
+        const auto stats_after = ctrl->get_stats();
+        require_or_abort(stats_after.at("cache_two_layer_decisions") == stats_before.at("cache_two_layer_decisions") &&
+            stats_after.at("cache_cold_transactions") == stats_before.at("cache_cold_transactions"),
+            "TP-39-03 owner rollback started pressure or cold transaction");
+        std::filesystem::remove_all(root, std::error_code{});
+    }
+    printf("  PASSED\n");
+}
+
+// TP-39-03 natural-prepared fixtures: one hot owner with both exact and
+// checkpoint payloads. Discovery returns a single hot candidate and an empty
+// cold set. The proof operation returns the runtime proof token that binds
+// the prepared bindings to inventory and process identity.
+static stage39_live_pressure_request stage39_tp39_03_natural_apply(
+        hybrid_cache_controller & ctrl,
+        const std::string & fault,
+        const std::string & run_id) {
+    stage39_live_pressure_request discover;
+    discover.operation = "discover";
+    const auto snapshot = ctrl.stage39_live_pressure_control(discover).body;
+    require_or_abort(snapshot.at("hot_candidates").size() == 1,
+        "TP-39-03 natural fixture expects a single hot owner");
+    require_or_abort(snapshot.at("cold_sets").front().at("candidates").empty(),
+        "TP-39-03 natural fixture expects an empty cold set");
+    stage39_live_pressure_request proof_req;
+    proof_req.operation = "proof";
+    proof_req.snapshot_generation = snapshot.at("snapshot_generation").get<uint64_t>();
+    proof_req.snapshot_token = snapshot.at("snapshot_token").get<std::string>();
+    const auto & hot_row = snapshot.at("hot_candidates").front();
+    const uint64_t owner_entry_id = hot_row.at("owner_entry_id").get<uint64_t>();
+    auto & entries = stage22_entries(ctrl);
+    const auto owner = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+        return entry.entry_id == owner_entry_id;
+    });
+    require_or_abort(owner != entries.end(), "TP-39-03 natural proof could not find owner");
+    proof_req.proof_payload_ids.push_back(owner->payload_id);
+    proof_req.proof_payload_ids.push_back(owner->checkpoint_payload_id);
+    const auto proof = ctrl.stage39_live_pressure_control(proof_req);
+    require_or_abort(proof.success, "TP-39-03 natural proof request failed");
+    stage39_live_pressure_request request;
+    request.operation = "apply";
+    request.scenario = "tp39-03";
+    request.tp39_03_setup = "same_owner_kind_sequence";
+    request.run_id = run_id;
+    request.fault = fault;
+    request.process_identity = proof.body.at("process_identity").get<std::string>();
+    request.proof_token = proof.body.at("proof_token").get<std::string>();
+    request.snapshot_generation = snapshot.at("snapshot_generation").get<uint64_t>();
+    request.snapshot_token = snapshot.at("snapshot_token").get<std::string>();
+    request.incoming_payload_id = owner->payload_id;
+    request.incoming_owner_entry_id = owner_entry_id;
+    request.hot_budget_bytes = hot_row.at("resident_bytes").get<uint64_t>();
+    request.cold_budget_bytes = sizeof(cold_store_header) + std::max(
+        proof.body.at("rows").at(0).at("resident_component_bytes").get<uint64_t>(),
+        proof.body.at("rows").at(1).at("resident_component_bytes").get<uint64_t>());
+    request.hot_candidates.push_back(stage39_test_row(hot_row));
+    for (const auto & set : snapshot.at("cold_sets")) {
+        stage39_live_pressure_cold_set out;
+        out.incoming_payload_id = set.at("incoming_payload_id").get<uint64_t>();
+        out.incoming_owner_entry_id = set.at("incoming_owner_entry_id").get<uint64_t>();
+        request.cold_sets.push_back(std::move(out));
+    }
+    request.desired_hot_orders.push_back({owner_entry_id, 1000});
+    auto build_binding = [&](size_t index) {
+        const auto & row = proof.body.at("rows").at(index);
+        require_or_abort(row.at("residency") == "hot" && row.at("runtime_pair_matches").get<bool>(),
+            "TP-39-03 natural proof row must be hot and pair-matched");
+        stage39_prepared_proof_binding binding;
+        binding.workload_role = "canonical_same_owner";
+        binding.request_number = 1;
+        binding.pressure_step = index + 1;
+        binding.payload_id = row.at("payload_id").get<uint64_t>();
+        binding.owner_entry_id = owner_entry_id;
+        binding.payload_kind = index == 0 ? "exact_blob" : "checkpoint";
+        binding.pair_state = row.at("pair_state").get<std::string>();
+        binding.runtime_has_draft = row.at("runtime_has_draft").get<bool>();
+        binding.target_size_bytes = row.at("target_size_bytes").get<uint64_t>();
+        binding.draft_size_bytes = row.at("draft_size_bytes").get<uint64_t>();
+        binding.target_checksum = row.at("target_checksum").get<uint64_t>();
+        binding.draft_checksum = row.at("draft_checksum").get<uint64_t>();
+        return binding;
+    };
+    request.prepared_bindings.push_back(build_binding(0));
+    request.prepared_bindings.push_back(build_binding(1));
+    return request;
+}
+
+static bool stage39_terminal_forbidden_effects_clear(const json & proof);
+
+static void stage39_require_terminal_fault_matrix(
+        const json & proof,
+        const char * fault,
+        bool checkpoint_attempted) {
+    require_or_abort(proof.at("status") == "failed" && proof.at("fault") == fault,
+        "TP-39-03 terminal status/fault mismatch");
+    require_or_abort(proof.at("checkpoint_attempted").get<bool>() == checkpoint_attempted &&
+        proof.at("checkpoint_prepared").get<bool>() == checkpoint_attempted,
+        "TP-39-03 checkpoint attempt/preparation mismatch");
+    require_or_abort(proof.at("common_sync_observed").get<bool>() &&
+        proof.at("common_sync_generation").get<uint64_t>() >
+            proof.at("exact_return_generation").get<uint64_t>() &&
+        proof.at("final_generation").get<uint64_t>() >=
+            proof.at("common_sync_generation").get<uint64_t>(),
+        "TP-39-03 terminal generation chain mismatch");
+    const auto & records = proof.at("records");
+    require_or_abort(records.size() == (checkpoint_attempted ? 2 : 1) &&
+        records.at(0).at("payload_kind") == "exact_blob",
+        "TP-39-03 prepared record shape mismatch");
+    if (checkpoint_attempted) {
+        require_or_abort(records.at(1).at("payload_kind") == "checkpoint",
+            "TP-39-03 checkpoint prepared record missing");
+    }
+    const auto & state = proof.at("terminal_state");
+    const auto & entry = state.at("entry");
+    const auto & branch = state.at("branch");
+    const auto & exact = state.at("exact_descriptor");
+    const auto & checkpoint = state.at("checkpoint_descriptor");
+    const uint64_t checkpoint_id = checkpoint.at("payload_id").get<uint64_t>();
+    const uint64_t checkpoint_bytes = checkpoint.at("resident_component_bytes").get<uint64_t>();
+    require_or_abort(entry.at("entry_id") == records.at(0).at("owner_entry_id") &&
+        entry.at("exact_link") == records.at(0).at("payload_id") &&
+        entry.at("checkpoint_link").get<uint64_t>() == checkpoint_id &&
+        entry.at("resident_bytes").get<uint64_t>() == checkpoint_bytes &&
+        entry.at("has_target").get<bool>() &&
+        entry.at("has_draft").get<bool>() == records.at(0).at("runtime_has_draft").get<bool>(),
+        "TP-39-03 terminal entry state mismatch");
+    require_or_abort(branch.at("branch_id").get<uint64_t>() != 0 &&
+        branch.at("exact_link") == entry.at("exact_link") &&
+        branch.at("checkpoint_link") == entry.at("checkpoint_link") &&
+        branch.at("resident_bytes") == entry.at("resident_bytes") &&
+        branch.at("has_target") == entry.at("has_target") &&
+        branch.at("has_draft") == entry.at("has_draft") &&
+        branch.at("sync_count") == 1,
+        "TP-39-03 terminal branch state mismatch");
+    require_or_abort(exact.at("payload_id") == records.at(0).at("payload_id") &&
+        exact.at("residency") == "cold" &&
+        exact.at("cold_file_bytes") == records.at(0).at("serialized_bytes") &&
+        exact.at("descriptor_bytes").get<uint64_t>() ==
+            records.at(0).at("target_size_bytes").get<uint64_t>() +
+                records.at(0).at("draft_size_bytes").get<uint64_t>() &&
+        exact.at("byte_map_bytes") == exact.at("cold_file_bytes") &&
+        checkpoint.at("residency") == "hot" && checkpoint_bytes > 0,
+        "TP-39-03 terminal descriptor state mismatch");
+    require_or_abort(state.at("cold_inventory").size() == 1 &&
+        state.at("cold_inventory").at(0).at("bytes") == exact.at("cold_file_bytes") &&
+        state.at("staging_inventory").empty(),
+        "TP-39-03 terminal cold/staging inventory mismatch");
+    const auto & topology = state.at("topology");
+    require_or_abort(topology.at("entry_count").get<size_t>() > 0 &&
+        topology.at("node_count").get<size_t>() > 0 && topology.at("lru_memberships") == 1 &&
+        topology.at("entry_count_delta") == 0 && topology.at("node_count_delta") == 0 &&
+        topology.at("lru_membership_delta") == 0 && topology.at("branch_prune_delta") == 0 &&
+        topology.at("later_victim_count") == 0,
+        "TP-39-03 terminal topology changed");
+    require_or_abort(state.at("decision_deltas") == json::array({{
+            {"mode", "hybrid"}, {"result", "retained_cold"}, {"reason", "cold_room"}, {"value", 1}}}) &&
+        state.at("transaction_deltas") == json::array({{
+            {"mode", "hybrid"}, {"result", "commit"}, {"reason", "none"}, {"value", 1}}}) &&
+        state.at("diagnostic_deltas").empty(),
+        "TP-39-03 terminal metric tuple delta mismatch");
+    const auto & observations = state.at("forbidden_observations");
+    for (const char * key : {"checkpoint_cold_file", "checkpoint_descriptor", "checkpoint_link"}) {
+        require_or_abort(observations.at(key).at("before") == observations.at(key).at("after") &&
+            observations.at(key).at("event_delta") == 0,
+            "TP-39-03 forbidden observation changed");
+    }
+    const auto & forbidden = state.at("forbidden_effects");
+    require_or_abort(stage39_terminal_forbidden_effects_clear(proof),
+        "TP-39-03 forbidden terminal effect observed");
+}
+
+static bool stage39_terminal_forbidden_effects_clear(const json & proof) {
+    const auto & forbidden = proof.at("terminal_state").at("forbidden_effects");
+    for (const char * key : {"checkpoint_classification_delta", "checkpoint_admission_delta",
+            "checkpoint_publish_delta", "checkpoint_commit_delta", "checkpoint_cold_file_delta",
+            "checkpoint_descriptor_mutation_delta", "checkpoint_link_mutation_delta",
+            "checkpoint_decision_delta", "checkpoint_diagnostic_delta", "later_kind_work_delta",
+            "post_abort_pressure_delta", "post_abort_diagnostic_delta", "later_work_delta",
+            "later_victim_delta", "explicit_generation_advance_delta",
+            "duplicate_sync_delta", "success_snapshot_count"}) {
+        if (forbidden.at(key) != 0) {
+            return false;
+        }
+    }
+    return forbidden.at("failed_apply_count") == 1;
+}
+
+void test_stage39_live_pressure_observed_forbidden_effect_probes() {
+    printf("test-cache-controller: Stage 39 observed forbidden-effect probes...\n");
+    struct forbidden_effect_probe {
+        std::string probe;
+        std::string field;
+        bool component_later_work;
+    };
+    const std::vector<forbidden_effect_probe> effects = {
+        {"checkpoint_classification_delta", "checkpoint_classification_delta", false},
+        {"checkpoint_publish_delta", "checkpoint_publish_delta", false},
+        {"checkpoint_commit_delta", "checkpoint_commit_delta", false},
+        {"checkpoint_cold_file_delta", "checkpoint_cold_file_delta", false},
+        {"checkpoint_descriptor_mutation_delta", "checkpoint_descriptor_mutation_delta", false},
+        {"checkpoint_link_mutation_delta", "checkpoint_link_mutation_delta", false},
+        {"explicit_generation_advance_delta", "explicit_generation_advance_delta", false},
+        {"later_kind_work", "later_kind_work_delta", true},
+        {"post_abort_pressure", "post_abort_pressure_delta", true},
+        {"post_abort_diagnostic", "post_abort_diagnostic_delta", true},
+    };
+    for (const auto & effect : effects) {
+        const auto root = std::filesystem::temp_directory_path() / ("stage39_tp39_03_probe_" + effect.field);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root, ec);
+        common_params params = create_test_params();
+        params.cache_cold_max_mib = 1;
+        auto ctrl = std::make_unique<hybrid_cache_controller>(params, 1, 1000, nullptr, nullptr, root.string());
+        ctrl->debug_add_entry_for_tests(create_tokens({3902, 3903}), false, "stage39-live", 256, 0);
+        require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(1), true),
+            "TP-39-03 forbidden-effect probe checkpoint admission failed");
+        ctrl->debug_stage39_forbidden_effect_probe_for_tests(effect.probe);
+        auto request = stage39_tp39_03_natural_apply(*ctrl, "midpoint", "tp39-03-" + effect.field);
+        const auto result = ctrl->stage39_live_pressure_control(request);
+        require_or_abort(!result.success && result.error == "prepared_midpoint_abort" &&
+            result.body.contains("prepared_proof"),
+            "TP-39-03 forbidden-effect probe did not reach terminal proof");
+        const auto & proof = result.body.at("prepared_proof");
+        const auto & state = proof.at("terminal_state");
+        const auto & forbidden = state.at("forbidden_effects");
+        require_or_abort(forbidden.at(effect.field) == 1 &&
+            !stage39_terminal_forbidden_effects_clear(proof),
+            "TP-39-03 common terminal matrix accepted observed forbidden effect");
+        if (effect.component_later_work) {
+            uint64_t sibling_sum = 0;
+            for (const char * key : {"later_kind_work_delta", "post_abort_pressure_delta",
+                    "post_abort_diagnostic_delta"}) {
+                if (effect.field != key) {
+                    sibling_sum += forbidden.at(key).get<uint64_t>();
+                }
+            }
+            require_or_abort(sibling_sum == 0 && forbidden.at("later_work_delta") == 1,
+                "TP-39-03 later-work component matrix mismatch");
+            require_or_abort(state.at("checkpoint_descriptor").at("residency") == "hot" &&
+                state.at("topology").at("entry_count_delta") == 0 &&
+                state.at("topology").at("node_count_delta") == 0 &&
+                state.at("topology").at("lru_membership_delta") == 0 &&
+                state.at("topology").at("branch_prune_delta") == 0 &&
+                state.at("diagnostic_deltas").empty(),
+                "TP-39-03 later-work component probe changed product state");
+        }
+        std::filesystem::remove_all(root, ec);
+    }
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_prepared_proof_midpoint_fault_common_epilogue() {
+    printf("test-cache-controller: Stage 39 live pressure prepared proof midpoint fault common-epilogue...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_tp39_03_prepared_midpoint_fault";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    auto ctrl = std::make_unique<hybrid_cache_controller>(params, 1, 1000, nullptr, nullptr, root.string());
+    ctrl->debug_add_entry_for_tests(create_tokens({3902, 3903}), false, "stage39-live", 256, 0);
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(1), true),
+        "TP-39-03 natural checkpoint admission failed");
+    const auto stats_before = ctrl->get_stats();
+    auto request = stage39_tp39_03_natural_apply(*ctrl, "midpoint", "tp39-03-midpoint-fault");
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!result.success && result.consumed && result.pressure_started,
+        "TP-39-03 midpoint fault did not consume one-shot control with pressure started");
+    if (result.error != "prepared_midpoint_abort") {
+        fprintf(stderr, "FAIL: TP-39-03 midpoint fault error=%s\n", result.error.c_str());
+    }
+    require_or_abort(result.error == "prepared_midpoint_abort",
+        "TP-39-03 midpoint fault error latch mismatch");
+    require_or_abort(result.body.contains("prepared_proof"),
+        "TP-39-03 midpoint fault response lacks prepared proof");
+    const auto & proof = result.body.at("prepared_proof");
+    stage39_require_terminal_fault_matrix(proof, "midpoint", false);
+    // Retrieval binds the ordered observations and rejects tampering.
+    stage39_live_pressure_request retrieve;
+    retrieve.operation = "prepared_proof";
+    retrieve.process_identity = request.process_identity;
+    retrieve.run_id = request.run_id;
+    retrieve.terminal_hmac = proof.at("terminal_hmac").get<std::string>();
+    retrieve.test_session_id = proof.at("test_session_id").get<std::string>();
+    const auto retrieved = ctrl->stage39_live_pressure_control(retrieve);
+    require_or_abort(retrieved.success && retrieved.error.empty() && retrieved.body == proof,
+        "TP-39-03 midpoint fault authenticated retrieval failed");
+    retrieve.terminal_hmac[0] = retrieve.terminal_hmac[0] == '0' ? '1' : '0';
+    require_or_abort(!ctrl->stage39_live_pressure_control(retrieve).success,
+        "TP-39-03 midpoint fault tampered HMAC retrieval succeeded");
+    const auto retry = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!retry.success && retry.error == "consumed",
+        "TP-39-03 midpoint fault retry was not consumed");
+    const auto stats_after = ctrl->get_stats();
+    require_or_abort(stats_after.at("n_entries") == stats_before.at("n_entries") &&
+        stats_after.at("branch_forest").at("total_nodes") == stats_before.at("branch_forest").at("total_nodes") &&
+        stats_after.at("cache_branch_pruning_total").get<size_t>() ==
+            stats_before.at("cache_branch_pruning_total").get<size_t>(),
+        "TP-39-03 midpoint fault changed entry/branch/pruning topology");
+    // The committed exact demotion is a legitimate retained-cold decision; no
+    // checkpoint transaction may have been committed on either fault.
+    size_t commits = 0;
+    for (const auto & row : stats_after.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits += row.at("value").get<size_t>();
+        }
+    }
+    size_t commits_before = 0;
+    for (const auto & row : stats_before.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits_before += row.at("value").get<size_t>();
+        }
+    }
+    if (commits != commits_before + 1) {
+        fprintf(stderr, "FAIL: TP-39-03 midpoint fault commits=%zu before=%zu\n", commits, commits_before);
+        std::abort();
+    }
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_prepared_proof_step2_fault_common_epilogue() {
+    printf("test-cache-controller: Stage 39 live pressure prepared proof step-2 fault common-epilogue...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_tp39_03_prepared_step2_fault";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root, ec);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    auto ctrl = std::make_unique<hybrid_cache_controller>(params, 1, 1000, nullptr, nullptr, root.string());
+    ctrl->debug_add_entry_for_tests(create_tokens({3902, 3903}), false, "stage39-live", 256, 0);
+    require_or_abort(ctrl->debug_admit_checkpoint_for_tests(64, 0, int64_t(1), true),
+        "TP-39-03 natural checkpoint admission failed");
+    const auto stats_before = ctrl->get_stats();
+    auto request = stage39_tp39_03_natural_apply(*ctrl, "step2", "tp39-03-step2-fault");
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!result.success && result.consumed && result.pressure_started,
+        "TP-39-03 step-2 fault did not consume one-shot control with pressure started");
+    require_or_abort(result.error == "prepared_boundary_abort",
+        "TP-39-03 step-2 fault error latch mismatch");
+    const auto & proof = result.body.at("prepared_proof");
+    stage39_require_terminal_fault_matrix(proof, "step2", true);
+    stage39_live_pressure_request retrieve;
+    retrieve.operation = "prepared_proof";
+    retrieve.process_identity = request.process_identity;
+    retrieve.run_id = request.run_id;
+    retrieve.terminal_hmac = proof.at("terminal_hmac").get<std::string>();
+    retrieve.test_session_id = proof.at("test_session_id").get<std::string>();
+    const auto retrieved = ctrl->stage39_live_pressure_control(retrieve);
+    require_or_abort(retrieved.success && retrieved.error.empty() && retrieved.body == proof,
+        "TP-39-03 step-2 fault authenticated retrieval failed");
+    retrieve.terminal_hmac[0] = retrieve.terminal_hmac[0] == '0' ? '1' : '0';
+    require_or_abort(!ctrl->stage39_live_pressure_control(retrieve).success,
+        "TP-39-03 step-2 fault tampered HMAC retrieval succeeded");
+    const auto retry = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(!retry.success && retry.error == "consumed",
+        "TP-39-03 step-2 fault retry was not consumed");
+    const auto stats_after = ctrl->get_stats();
+    require_or_abort(stats_after.at("n_entries") == stats_before.at("n_entries") &&
+        stats_after.at("branch_forest").at("total_nodes") == stats_before.at("branch_forest").at("total_nodes") &&
+        stats_after.at("cache_branch_pruning_total").get<size_t>() ==
+            stats_before.at("cache_branch_pruning_total").get<size_t>(),
+        "TP-39-03 step-2 fault changed entry/branch/pruning topology");
+    size_t commits = 0;
+    for (const auto & row : stats_after.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits += row.at("value").get<size_t>();
+        }
+    }
+    size_t commits_before = 0;
+    for (const auto & row : stats_before.at("cache_cold_transactions")) {
+        if (row.at("result") == "commit" && row.at("reason") == "none") {
+            commits_before += row.at("value").get<size_t>();
+        }
+    }
+    if (commits != commits_before + 1) {
+        fprintf(stderr, "FAIL: TP-39-03 step-2 fault commits=%zu before=%zu (only committed exact)",
+            commits, commits_before);
+        std::abort();
+    }
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+
+void test_stage39_live_pressure_tp39_04_oversized_both() {
+    printf("test-cache-controller: Stage 39 TP-39-04 guarded oversized-both...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_live_pressure_tp3904";
+    auto ctrl = stage39_test_controller(root);
+    stage39_live_pressure_request discover; discover.operation = "discover";
+    auto request = stage39_test_apply(ctrl->stage39_live_pressure_control(discover).body);
+    const auto before_stats = ctrl->get_stats();
+    const auto result = ctrl->stage39_live_pressure_control(request);
+    require_or_abort(result.success && result.pressure_started &&
+        result.body.at("before").at("hot_candidates").front().at("resident_bytes").get<uint64_t>() >
+            request.hot_budget_bytes,
+        "TP-39-04 did not execute measured oversized production pressure");
+    const auto after_stats = ctrl->get_stats();
+    size_t decisions = 0;
+    for (const auto & row : after_stats.at("cache_two_layer_decisions")) {
+        if (row.at("result") == "evicted" && row.at("reason") == "oversized_both") decisions += row.at("value").get<size_t>();
+    }
+    require_or_abort(decisions == 1 &&
+        after_stats.at("n_payload_evictions").get<size_t>() == before_stats.at("n_payload_evictions").get<size_t>() + 1 &&
+        after_stats.at("n_entries") == before_stats.at("n_entries") &&
+        after_stats.at("branch_forest").at("total_nodes") == before_stats.at("branch_forest").at("total_nodes") &&
+        after_stats.at("cache_branch_pruning_total") == before_stats.at("cache_branch_pruning_total") &&
+        std::none_of(result.body.at("after").at("hot_candidates").begin(),
+            result.body.at("after").at("hot_candidates").end(), [&](const json & row) {
+                return row.at("payload_id").get<uint64_t>() == request.incoming_payload_id;
+            }) &&
+        after_stats.at("n_cold_payload_descriptors").get<size_t>() == 0,
+        "TP-39-04 exact decision/accounting/topology/pair result mismatch");
+    std::filesystem::remove_all(root, std::error_code{});
+    printf("  PASSED\n");
+}
+#endif
+
+static void stage22_remove_payload(hybrid_cache_controller & ctrl, uint64_t payload_id);
+
+void test_stage39_tp_08_same_entry_independent_descriptor_pressure() {
+    printf("test-cache-controller: Stage 39 TP-39-08 same-entry independent descriptor pressure...\n");
+    const auto root = std::filesystem::temp_directory_path() / "stage39_tp08_descriptor_pressure";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::filesystem::create_directories(root / "exact", ec);
+    std::filesystem::create_directories(root / "checkpoint", ec);
+
+    auto run_leg = [&](const std::filesystem::path & cold_dir, bool pressure_checkpoint) {
+        common_params params = create_test_params();
+        params.cache_cold_max_mib = 1;
+        hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+        const server_tokens tokens = create_tokens({613, 614, 615});
+        ctrl.debug_add_entry_for_tests(tokens.clone(), false, "stage39-tp08", 96, 0);
+        require_or_abort(ctrl.debug_admit_checkpoint_for_tests(64, 0, int64_t(3), true),
+            "TP-39-08 checkpoint admission failed");
+
+        auto & entry = stage22_entries(ctrl).front();
+        const uint64_t entry_id = entry.entry_id;
+        const uint64_t branch_node_id = entry.branch_node_id;
+        const uint64_t exact_id = entry.payload_id;
+        const uint64_t checkpoint_id = entry.checkpoint_payload_id;
+        const json before = ctrl.get_stats();
+        const size_t pruning_before = before["cache_branch_pruning_total"].get<size_t>();
+        const size_t entries_before = ctrl.debug_entry_count_for_tests();
+
+        require_or_abort(ctrl.demote_payload(pressure_checkpoint ? checkpoint_id : exact_id),
+            "TP-39-08 descriptor pressure failed");
+        const json after = ctrl.get_stats();
+        require_or_abort(ctrl.debug_entry_count_for_tests() == entries_before &&
+                         stage22_entries(ctrl).front().entry_id == entry_id &&
+                         stage22_entries(ctrl).front().branch_node_id == branch_node_id,
+            "TP-39-08 descriptor pressure changed entry or branch topology");
+        require_or_abort(stage22_entries(ctrl).front().payload_id == exact_id &&
+                         stage22_entries(ctrl).front().checkpoint_payload_id == checkpoint_id,
+            "TP-39-08 descriptor pressure detached an owner link");
+        require_or_abort(stage22_descriptors(ctrl).at(pressure_checkpoint ? checkpoint_id : exact_id).residency ==
+                         payload_residency_state::cold,
+            "TP-39-08 pressured descriptor was not retained cold");
+        require_or_abort(stage22_descriptors(ctrl).at(pressure_checkpoint ? exact_id : checkpoint_id).residency ==
+                         payload_residency_state::hot,
+            "TP-39-08 independent descriptor pressure changed peer residency");
+        require_or_abort(after["n_payload_evictions"].get<size_t>() == before["n_payload_evictions"].get<size_t>(),
+            "TP-39-08 descriptor pressure evicted a payload");
+        require_or_abort(after["cache_branch_pruning_total"].get<size_t>() == pruning_before,
+            "TP-39-08 descriptor pressure pruned branch topology");
+
+        const auto profile = pressure_checkpoint ? cache_workload_profile::plain_transformer
+                                                 : cache_workload_profile::checkpoint_dependent;
+        require_or_abort(ctrl.debug_select_stage9_restore_source_tokens_for_tests(
+                             tokens.clone(), "stage39-tp08", profile) == 3,
+            "TP-39-08 ranking did not select the independently retained hot descriptor");
+    };
+
+    run_leg(root / "exact", false);
+    run_leg(root / "checkpoint", true);
+    std::filesystem::remove_all(root, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_tp_07_target_draft_full_lifecycle() {
+    printf("test-cache-controller: Stage 39 TP-39-07 target+draft full lifecycle...\n");
+    const auto cold_dir = std::filesystem::temp_directory_path() / "stage39_tp07_target_draft";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir, ec);
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_add_entry_for_tests(create_tokens({731, 732, 733}), false, "stage39-tp07", 96, 48);
+    const uint64_t payload_id = stage22_entries(ctrl).front().payload_id;
+
+    ctrl.debug_cold_store_for_tests().debug_set_write_failure_for_tests(true);
+    require_or_abort(!ctrl.tx_demote_payload(payload_id), "TP-39-07 injected rollback unexpectedly committed");
+    require_or_abort(stage22_descriptors(ctrl).at(payload_id).residency == payload_residency_state::hot,
+        "TP-39-07 rollback split pair residency");
+    require_or_abort(stage22_descriptors(ctrl).at(payload_id).pair_state == payload_pair_state::target_and_draft,
+        "TP-39-07 rollback changed pair state");
+    require_or_abort(ctrl.debug_validate_first_payload_for_tests(true),
+        "TP-39-07 rollback did not restore both hot buffers");
+
+    ctrl.debug_cold_store_for_tests().debug_set_write_failure_for_tests(false);
+    require_or_abort(ctrl.tx_demote_payload(payload_id), "TP-39-07 pair commit failed");
+    require_or_abort(stage22_descriptors(ctrl).at(payload_id).residency == payload_residency_state::cold,
+        "TP-39-07 pair commit did not publish cold residency atomically");
+    require_or_abort(ctrl.tx_promote_payload(payload_id), "TP-39-07 pair restore failed");
+    const auto restored = ctrl.debug_capture_first_payload_for_tests(true);
+    require_or_abort(restored.found && restored.target_bytes.size() == 96 && restored.draft_bytes.size() == 48,
+        "TP-39-07 restore did not recover complete pair");
+
+    stage22_remove_payload(ctrl, payload_id);
+    require_or_abort(stage22_descriptors(ctrl).find(payload_id) == stage22_descriptors(ctrl).end(),
+        "TP-39-07 pair eviction left a descriptor");
+    require_or_abort(!ctrl.debug_validate_first_payload_for_tests(true),
+        "TP-39-07 pair eviction left restorable partial bytes");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 1,
+        "TP-39-07 payload eviction removed lookup entry");
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_tp_09_protected_root_live_descendant_pressure() {
+    printf("test-cache-controller: Stage 39 TP-39-09 protected root descendant pressure...\n");
+    const auto cold_dir = std::filesystem::temp_directory_path() / "stage39_tp09_protected_descendant";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir, ec);
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    ctrl.debug_add_entry_for_tests(create_tokens({741, 742}), true, "stage39-tp09", 100, 0);
+    require_or_abort(ctrl.debug_add_child_entry_for_tests(
+                         create_tokens({741, 742, 743}), "stage39-tp09", 100, 0),
+        "TP-39-09 descendant admission failed");
+    const uint64_t root_entry_id = stage22_entries(ctrl).front().entry_id;
+    const uint64_t root_node_id = stage22_entries(ctrl).front().branch_node_id;
+    const uint64_t child_payload_id = stage22_entries(ctrl).back().payload_id;
+    const size_t pruning_before = ctrl.get_stats()["cache_branch_pruning_total"].get<size_t>();
+
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(100);
+    ctrl.tx_update();
+    require_or_abort(stage22_entries(ctrl).front().entry_id == root_entry_id &&
+                     stage22_entries(ctrl).front().branch_node_id == root_node_id &&
+                     stage22_entries(ctrl).front().protected_root,
+        "TP-39-09 pressure changed protected-root ownership");
+    require_or_abort(stage22_descriptors(ctrl).at(child_payload_id).residency == payload_residency_state::cold,
+        "TP-39-09 pressure did not rank live unprotected descendant first");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 2,
+        "TP-39-09 pressure removed root or descendant entry");
+    require_or_abort(ctrl.debug_select_restore_source_tokens_for_tests(
+                         create_tokens({741, 742, 743}), "stage39-tp09") == 3,
+        "TP-39-09 cold descendant did not remain restorable");
+    require_or_abort(ctrl.debug_evict_last_payload_for_tests(),
+        "TP-39-09 descendant cleanup failed");
+    const json after = ctrl.get_stats();
+    require_or_abort(ctrl.debug_entry_count_for_tests() == 2 &&
+                     after["branch_forest"]["total_nodes"].get<size_t>() == 2,
+        "TP-39-09 ownership-safe cleanup removed topology");
+    require_or_abort(after["cache_branch_pruning_total"].get<size_t>() == pruning_before,
+        "TP-39-09 pressure or cleanup pruned live topology");
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_tp_10_concurrent_cold_transactions_one_decision_each() {
+    printf("test-cache-controller: Stage 39 TP-39-10 concurrent hot-pressure updates...\n");
+    const auto cold_dir = std::filesystem::temp_directory_path() / "stage39_tp10_concurrent_tx";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir, ec);
+
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr, cold_dir.string());
+    constexpr size_t count = 4;
+    std::vector<uint64_t> payload_ids;
+    for (size_t i = 0; i < count; ++i) {
+        ctrl.debug_add_entry_for_tests(
+            create_tokens({751 + int(i), 761 + int(i)}), false, "stage39-tp10", 80, 0);
+        payload_ids.push_back(stage22_entries(ctrl).back().payload_id);
+    }
+    ctrl.debug_set_hot_payload_budget_bytes_for_tests(1);
+
+    std::atomic<size_t> ready{0};
+    std::atomic<bool> go{false};
+    std::vector<std::thread> workers;
+    for (size_t i = 0; i < count; ++i) {
+        workers.emplace_back([&]() {
+            ready.fetch_add(1);
+            while (!go.load()) {
+                std::this_thread::yield();
+            }
+            ctrl.tx_update();
+        });
+    }
+    while (ready.load() != count) {
+        std::this_thread::yield();
+    }
+    go.store(true);
+    for (auto & worker : workers) {
+        worker.join();
+    }
+
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["n_cold_payload_count"].get<size_t>() == count,
+        "TP-39-10 concurrent hot pressure exposed partial cold state");
+    require_or_abort(stats["n_cold_payload_bytes"].get<size_t>() == count * (sizeof(cold_store_header) + 80),
+        "TP-39-10 concurrent hot pressure produced nondeterministic cold bytes");
+    require_or_abort(stage39_decision_count(stats, "retained_cold", "cold_room") == count,
+        "TP-39-10 did not emit one final decision per candidate");
+    size_t final_decisions = 0;
+    for (const auto & row : stats["cache_two_layer_decisions"]) {
+        final_decisions += row["value"].get<size_t>();
+    }
+    require_or_abort(final_decisions == count,
+        "TP-39-10 emitted an extra final-decision result/reason tuple");
+    require_or_abort(stats["n_demotion_successes"].get<size_t>() == count,
+        "TP-39-10 deterministic transaction total mismatch");
+    require_or_abort(stats["resident_payload_bytes"].get<size_t>() == 0,
+        "TP-39-10 concurrent hot pressure left partial hot visibility");
+    require_or_abort(ctrl.debug_entry_count_for_tests() == count,
+        "TP-39-10 concurrent demotion removed entries");
+    for (uint64_t payload_id : payload_ids) {
+        require_or_abort(stage22_descriptors(ctrl).at(payload_id).residency == payload_residency_state::cold,
+            "TP-39-10 transaction left partial descriptor visibility");
+    }
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
 }
 
 static std::unordered_map<uint64_t, hot_payload_record> & stage22_hot_payloads(hybrid_cache_controller & ctrl) {
@@ -4915,15 +6540,13 @@ void test_stage28_attach_checkpoint_payload_rejects_evicted_entry() {
 // admission cleanly (returns false, populates failure_reason, increments
 // n_checkpoint_admission_failures) when the entry has no tokens or no
 // payload_id. This reproduces the memory-layout sensitive crash observed
-// when test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach
-// calls admit_latest_checkpoint_and_store_metadata on the second entry
-// (evicted by debug_evict_last_payload_for_tests). Without the
-// NEWBUG-02 guard, the test crashes with STATUS_ACCESS_VIOLATION or
-// STATUS_STACK_BUFFER_OVERRUN (depending on stack frame layout) inside
-// entry.checkpoints.clear() before reaching the existing attach_checkpoint_payload
-// guard. The guard at the top of admit_latest_checkpoint_and_store_metadata
-// returns false on the no-tokens / no-payload case and lets the caller
-// abort-pattern handle the rejection.
+// in the original Stage 23 fallback test. That test now covers cold room-
+// making and successful admission; this independent regression keeps the
+// no-tokens / no-payload rejection active. Without the NEWBUG-02 guard,
+// the call can crash with STATUS_ACCESS_VIOLATION or
+// STATUS_STACK_BUFFER_OVERRUN inside entry.checkpoints.clear() before the
+// existing attach_checkpoint_payload guard. The entry-state guard returns
+// false and lets the caller handle the rejection.
 void test_stage28_admit_checkpoint_store_rejects_no_tokens_entry() {
     printf("test-cache-controller: Stage 28 admit checkpoint store rejects no-tokens entry...\n");
 
@@ -5159,9 +6782,9 @@ void test_stage23_cold_budget_counts_pending_demotions() {
     printf("  PASSED\n");
 }
 
-// TP-23-UT8: demotion-budget fallback plus stale completion keeps checkpoint attach safe.
-void test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach() {
-    printf("test-cache-controller: Stage 23 demotion budget fallback stale completion checkpoint attach...\n");
+// TP-23-UT8: cold room-making keeps victim state and checkpoint attach coherent.
+void test_stage23_cold_room_making_keeps_checkpoint_attach_coherent() {
+    printf("test-cache-controller: Stage 23 cold room-making keeps checkpoint attach coherent...\n");
     const std::filesystem::path cold_dir =
         std::filesystem::temp_directory_path() / "stage23_fallback_stale_checkpoint_test";
     std::error_code ec;
@@ -5173,9 +6796,9 @@ void test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach() 
     hybrid_cache_controller ctrl(params, 1024 * 1024, 1000, nullptr, nullptr, cold_dir.string());
     // Stage 28 R28-BUG-04 Phase C: async worker start/stop retired;
     // debug_set_completion_delay_for_tests is a no-op (no worker to delay).
-    // The fallback pressure pattern is still observable inline: first
-    // payload demotes successfully, second eviction is rejected by the
-    // cold-budget gate and reverts to immediate eviction. The original
+    // The pressure pattern is still observable inline: payload 1 demotes,
+    // then the second demotion makes cold room by tombstoning payload 1 and
+    // retains payload 2 cold. The original
     // completion-drain loop (which waited for the async worker to finalize
     // the first demotion) is replaced with the sync-on-return residency
     // check below.
@@ -5184,30 +6807,111 @@ void test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach() 
     const auto tokens_b = stage22_token_range(800, 3);
     const auto meta_a = stage22_metadata_for_range(700, 3, "prompt");
     const auto meta_b = stage22_metadata_for_range(800, 3, "prompt");
-    assert(stage22_attach_exact_payload(ctrl, tokens_a.clone(), meta_a, "stage23-fallback-stale", 700 * 1024));
-    assert(stage22_attach_exact_payload(ctrl, tokens_b.clone(), meta_b, "stage23-fallback-stale", 700 * 1024));
+    require_or_abort(
+        stage22_attach_exact_payload(ctrl, tokens_a.clone(), meta_a, "stage23-fallback-stale", 700 * 1024),
+        "Stage 23 failed to attach first exact payload");
+    require_or_abort(
+        stage22_attach_exact_payload(ctrl, tokens_b.clone(), meta_b, "stage23-fallback-stale", 700 * 1024),
+        "Stage 23 failed to attach second exact payload");
 
+    require_or_abort(stage22_entries(ctrl).size() == 2, "Stage 23 expected exactly two entries");
     auto second = std::next(stage22_entries(ctrl).begin());
     const uint64_t first_payload_id = stage22_entries(ctrl).front().payload_id;
     const uint64_t second_payload_id = second->payload_id;
-    assert(first_payload_id != 0);
-    assert(second_payload_id != 0);
+    require_or_abort(first_payload_id != 0, "Stage 23 first payload ID is zero");
+    require_or_abort(second_payload_id != 0, "Stage 23 second payload ID is zero");
+    const uint64_t first_entry_id = stage22_entries(ctrl).front().entry_id;
+    const uint64_t second_entry_id = second->entry_id;
 
-    // First eviction: sync demotion fits the 1 MiB cold budget, completes
-    // inline; residency transitions cold before returning.
-    assert(ctrl.debug_evict_first_payload_for_tests());
-    assert(stage22_descriptors(ctrl)[first_payload_id].residency == payload_residency_state::cold);
-    // Second eviction: cold-budget gate rejects; immediate-eviction path
-    // sets residency = evicted and clears hot bytes.
-    assert(ctrl.debug_evict_last_payload_for_tests());
-    assert(stage22_descriptors(ctrl)[second_payload_id].residency == payload_residency_state::evicted);
-    assert(stage22_hot_payloads(ctrl).find(second_payload_id) == stage22_hot_payloads(ctrl).end());
-    json pressure_stats = ctrl.get_stats();
-    assert(stage22_metric_has_reason(pressure_stats["cache_payload_transitions_by_shape"], "demotion_budget_pressure"));
+    const json initial_stats = ctrl.get_stats();
+    require_or_abort(initial_stats["n_payload_evictions"].get<size_t>() == 0,
+        "Stage 23 initial payload eviction count is not zero");
+    require_or_abort(initial_stats["cache_two_layer_decisions"].empty() &&
+                     initial_stats["cache_cold_transactions"].empty(),
+        "Stage 23 initial decision or transaction rows are not empty");
 
-    // Final residency check (sync, no worker drain needed).
-    assert(stage22_descriptors(ctrl)[first_payload_id].residency == payload_residency_state::cold);
-    assert(stage22_descriptors(ctrl)[second_payload_id].residency == payload_residency_state::evicted);
+    // First wrapper demotes payload 1. Its helper accounting increments the
+    // generic payload-eviction counter even though the payload remains cold.
+    require_or_abort(ctrl.debug_evict_first_payload_for_tests(), "Stage 23 first payload eviction failed");
+    const json first_stats = ctrl.get_stats();
+    require_or_abort(stage22_descriptors(ctrl).at(first_payload_id).residency == payload_residency_state::cold &&
+                     stage22_descriptors(ctrl).at(second_payload_id).residency == payload_residency_state::hot,
+        "Stage 23 first-step payload residencies mismatch");
+    require_or_abort(stage22_entries(ctrl).size() == 2 &&
+                     stage22_entries(ctrl).front().entry_id == first_entry_id &&
+                     stage22_entries(ctrl).front().payload_id == first_payload_id &&
+                     second->entry_id == second_entry_id && second->payload_id == second_payload_id,
+        "Stage 23 first-step entry links changed");
+    require_or_abort(first_stats["resident_payload_bytes"].get<size_t>() == 700 * 1024 &&
+                     first_stats["n_payload_evictions"].get<size_t>() == 1,
+        "Stage 23 first-step hot bytes or eviction progression mismatch");
+    require_or_abort(first_stats["cache_two_layer_decisions"] == json::array({{
+            {"mode", "hybrid"}, {"result", "retained_cold"}, {"reason", "cold_room"}, {"value", 1}}}) &&
+                     first_stats["cache_cold_transactions"] == json::array({{
+            {"mode", "hybrid"}, {"result", "commit"}, {"reason", "none"}, {"value", 1}}}),
+        "Stage 23 first-step decision or transaction rows mismatch");
+
+    // Second wrapper makes cold room for payload 2 by evicting payload 1.
+    // Two helper increments plus one cold-victim increment produce 1 -> 3.
+    require_or_abort(ctrl.debug_evict_last_payload_for_tests(), "Stage 23 second payload eviction failed");
+    const json pressure_stats = ctrl.get_stats();
+    require_or_abort(stage22_descriptors(ctrl).at(first_payload_id).residency == payload_residency_state::evicted &&
+                     stage22_descriptors(ctrl).at(second_payload_id).residency == payload_residency_state::cold,
+        "Stage 23 final exact payload residencies mismatch");
+    require_or_abort(stage22_entries(ctrl).size() == 2 &&
+                     stage22_entries(ctrl).front().entry_id == first_entry_id &&
+                     stage22_entries(ctrl).front().payload_id == first_payload_id &&
+                     second->entry_id == second_entry_id && second->payload_id == second_payload_id,
+        "Stage 23 final exact entry links changed");
+    require_or_abort(stage22_hot_payloads(ctrl).find(first_payload_id) == stage22_hot_payloads(ctrl).end() &&
+                     stage22_hot_payloads(ctrl).find(second_payload_id) == stage22_hot_payloads(ctrl).end(),
+        "Stage 23 final exact payload remained hot");
+    require_or_abort(pressure_stats["resident_payload_bytes"].get<size_t>() == 0 &&
+                     pressure_stats["n_hot_payload_descriptors"].get<size_t>() == 0 &&
+                     pressure_stats["n_cold_payload_descriptors"].get<size_t>() == 1 &&
+                     pressure_stats["n_evicted_payload_descriptors"].get<size_t>() == 1,
+        "Stage 23 final descriptor accounting mismatch");
+    require_or_abort(pressure_stats["n_demotion_successes"].get<size_t>() == 2 &&
+                     pressure_stats["n_demotion_failures"].get<size_t>() == 0 &&
+                     pressure_stats["n_cold_evictions"].get<size_t>() == 1 &&
+                     pressure_stats["n_payload_evictions"].get<size_t>() == 3,
+        "Stage 23 final demotion or eviction progression mismatch");
+    require_or_abort(pressure_stats["n_cold_payload_count"].get<size_t>() == 1,
+        "Stage 23 final cold payload count mismatch");
+
+    size_t cold_file_count = 0;
+    size_t cold_file_bytes = 0;
+    std::filesystem::path cold_file;
+    bool quarantine_file_found = false;
+    for (const auto & file : std::filesystem::directory_iterator(cold_dir)) {
+        const std::string name = file.path().filename().string();
+        quarantine_file_found = quarantine_file_found || name.find(".q.") != std::string::npos;
+        if (file.is_regular_file() && file.path().extension() == ".cold") {
+            ++cold_file_count;
+            cold_file = file.path();
+            cold_file_bytes += file.file_size();
+        }
+    }
+    require_or_abort(cold_file_count == 1 && !quarantine_file_found,
+        "Stage 23 final cold or quarantine file count mismatch");
+    require_or_abort(cold_file_bytes > 0 && cold_file_bytes <= 1024 * 1024 &&
+                     pressure_stats["n_cold_payload_bytes"].get<size_t>() == cold_file_bytes &&
+                     pressure_stats["cache_cold_bytes"].get<size_t>() == cold_file_bytes,
+        "Stage 23 final cold byte reconciliation mismatch");
+
+    const json expected_decisions = json::array({
+        {{"mode", "hybrid"}, {"result", "retained_cold"}, {"reason", "cold_room"}, {"value", 1}},
+        {{"mode", "hybrid"}, {"result", "retained_cold"}, {"reason", "cold_room_made"}, {"value", 1}},
+    });
+    const json expected_transactions = json::array({{
+        {"mode", "hybrid"}, {"result", "commit"}, {"reason", "none"}, {"value", 2}}});
+    require_or_abort(pressure_stats["cache_two_layer_decisions"] == expected_decisions &&
+                     pressure_stats["cache_cold_transactions"] == expected_transactions,
+        "Stage 23 final decision or transaction rows mismatch");
+    require_or_abort(!stage22_metric_has_reason(
+                         pressure_stats["cache_payload_transitions_by_shape"], "demotion_budget_pressure") &&
+                     stage39_decision_count(pressure_stats, "evicted", "both_filled") == 0,
+        "Stage 23 forbidden pressure outcome was recorded");
 
     common_prompt_checkpoint checkpoint;
     checkpoint.update_pos(3, 0, 3);
@@ -5215,29 +6919,48 @@ void test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach() 
     std::list<common_prompt_checkpoint> checkpoints;
     checkpoints.push_back(checkpoint);
     std::string failure;
-    // Stage 28 R28-BUG-01 (Step 7): production crash in attach_checkpoint_payload
-    // (D-EXEC-28-NEWBUG-01) FIXED via entry-state guard at the top of
-    // attach_checkpoint_payload. The call now returns false on the
-    // evicted entry instead of crashing with STATUS_ACCESS_VIOLATION
-    // inside validate_checkpoint_descriptor_metadata. Abort pattern
-    // verifies the rejection explicitly. The 4 post-admit asserts that
-    // assumed a successful admission have been removed because the
-    // admission is now correctly rejected.
-    //
-    // D-EXEC-28-NEWBUG-02 fix: the entry-state guard at the top of
-    // admit_latest_checkpoint_and_store_metadata also catches the
-    // memory-layout sensitive STATUS_ACCESS_VIOLATION / STATUS_STACK_BUFFER_OVERRUN
-    // observed in this test (entry pointer is valid but entry.tokens
-    // is empty even though it should contain 3 tokens). The guard
-    // returns false and the test verifies the rejection.
-    if (stage23_admit_checkpoint_store(ctrl, *second, checkpoints, false, &failure, true)) {
-        fprintf(stderr, "FAIL: stage23_admit_checkpoint_store returned true (expected false on evicted entry)\n");
-        std::abort();
-    }
-    if (failure.empty()) {
-        fprintf(stderr, "FAIL: failure reason not populated on rejected admit\n");
-        std::abort();
-    }
+    require_or_abort(stage23_admit_checkpoint_store(ctrl, *second, checkpoints, false, &failure, true),
+        "Stage 23 checkpoint admission failed");
+    require_or_abort(failure.empty(), "Stage 23 checkpoint admission populated failure reason");
+
+    const uint64_t checkpoint_id = second->checkpoint_payload_id;
+    require_or_abort(checkpoint_id != 0, "Stage 23 checkpoint payload ID is zero");
+    const auto & checkpoint_descriptor = stage22_descriptors(ctrl).at(checkpoint_id);
+    require_or_abort(checkpoint_descriptor.kind == payload_kind::checkpoint &&
+                     checkpoint_descriptor.owner_entry_id == second_entry_id &&
+                     checkpoint_descriptor.residency == payload_residency_state::hot &&
+                     checkpoint_descriptor.pair_state == payload_pair_state::target_only &&
+                     checkpoint_descriptor.target_size_bytes == 96 &&
+                     checkpoint_descriptor.draft_size_bytes == 0 &&
+                     checkpoint_descriptor.resident_payload_bytes == 96,
+        "Stage 23 checkpoint descriptor state mismatch");
+    require_or_abort(stage22_hot_payloads(ctrl).at(checkpoint_id).target.size() == 96 &&
+                     stage22_hot_payloads(ctrl).at(checkpoint_id).draft.empty(),
+        "Stage 23 checkpoint hot record mismatch");
+    require_or_abort(second->payload_id == second_payload_id && second->checkpoint_payload_id == checkpoint_id &&
+                     stage22_entries(ctrl).front().payload_id == first_payload_id,
+        "Stage 23 post-checkpoint entry links mismatch");
+    require_or_abort(stage22_descriptors(ctrl).at(first_payload_id).residency == payload_residency_state::evicted &&
+                     stage22_descriptors(ctrl).at(second_payload_id).residency == payload_residency_state::cold,
+        "Stage 23 checkpoint admission changed exact residencies");
+
+    const json checkpoint_stats = ctrl.get_stats();
+    require_or_abort(checkpoint_stats["cache_checkpoint_admissions_total"].get<size_t>() == 1 &&
+                     checkpoint_stats["cache_checkpoint_admission_failures_total"].get<size_t>() == 0,
+        "Stage 23 checkpoint admission counters mismatch");
+    require_or_abort(checkpoint_stats["n_hot_payload_descriptors"].get<size_t>() == 1 &&
+                     checkpoint_stats["n_cold_payload_descriptors"].get<size_t>() == 1 &&
+                     checkpoint_stats["n_evicted_payload_descriptors"].get<size_t>() == 1 &&
+                     checkpoint_stats["resident_payload_bytes"].get<size_t>() == 96,
+        "Stage 23 post-checkpoint descriptor accounting mismatch");
+    require_or_abort(checkpoint_stats["n_cold_payload_bytes"] == pressure_stats["n_cold_payload_bytes"] &&
+                     checkpoint_stats["cache_cold_bytes"] == pressure_stats["cache_cold_bytes"] &&
+                     checkpoint_stats["cache_two_layer_decisions"] == pressure_stats["cache_two_layer_decisions"] &&
+                     checkpoint_stats["cache_cold_transactions"] == pressure_stats["cache_cold_transactions"],
+        "Stage 23 checkpoint admission changed cold or metric evidence");
+    require_or_abort(std::filesystem::exists(cold_file) &&
+                     std::filesystem::file_size(cold_file) == cold_file_bytes,
+        "Stage 23 checkpoint admission changed cold file evidence");
 
     std::filesystem::remove_all(cold_dir, ec);
     printf("  PASSED\n");
@@ -7093,7 +8816,190 @@ void test_stage35_current_contract_edge_coverage() {
     printf("  PASSED\n");
 }
 
+void test_stage39_cold_store_transaction_primitives() {
+    printf("test-cache-controller: Stage 39 cold store transaction primitives...\n");
+
+    const auto cold_dir = std::filesystem::temp_directory_path() / "stage39_cold_tx_primitives";
+    std::error_code ec;
+    std::filesystem::remove_all(cold_dir, ec);
+    std::filesystem::create_directories(cold_dir);
+
+    server_cache_store_cold store;
+    require_or_abort(store.configure(cold_dir.string(), COLD_STORE_FORMAT_VERSION_1),
+        "Stage 39 cold store configure failed");
+
+    cold_descriptor_snapshot snapshot{};
+    snapshot.payload_id = 3901;
+    snapshot.pair_state = static_cast<uint8_t>(payload_pair_state::target_and_draft);
+    const std::vector<uint8_t> target = {1, 2, 3, 4};
+    const std::vector<uint8_t> draft = {5, 6};
+    auto prepared = store.prepare(snapshot.payload_id, target, draft, snapshot);
+    require_or_abort(static_cast<bool>(prepared), "Stage 39 cold prepare failed");
+    require_or_abort(prepared.object.exact_bytes == sizeof(cold_store_header) + target.size() + draft.size(),
+        "Stage 39 cold prepare exact size mismatch");
+    require_or_abort(std::filesystem::exists(prepared.object.staging_path),
+        "Stage 39 cold prepare staging file missing");
+    require_or_abort(!std::filesystem::exists(prepared.object.final_path),
+        "Stage 39 cold prepare exposed final file");
+    require_or_abort(store.validate_prepared(prepared.object) == cold_validate_result::valid,
+        "Stage 39 prepared validation failed");
+    require_or_abort(store.publish(prepared.object, 39001), "Stage 39 cold publish failed");
+    require_or_abort(!std::filesystem::exists(prepared.object.staging_path) &&
+                     std::filesystem::exists(prepared.object.final_path),
+        "Stage 39 cold publish paths mismatch");
+
+    cold_victim victim{};
+    victim.payload_id = snapshot.payload_id;
+    victim.final_path = prepared.object.final_path;
+    victim.quarantine_path = prepared.object.final_path.string() + ".q.39001";
+    require_or_abort(store.quarantine(victim, 39001), "Stage 39 cold quarantine failed");
+    require_or_abort(store.quarantine(victim, 39001), "Stage 39 cold quarantine replay failed");
+    require_or_abort(std::filesystem::exists(victim.quarantine_path) &&
+                     !std::filesystem::exists(victim.final_path),
+        "Stage 39 quarantine paths mismatch");
+
+    cold_descriptor_snapshot incoming_snapshot = snapshot;
+    incoming_snapshot.payload_id = 3902;
+    auto incoming = store.prepare(incoming_snapshot.payload_id, target, draft, incoming_snapshot);
+    require_or_abort(static_cast<bool>(incoming) && store.publish(incoming.object, 39001),
+        "Stage 39 incoming publish failed");
+
+    cold_tx_manifest manifest{};
+    manifest.tx_id = 39001;
+    manifest.state = cold_tx_state::quarantined;
+    manifest.incoming_descriptor.file = incoming.object.descriptor;
+    manifest.incoming_descriptor.payload_kind = 0;
+    manifest.incoming_descriptor.owner = {3902, 0};
+    manifest.incoming_exact_bytes = incoming.object.exact_bytes;
+    manifest.incoming_final_path = incoming.object.final_path;
+    manifest.logical_bytes_before = prepared.object.exact_bytes;
+    manifest.victim_bytes = prepared.object.exact_bytes;
+    manifest.logical_bytes_after = prepared.object.exact_bytes;
+    manifest.incoming = incoming.object;
+    cold_recovered_victim recovered_victim{};
+    recovered_victim.descriptor.file = prepared.object.descriptor;
+    recovered_victim.descriptor.payload_kind = 0;
+    recovered_victim.descriptor.owner = {3901, 0};
+    recovered_victim.exact_bytes = prepared.object.exact_bytes;
+    recovered_victim.quarantine_path = victim.quarantine_path;
+    recovered_victim.committed_tombstone = true;
+    manifest.victims.push_back(recovered_victim);
+    require_or_abort(store.write_manifest(manifest), "Stage 39 manifest write failed");
+    require_or_abort(store.mark_committed(manifest), "Stage 39 commit marker failed");
+
+    auto recovery = store.recover_transactions();
+    require_or_abort(!recovery.mutation_disabled && recovery.committed.size() == 1,
+        "Stage 39 committed manifest recovery failed");
+    require_or_abort(recovery.committed[0].tx_id == manifest.tx_id &&
+                     recovery.committed[0].victims.size() == 1,
+        "Stage 39 recovered manifest contents mismatch");
+    auto cleanup = store.cleanup(manifest);
+    require_or_abort(cleanup.success && cleanup.files_removed == 1,
+        "Stage 39 committed cleanup failed");
+    require_or_abort(store.recover_transactions().committed.empty(),
+        "Stage 39 cleaned manifest replayed");
+    auto second = store.recover_transactions();
+    require_or_abort(!second.mutation_disabled && second.claims.size() == 1 &&
+                     second.claims[0].incoming_descriptor.file.payload_id == 3902,
+        "Stage 39 ownership claim did not survive second startup");
+    auto third = store.recover_transactions();
+    require_or_abort(!third.mutation_disabled && third.claims.size() == 1,
+        "Stage 39 ownership claim did not survive third startup");
+    require_or_abort(store.remove(3902) && store.recover_transactions().claims.empty(),
+        "Stage 39 payload removal did not clear ownership claim");
+
+    auto add_claim = [&](uint64_t payload_id, uint64_t owner_id) {
+        cold_descriptor_snapshot claim_snapshot{};
+        claim_snapshot.payload_id = payload_id;
+        auto object = store.prepare(payload_id, target, {}, claim_snapshot);
+        require_or_abort(static_cast<bool>(object) && store.publish(object.object, 39001),
+            "Stage 39 claimed payload publish failed");
+        cold_recovered_commit claim{};
+        claim.incoming_descriptor.file = object.object.descriptor;
+        claim.incoming_descriptor.owner = {owner_id, 0};
+        claim.incoming_exact_bytes = object.object.exact_bytes;
+        require_or_abort(store.apply_claims(claim), "Stage 39 claim journal update failed");
+    };
+    add_claim(3903, 0);
+    require_or_abort(store.recover_transactions().mutation_disabled,
+        "Stage 39 missing-owner claim was accepted");
+    require_or_abort(store.remove(3903), "Stage 39 missing-owner cleanup failed");
+    add_claim(3904, 4900);
+    add_claim(3905, 4900);
+    require_or_abort(store.recover_transactions().mutation_disabled,
+        "Stage 39 owner-link conflict was accepted");
+
+    std::filesystem::remove_all(cold_dir, ec);
+    printf("  PASSED\n");
+}
+
+void test_stage39_typed_metric_cardinality() {
+    printf("test-cache-controller: Stage 39 typed metric cardinality...\n");
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 100, 1000, nullptr, nullptr);
+    for (int result = 0; result < 4; ++result) {
+        for (int reason = 0; reason < 8; ++reason) {
+            require_or_abort(ctrl.debug_record_two_layer_decision_for_tests(
+                cache_two_layer_mode::hybrid,
+                static_cast<cache_two_layer_result>(result),
+                static_cast<cache_two_layer_reason>(reason)),
+                "Stage 39 valid decision metric enum rejected");
+        }
+    }
+    for (int result = 0; result < 3; ++result) {
+        for (int reason = 0; reason < 9; ++reason) {
+            require_or_abort(ctrl.debug_record_cold_transaction_for_tests(
+                cache_two_layer_mode::hybrid,
+                static_cast<cache_cold_transaction_result>(result),
+                static_cast<cache_cold_transaction_reason>(reason)),
+                "Stage 39 valid transaction metric enum rejected");
+        }
+    }
+    require_or_abort(!ctrl.debug_record_two_layer_decision_for_tests(
+        static_cast<cache_two_layer_mode>(255), cache_two_layer_result::evicted, cache_two_layer_reason::both_filled),
+        "Stage 39 invalid decision mode accepted");
+    require_or_abort(!ctrl.debug_record_cold_transaction_for_tests(
+        cache_two_layer_mode::hybrid, static_cast<cache_cold_transaction_result>(255), cache_cold_transaction_reason::none),
+        "Stage 39 invalid transaction result accepted");
+    const json stats = ctrl.get_stats();
+    require_or_abort(stats["cache_two_layer_decisions"].size() == 32,
+        "Stage 39 decision metric cardinality mismatch");
+    require_or_abort(stats["cache_cold_transactions"].size() == 27,
+        "Stage 39 transaction metric cardinality mismatch");
+    for (const auto & row : stats["cache_two_layer_decisions"]) {
+        require_or_abort(row["mode"] == "hybrid" && !row["result"].get<std::string>().empty() && !row["reason"].get<std::string>().empty(),
+            "Stage 39 decision metric emitted invalid label");
+    }
+    printf("  PASSED\n");
+}
+
+void test_stage39_controller_claim_restart_idempotence() {
+    printf("test-cache-controller: Stage 39 controller claim restart idempotence...\n");
+    const auto dir = std::filesystem::temp_directory_path() / "stage39_claim_restart";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    common_params params = create_test_params();
+    params.cache_cold_max_mib = 1;
+    {
+        hybrid_cache_controller first(params, 100, 1000, nullptr, nullptr, dir.string());
+        first.debug_add_entry_for_tests(create_tokens({390, 391}), false, "stage39-restart", 100, 0);
+        require_or_abort(first.debug_demote_first_payload_for_tests(), "Stage 39 initial demotion failed");
+    }
+    for (int startup = 2; startup <= 3; ++startup) {
+        hybrid_cache_controller fresh(params, 100, 1000, nullptr, nullptr, dir.string());
+        const json stats = fresh.get_stats();
+        require_or_abort(stats["n_cold_payload_count"].get<size_t>() == 1,
+            "Stage 39 fresh controller lost claimed cold payload");
+        require_or_abort(std::filesystem::exists(dir / "1.cold"),
+            "Stage 39 startup reconcile deleted claimed cold payload");
+    }
+    std::filesystem::remove_all(dir, ec);
+    printf("  PASSED\n");
+}
+
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     printf("==================================================\n");
     printf("test-cache-controller: Cache System Tests\n");
     printf("==================================================\n\n");
@@ -7240,11 +9146,50 @@ int main() {
     test_stage21_entry_eviction_during_demotion_does_not_crash();
     test_stage23_demotion_queue_budget_pressure_falls_back_to_eviction();
     test_stage23_target_draft_demotion_pressure_counts_both_payloads();
-    test_stage24_over_budget_eviction_skips_demote();
+    test_stage39_over_budget_demotion_precedes_eviction();
+    test_stage39_payload_larger_than_hot_budget_can_retain_cold();
+    test_stage39_non_capacity_demotion_failure_retains_hot();
+    test_stage39_tp_08_same_entry_independent_descriptor_pressure();
+    test_stage39_tp_07_target_draft_full_lifecycle();
+    test_stage39_tp_09_protected_root_live_descendant_pressure();
+    test_stage39_tp_10_concurrent_cold_transactions_one_decision_each();
+    test_stage39_production_capacity_reason_selection();
+    test_stage39_production_cold_disabled_bypass();
+    test_stage39_serialized_size_boundaries();
+    test_stage39_controller_transaction_fault_boundaries();
+    test_stage39_multi_victim_fault_position_matrix();
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    test_stage39_live_pressure_discover_non_mutating();
+    test_stage39_live_pressure_hot_enumeration_pure();
+    test_stage39_live_pressure_mixed_kind_cold_exact_set();
+    test_stage39_live_pressure_snapshot_stale();
+    test_stage39_live_pressure_apply_atomic_revalidation();
+    test_stage39_live_pressure_snapshot_wrong_token();
+    test_stage39_live_pressure_snapshot_slot_ref_drift();
+    test_stage39_live_pressure_before_after_generation();
+    test_stage39_live_pressure_inventory_integrity_retryable();
+    test_stage39_live_pressure_snapshot_changed_restored();
+    test_stage39_live_pressure_snapshot_budget_drift();
+    test_stage39_live_pressure_generation_mutation_matrix();
+    test_stage39_live_pressure_normal_cold_cleanup_generation();
+    test_stage39_live_pressure_committed_recovery_generation();
+    test_stage39_live_pressure_committed_cleanup_generation();
+    test_stage39_live_pressure_idle_dispatch_race();
+    test_stage39_live_pressure_terminal_after_mutation_failure();
+    test_stage39_live_pressure_normal_tx_update_success();
+    test_stage39_live_pressure_tp39_02_multi_victim();
+    test_stage39_live_pressure_tp39_03_both_filled();
+    test_stage39_live_pressure_tp39_03_tag_isolation();
+    test_stage39_live_pressure_tp39_03_owner_rollback_matrix();
+    test_stage39_live_pressure_observed_forbidden_effect_probes();
+    test_stage39_live_pressure_prepared_proof_midpoint_fault_common_epilogue();
+    test_stage39_live_pressure_prepared_proof_step2_fault_common_epilogue();
+    test_stage39_live_pressure_tp39_04_oversized_both();
+#endif
     test_stage24_token_limit_evicts_when_candidates_empty();
     test_stage23_stale_success_removes_cold_file();
     test_stage23_cold_budget_counts_pending_demotions();
-    test_stage23_demotion_budget_fallback_stale_completion_checkpoint_attach();
+    test_stage23_cold_room_making_keeps_checkpoint_attach_coherent();
     test_stage23_skipped_checkpoint_admission_does_not_store_checkpoint_list();
     test_stage23_successful_checkpoint_admission_keeps_metadata_only_list();
     test_stage23_missing_cold_path_fails_bounded_controller_init();
@@ -7290,6 +9235,9 @@ int main() {
     test_stage28_attach_checkpoint_payload_rejects_evicted_entry();
     // Stage 28 R28-BUG-01 Step 8 (D-EXEC-28-NEWBUG-02 production crash fix).
     test_stage28_admit_checkpoint_store_rejects_no_tokens_entry();
+    test_stage39_cold_store_transaction_primitives();
+    test_stage39_controller_claim_restart_idempotence();
+    test_stage39_typed_metric_cardinality();
 
     printf("\n==================================================\n");
     printf("All tests passed successfully!\n");

@@ -60,7 +60,7 @@ Condition:
 
 Action:
 
-- Do not use `assert(.)` for setup, side effects, or required failure checks. Replace required checks with explicit `if (!cond) { fprintf(stderr, .); std::abort(); }`. Verify the negative path actually fails by temporarily reverting the fix or using a focused failing input. Check compile flags when the file tries to `#undef NDEBUG`.
+- Do not use `assert(.)` for setup, side effects, or required failure checks. Replace required checks with explicit `if (!cond) { fprintf(stderr, .); std::abort(); }`. If `#undef NDEBUG` appears after `<cassert>`, treat it as ineffective because the `assert` macro is already defined; inspect include order and compile flags. When one missing side effect causes a Release crash, audit every `assert` in that test before proposing the fix so later setup calls are not left compiled out. Verify the negative path actually fails by temporarily reverting the fix or using a focused failing input.
 
 
 ## Improvement: Baseline crashes must be separated from current fix evidence
@@ -116,6 +116,16 @@ Action:
 - Use `(Get-Content -LiteralPath $path).Count` for the logical line count and compare it to the LF byte count on LF-only markdown. If a combined PowerShell byte/line probe prints an impossible value such as `lines=0` with nonzero LF bytes, rerun the line count directly before reporting evidence.
 -.
 
+## Improvement: Verify untracked driver-script edits directly
+
+Condition:
+
+- When editing a PowerShell driver, test script, or harness file that is untracked in git, or when its parent directory is untracked
+
+Action:
+
+- Do not rely on `git diff`, `git diff --check`, or `git status` alone to show the changed script content. Capture line anchors with `Select-String`, run parser/self-test commands that execute the edited path, and run direct byte and trailing-whitespace checks on the untracked file. In the handoff, identify the changed path by `git status --short` and cite the live line anchors or behavior evidence instead of implying that a tracked diff contains the script change.
+
 
 ## Improvement: Markdown lint catches what byte-level checks miss
 
@@ -132,11 +142,20 @@ Action:
 
 Condition:
 
-- When running `tools/server/tests` pytest modules on Windows from the repository root and the harness tries to launch a relative `../../../build/bin/./llama-server.exe`
+- When running a focused `tools/server/tests` pytest module on Windows from the
+  repository root, especially when the selected node owns its own server and
+  the shared module preset preload is unrelated
 
 Action:
 
-- Do rerun focused tests with `LLAMA_SERVER_BIN_PATH` set to the absolute built server executable; use `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` when the module preload fixture is unrelated to the behavior under test.
+- Do set `LLAMA_SERVER_BIN_PATH` to the absolute built server executable and
+  set `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` before the first invocation when
+  the module preload fixture is unrelated. Verify both environment values in
+  the captured command metadata. For sequential model-backed nodes that require
+  isolation, also set and capture a fresh artifact root before each pytest
+  process, then audit that node's caps and required files before starting the
+  next node. Do not wait for shared preset preload to fail on a missing local
+  model, remote download, or unsupported HTTPS path before applying the skip.
 
 
 ## Improvement: std::thread+detach inside llama_server() before model load races with CUDA init
@@ -158,7 +177,66 @@ Condition:
 
 Action:
 
-- Do make the first assistant action a tool read of the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, AGENTS.md discussion, analysis, or non-memory tool use; don't send even a brief "I'll load memory first" note until that read is complete, including when the user pasted repo instructions or the note only says memory will be loaded.
+- Do make the first assistant action a tool read of only the self-improvement skill and agent memory before any acknowledgement, commentary update, skill-use announcement, plan, AGENTS.md discussion, analysis, or non-memory tool use. When the first-read instruction requires both skill and memory in one single-purpose memory call, keep that call memory-only but bound the output: read the skill plus memory in chunks or include a tail/last-line verification so the result cannot truncate away later memory entries. If truncation still happens, immediately perform a second memory-only tail/chunk read before any task action. Don't send even a brief "I'll load memory first" note until that read is complete, including when the user pasted repo instructions or the note only says memory will be loaded.
+
+## Improvement: Prometheus row writers must not duplicate implicit labels
+
+Condition:
+
+- When a Prometheus helper automatically prefixes a fixed label such as `mode`, and row data also contains that label
+
+Action:
+
+- Do inspect the helper's emitted prefix before passing row labels. Keep the label in the internal bounded tuple if required, but omit it from the explicit exporter label list. Add a rendered-text assertion that each label name occurs exactly once; don't treat bounded series count alone as valid Prometheus syntax proof.
+- Do route production rendering and focused rendering through the same row writer. A test-only copy can pass while the public exporter still emits invalid labels.
+
+## Improvement: Zero hot budget disables pressure
+
+Condition:
+
+- When a hybrid-cache test lowers the hot payload budget to trigger production
+  pressure
+
+Action:
+
+- Do use a positive budget smaller than resident bytes. A zero-byte limit makes
+  `hot_payload_budget_enabled()` false and bypasses `evict_until_within_budget`;
+  don't use zero as the pressure threshold.
+
+## Improvement: Test seams must separate exclusive residency sets
+
+Condition:
+
+- When a deterministic pressure test must rank both hot candidates and cold
+  victims, and production stores residency as one exclusive state
+
+Action:
+
+- Do specify separate complete hot-candidate and cold-victim request sets, with
+  exact production eligibility, ownership, uniqueness, residency, omission,
+  and extra-row checks for each. Also specify normal production transitions
+  that create cold victims before the seam pressures the incoming hot object;
+  don't assign cold-victim ranks through a hot-only candidate list.
+
+## Improvement: Transaction fault matrices need state cardinality proof
+
+Condition:
+
+- When closing an exhaustive multi-object transaction fault matrix across pre-commit and post-commit mutation positions
+
+Action:
+
+- Do force one transaction to include every intended victim, inject each repeated mutation by occurrence, destroy the active owner, and verify at least two fresh reconstructions produce the exact descriptor count and byte total for either the old set or committed incoming set; don't infer atomic replay from file existence alone.
+
+## Improvement: Large approved plan needs explicit partial gate
+
+Condition:
+
+- When an approved implementation plan requires several coupled production contracts and the current session completes only one independently useful slice
+
+Action:
+
+- Do mark implementation evidence PARTIAL, list every unimplemented binding contract, and keep review gate blocked; don't rename a narrow regression fix as completion of the full stage.
 
 
 ## Improvement: Cherry-pick list must distinguish code-introducing merges from worktree-artifact commits
@@ -225,6 +303,29 @@ Action:
   product bug, and update the stage implementation status with the exact next
   gate action.
 
+## Improvement: Reclassify old policy tests against current transaction semantics
+
+Condition:
+
+- When a Release-active legacy test reaches a previously skipped assertion and
+  observes a newer policy result, especially cold victim replacement instead of
+  immediate payload eviction
+
+Action:
+
+- Do trace the production branch, decision and transaction ownership, and the
+  test's commit history before classifying a product defect. If the newer policy
+  intentionally supersedes the expectation, replace the stale assertion with
+  before/after snapshots that prove exact victim and incoming state, owner links,
+  wrapper-specific counter progression, descriptor and hot-byte accounting,
+  cold-file byte reconciliation, and the complete allowed decision/transaction
+  rows with forbidden rows absent. Preserve the old safety property through
+  dedicated current regression tests; don't keep an obsolete fallback
+  expectation or weaken coverage to make the suite pass. Audit adjacent test
+  comments for the same obsolete policy claim. Under a comment-only correction
+  gate, hash the surrounding executable-only lines before and after the edit so
+  the handoff proves no assertion or setup changed.
+
 
 ## Improvement: Cross-reference same-day QA follow-up sessions
 
@@ -280,6 +381,16 @@ Action:
 
 - Do include --metrics in the Start-Process ArgumentList before launching the server; the /metrics endpoint returns 501 not_supported_error without it, and an empty or 0-row body looks like a product bug rather than a missing flag. Verify the flag is present by checking for the 501 error in the first probe run and re-launching with --metrics added before escalating to focused-substitute evidence.
 
+## Improvement: Windows `_commit` needs a writable descriptor
+
+Condition:
+
+- When durable file code reopens a completed file on Windows and calls `_commit`
+
+Action:
+
+- Do open the file with `_O_RDWR | _O_BINARY`; `_O_RDONLY` can open successfully but `_commit` then fails. Exercise the real prepare or manifest path in a focused test so the flush failure is visible.
+
 
 ## Improvement: Hybrid restore timing triage
 
@@ -326,15 +437,15 @@ Action:
 - Do inspect the resulting diff, `git diff --stat`, and byte-level CR/LF counts before and after any newline cleanup. If a formatter or shell rewrite changes unrelated lines only because of newline normalization or adds a BOM, restore your own changes for that file and reapply the patch narrowly before handoff. Do not normalize a whole source file to LF or CRLF just to appease `git diff --check` unless that matches the file's intended repository style; compare the scoped diff size after cleanup and stop if the stat balloons. On Windows, use `New-Object System.Text.UTF8Encoding($false)` or `[System.Text.UTF8Encoding]::new($false)` for writes, strip any BOM, and verify with `git diff --check` plus a diff/stat that shows only the intended content changes.
 
 
-## Improvement: CRLF script diffs need byte-level whitespace verification
+## Improvement: CRLF source and script diffs need byte-level whitespace verification
 
 Condition:
 
-- When a touched PowerShell or script file intentionally remains CRLF in the worktree and scoped `git diff --check` reports trailing whitespace only on added lines that end with CRLF
+- When a touched source, PowerShell, or script file intentionally remains CRLF in the worktree and scoped `git diff --check` reports trailing whitespace only on added lines that end with CRLF
 
 Action:
 
-- Do verify the diff stat shows only intended content insertions, run `Select-String -Pattern '[ \t]+$'` for real trailing spaces or tabs, and record byte-level CR/LF counts proving the file stayed consistently CRLF. Don't normalize the whole script to LF just to satisfy `git diff --check` when that would create line-ending churn against the local file style.
+- Do verify the diff stat shows only intended content insertions, run `Select-String -Pattern '[ \t]+$'` for real trailing spaces or tabs, and record byte-level CR/LF counts proving the file stayed consistently CRLF. Don't normalize the whole file to LF just to satisfy `git diff --check` when that would create line-ending churn against the local file style.
 
 
 ## Improvement: Update indexes before mutable keys
@@ -390,6 +501,23 @@ Condition:
 Action:
 
 - Do rerun `git diff --check -- <touched paths>` for the current task files and report both the scoped result and the unrelated global failure; don't fix unrelated whitespace unless the user asked for cleanup.
+
+## Improvement: Terminal effect-map reviews must check field provenance
+
+Condition:
+
+- When a Stage 39 Developer results review sees a terminal proof failure on
+  `forbidden_effects` or another exact terminal field map
+
+Action:
+
+- Do compare the live diagnosis values, the driver exact-property guard, and the
+  latest Architect/Manager gate before classifying the failure. If production
+  emits reviewed component fields with zero values and all older expected fields
+  match, classify it as a driver contract defect owned by Developer, not a
+  product defect or execution blocker. Keep the retest scope to the driver
+  field-map fix, PowerShell 7/5 pure coverage, Architect review, Manager
+  rerun gate, then the canonical node and deferred coverage.
 
 
 ## Improvement: Preserve blob line structure on Windows
@@ -610,15 +738,21 @@ Action:
 
 - Read the test file at the cited revision and match the assertion text to the test function before trusting the report attribution. If the line number or function name drifted, document the corrected source location and scope the fix to the actual failing assertion.
 
-## Improvement: Check build artifact timestamps against source timestamps before running tests
+## Improvement: Bind freshness evidence to input hashes and direct outputs
 
 Condition:
 
-- When a cmake --build completes with exit 0 but the test results don't match the expected behavior of the current source code
+- When a gate requires fresh build evidence, or a successful build produces test
+  behavior that may not match the current source
 
 Action:
 
-- Do check the binary timestamp against the source file timestamps before running tests; if the binary timestamp is BEFORE the source file timestamp, the binary is stale and the test results are from the old code. Rebuild explicitly and verify the binary timestamp is AFTER the source timestamp before drawing conclusions from test failures. The fix was to rebuild explicitly and verify the new binary timestamp.
+- Do record SHA-256 and UTC timestamps for every guarded source and header before
+  the build, then record them again after the authorized test window. Record the
+  direct object, executable, and implementation-library hashes and timestamps;
+  require each output to be newer than every input that feeds it. If a one-shot
+  suite fails, preserve its full log and report subtests that passed, but do not
+  rerun or use freshness proof to waive the nonzero exit.
 
 
 ## Improvement: Iterative test fix exposes more latent defects
@@ -933,13 +1067,13 @@ Action:
 - Do encode the server-flag array as JSON and Base64, pass it as one scalar parameter, decode it inside the child script, and validate both wrapper dry-run and child dry-run. Don't pass raw `string[]` values or documented `@('stress row','stress row')` syntax through an outer `powershell -File` command and assume the child receives the same array, because the command boundary can flatten row arrays or reinterpret `--flag` tokens as script parameters.
 
 
-## Improvement: Check doc cap immediately after pointer edits
+## Improvement: Check doc cap immediately after pointer or index edits
 
 Condition:
-- When adding a short gate pointer, status line, or cross-reference to an existing durable design or implementation document near the 300-line cap
+- When adding a short gate pointer, status line, document-index row, or cross-reference to an existing durable design or implementation document near the 300-line cap
 
 Action:
-- Do check the physical line count immediately after the edit and bring the file back under 300 lines by tight reflow or required splitting before other hygiene checks. On Windows, verify the count with byte-level LF counting or explicit line enumeration, not only `Get-Content | Measure-Object -Line`, because text-pipeline counts can underreport a near-limit untracked Markdown file. Don't assume a small pointer edit is exempt from the document size rule; parent stage logs can already be close enough that one or two lines violate the cap.
+- Do check the physical line count immediately after the edit and bring the file back under 300 lines by tight reflow or required splitting before other hygiene checks. For `document-index.md`, prefer folding the new handoff into an existing related row before adding another row, then compact only directly related index wording if needed. On Windows, verify the count with byte-level LF counting or explicit line enumeration, not only `Get-Content | Measure-Object -Line`, because text-pipeline counts can underreport a near-limit untracked Markdown file. Don't assume a small pointer edit is exempt from the document size rule; parent stage logs can already be close enough that one or two lines violate the cap.
 
 
 ## Improvement: Row-specific server flags need final-value assertions
@@ -966,7 +1100,7 @@ Condition:
 - When fixing a cache pressure runner where the goal is demotion, cold eviction, queue pressure, or skip evidence under a small byte budget
 
 Action:
-- Do first prove a single payload can be admitted under that budget by checking live save size or a short smoke. If the minimum payload is larger than the budget, changing prompt count or identity cannot create demotion pressure; adjust the fixture or workload shape so payloads fit, then run a short smoke long enough to cross the next pressure boundary before documenting the fix.
+- Do first prove a single payload can be admitted under that budget by checking live save size or a short smoke. If the minimum payload is larger than the budget, changing prompt count or identity cannot create demotion pressure; adjust the fixture or workload shape so payloads fit. When acceptance requires an exact decision or transaction delta, also calculate resident bytes and expected pressure for every discovered hot candidate; a workload that leaves several near-equal hot candidates can produce several valid production decisions even when cold-victim count is correct. Run a short smoke through the exact boundary before documenting the fix.
 
 
 ## Improvement: Protected-root rows need protected-counter proof
@@ -1273,7 +1407,7 @@ Condition:
 
 Action:
 
-- Do grep every literal flag, confirm registration in the server argument parser, and trace mode- or context-coupled validation blocks for each mode the driver runs. Syntax, parameter names, and dry-run output are not enough if the server rejects the flag combination at startup.
+- Do grep every literal flag, confirm all registered aliases and environment sources in the server argument parser, and trace mode- or context-coupled validation blocks for each mode the driver runs. When a canonical argv forbids alternate configuration, reject every parser alias and environment source through one helper used by live and pure paths; test each source in isolation and restore process environment in `finally`. Syntax, parameter names, and dry-run output are not enough if the server rejects or silently changes the flag combination at startup.
 
 
 ## Improvement: Byte-verify new markdown immediately after creation on Windows
@@ -1476,6 +1610,22 @@ Action:
   `Select-Object -Index (70..130)`. Do not pass `-Index 70..130`, because
   PowerShell treats it as a string and fails before producing the file slice.
 
+## Improvement: Capture foreach output before piping in PowerShell probes
+
+Condition:
+
+- When a one-line PowerShell verification command builds objects with
+  `foreach (...) { ... }` and then pipes the resulting collection to
+  `Format-Table`, `Sort-Object`, or another pipeline command
+
+Action:
+
+- Do assign the `foreach` output to a variable or wrap the expression in a
+  subexpression before the pipe, for example `$rows = foreach (...) { ... };
+  $rows | Format-Table`. Do not write `foreach (...) { ... } | Format-Table`,
+  because PowerShell parses the pipe as an empty pipeline element and the
+  verification fails before producing evidence.
+
 ## Improvement: Clean Windows build workers after non-timeout failures
 
 Condition:
@@ -1542,3 +1692,643 @@ Action:
   Permission denied` even when the code is correct. If it happens, check for
   leftover build workers, rerun the failed target serially, and record the first
   failure as build-process contention, not product evidence.
+
+## Improvement: Release regressions need live checks and working test hooks
+
+Condition:
+
+- When a focused cache regression uses `assert` or a debug setter that claims
+  to wire a synchronous worker after an async worker was retired, or making
+  hidden Release side effects active exposes a later state mismatch
+
+Action:
+
+- Do replace binding Release checks with explicit aborting checks and inspect
+  the setter implementation, not its comment. Run the negative or pre-fix path
+  when feasible; a passing Release test with silent failed demotions is not
+  regression evidence. If the active side effects expose a different production
+  result, stop at that first failure and preserve the observed transition. Route
+  the expectation-versus-product classification for review; do not weaken the
+  new check or change production behavior under the assertion-fix gate.
+
+## Improvement: Persist rollback inventory before quarantine
+
+Condition:
+
+- When a filesystem transaction makes existing files temporarily unavailable
+  by renaming them to quarantine paths
+
+Action:
+
+- Do persist the complete victim inventory and original/quarantine path mapping
+  before the first rename. Update transaction phase only after each phase is
+  durable. On any pre-commit failure, drive rollback from that persisted
+  inventory; do not build the manifest incrementally after files move.
+
+## Improvement: Restart reconstruction needs durable ownership after cleanup
+
+Condition:
+
+- When committed cache recovery reconstructs controller ownership from a
+  transaction manifest and cleanup removes that manifest
+
+Action:
+
+- Do prove a second fresh-controller startup before calling recovery idempotent.
+  Keep ownership in a durable claim record whose lifecycle follows payload
+  eviction; in-memory reconstruction followed by manifest deletion is not
+  durable and lets later orphan reconciliation delete the payload.
+## Improvement: Final policy outcome owns decision metrics
+
+Condition:
+
+- When a lower-level cache transaction can fail and its caller may choose a different fallback outcome
+
+Action:
+
+- Do emit the one-per-candidate decision metric only after the caller selects the final outcome. Transaction metrics may describe the lower-level rollback, but do not emit `retained_hot` inside the failed transaction if the caller can still evict the payload. After a non-capacity demotion failure, verify every caller boundary stops before entry removal; retaining bytes inside the transaction is insufficient when an outer eviction function treats every non-demoted result as immediate eviction.
+## Improvement: Named live scenarios need tuple and delta proof
+
+Condition:
+
+- When a reusable live driver labels a scenario `PASS` from metric-family
+  presence or any member of a broad result family
+
+Action:
+
+- Do gate `PASS` on the scenario's exact before/after metric tuples, required
+  response or restore evidence, and forbidden counter deltas. Write raw snapshots
+  plus deterministic structured deltas and state reconciliation so QA does not
+  need to reconstruct the claimed preconditions ad hoc.
+
+## Improvement: Test-plan mapping must preserve combined preconditions
+
+Condition:
+
+- When a blocked test row requires two descriptor types, states, or pressures on
+  one owner and existing tests cover each element separately
+
+Action:
+
+- Do keep the row blocked until one test creates the combined precondition and
+  proves its coupled invariants. Don't map separate tests as if they prove the
+  same-entry or same-transaction contract.
+
+## Improvement: Place focused tests after required private-access helpers
+
+Condition:
+
+- When a new focused C++ test uses friend-injection helpers declared later in a
+  large test translation unit
+
+Action:
+
+- Do place the test body after the helper definitions and add only a forward
+  declaration near the stage grouping when call ordering needs it. Build the
+  focused target immediately so declaration-order errors do not survive into
+  broader validation.
+
+## Improvement: Coverage opt-out guards must run before capture phases
+
+Condition:
+
+- When a coverage runner has an explicit incomplete-run opt-out and complete
+  runs must fail closed
+
+Action:
+
+- Do validate incompatible skip/opt-out combinations immediately after argument
+  parsing, before directory setup or any test capture. Prove the guard with a
+  child-process negative smoke test so the expected nonzero exit does not abort
+  the verification shell.
+
+## Improvement: Coverage blockers require canonical runner proof
+
+Condition:
+
+- When a QA report classifies changed-line coverage as an infrastructure or
+  module-mapping blocker after running one or more ad hoc coverage probes
+
+Action:
+
+- Do inspect the accepted canonical coverage runner and compare its required
+  phases with the preserved artifacts. If the runner already includes a
+  production-server probe and merged `--input_coverage` capture but the report
+  ran only a focused executable, classify the result as a QA execution gap, not
+  an infrastructure limitation. Require the canonical fail-closed command and
+  its full log before escalating a real runner failure to tooling ownership.
+
+## Improvement: Live runners need preflight-free parser self-tests
+
+Condition:
+
+- When a canonical live PowerShell runner needs focused regression coverage for
+  parsing or classification logic but normal startup requires a model and server
+
+Action:
+
+- Do put the logic in one helper used by the live path, add a self-test switch
+  that calls it before model and server preflight, and run that switch under
+  both Windows PowerShell 5 and PowerShell 7. Include valid empty and malformed
+  nonempty inputs so the regression does not weaken strict validation.
+
+## Improvement: OpenCppCoverage merge tails must avoid cmd built-ins
+
+Condition:
+- When a PowerShell coverage runner launches OpenCppCoverage through
+  `Start-Process` and appends a dummy `cmd /c` built-in after `--`
+
+Action:
+- Do use a stable no-argument executable as the merge target and fail
+  immediately on a nonzero merge exit. `Start-Process` argument reconstruction
+  can make OpenCppCoverage pass a quoted built-in such as `"exit"` to `cmd`,
+  which creates empty exports even though every binary capture exists.
+
+## Improvement: OpenCppCoverage zero-denominator merges are tooling defects
+
+Condition:
+- When a canonical OpenCppCoverage run executes the focused targets, writes
+  `.cov` files, and the merge exits `0`, but the Cobertura XML has
+  `lines-valid="0"` or empty `<packages/>`
+
+Action:
+- Do classify the result as a coverage tooling/script defect, not a product
+  bug, unless separate evidence shows the product binary failed to execute.
+  Check `.cov` sizes first: tiny 100-byte-class files usually mean no line
+  data was captured. Then verify source path normalization, module filters,
+  PDB/debug symbol availability, and `--sources` shape before touching product
+  code. Add wrapper preflight for required PDBs when the build is supposed to
+  produce OpenCppCoverage line evidence, and require the wrapper to fail closed
+  on zero denominator, missing packages, or no approved denominator rows.
+  Retest with a nonempty package set plus positive `lines-valid`; don't accept
+  `line-rate="1"` on `0 / 0` lines as coverage evidence.
+
+## Improvement: Exact-set mutation seams need identity discovery
+
+Condition:
+- When a guarded live mutation route requires the first request to name an
+  exact complete set of internal payload and owner IDs
+
+Action:
+- Do verify the approved interface gives the runner a pre-mutation source for
+  every required ID before implementing live scenarios. If metrics and logs do
+  not expose a complete stable inventory, stop at a partial gate and request a
+  design decision. Do not guess IDs or add an unapproved discovery endpoint.
+
+## Improvement: Stop requests preserve verification boundaries
+
+Condition:
+- When a Manager stops further execution after the last code or assertion edit
+
+Action:
+- Do stop active workers, distinguish earlier passing evidence from the final
+  unverified tree, and mark the implementation PARTIAL with the exact rebuild
+  and suite commands still required. Do not cite a pre-edit PASS as proof for
+  later edits.
+
+## Improvement: Snapshot seams need pure selectors and complete epoch ownership
+
+Condition:
+- When a non-mutating discovery response binds a later cache mutation to a
+  generation and complete production candidate inventories
+
+Action:
+- Do separate pure enumeration from production metric recording, copy the live
+  production predicate exactly, and validate descriptor integrity after
+  selection without silently narrowing policy. Inventory every generation
+  input and route its mutation, including slot references, completion paths,
+  recovery, rollback, budgets, and one-shot setup, through one locked monotonic
+  owner. Require before and after generation values; changed-then-restored state
+  must remain stale.
+
+## Improvement: Standalone server route tests must account for suite fixtures and idle release
+
+Condition:
+- When a focused pytest module starts its own server processes inside the
+  repository server test tree
+
+Action:
+- Do set `LLAMA_SERVER_TEST_SKIP_MODEL_PRELOAD=1` for the focused invocation so
+  the global module fixture does not start unrelated presets. After a completion
+  returns, poll guarded discovery through retryable `idle slots` or integrity
+  responses before asserting inventory; response delivery can precede slot
+  release and cache-save completion.
+
+## Improvement: Live cache discovery must release the idle slot reference without another admission
+
+Condition:
+- When a model-backed cache workload needs the last normally saved payload to appear in an exact eligible discovery inventory
+
+Action:
+- Do call `POST /slots/<id>?action=erase` after admission and before discovery, start the server with an isolated existing `--slot-save-path`, preserve the erase response, and remove the directory if it stays empty. Do not send a throwaway completion to release the reference: normal `tx_save()` can admit that completion as another payload and violate exact workload cardinality.
+
+## Improvement: Empty redirected logs return null under PowerShell
+
+Condition:
+- When a live PowerShell runner reads redirected stdout or stderr with
+  `Get-Content -Raw` and uses string length to isolate a before/after log window
+
+Action:
+- Do normalize each null read to `''` before calling `.Length` or `.Substring()`.
+  A valid empty redirected file returns null, even after a `[string]` cast.
+
+## Improvement: No-victim pressure rows need reachable ownership setup
+
+Condition:
+- When a live cache row requires positive cold occupancy and an exact empty production-eligible victim set
+
+Action:
+- Do prove which normal ownership or residency transition can create occupied cold bytes that the production selector excludes before running repeated model attempts. If every normally admitted cold descriptor remains eligible, preserve the first exact discovery and stop for reviewed workload or ownership direction; do not weaken exact-set validation or hide the eligible victim in the runner.
+
+## Improvement: Owner reassignment must prove restore compatibility
+
+Condition:
+- When a guarded test seam reassigns a checkpoint descriptor to another entry
+
+Action:
+- Do validate the destination with the same namespace, pair-shape, descriptor, token-span, preparation, boundary, checksum, workload, and store-integrity predicates required by restore before consuming the seam. Also define one bounded normal workload that discovery must prove produces the collision-free owner-link shape; do not call a selector mutation reachable from a synthetic row or an unspecified search.
+
+## Improvement: Checkpoint workload plans need capability and apply preflight
+
+Condition:
+- When a model-backed plan requires a real checkpoint plus a specific owner/link
+  inventory before a guarded mutation
+
+Action:
+- Do verify fixture capability from GGUF architecture/NextN metadata, live code
+  support, and existing startup evidence; then define literal request bytes and
+  a fail-closed discovery preflight that checks checkpoint span compatibility
+  and an empty destination kind link before apply. Require discovery to prove
+  the checkpoint reached the required cold residency under the fixed startup
+  budgets; runtime checkpoint creation alone does not prove a cold descriptor
+  exists or is selectable. Do not treat capability as runtime shape proof or
+  send apply when any precondition is absent.
+## Improvement: Multi-owner live workloads must fit aggregate token budget
+
+Condition:
+
+- When a live cache workload requires distinct retained owners and each request
+  is close to the configured context size
+
+Action:
+
+- Do sum the rendered token counts for all owners that must coexist and compare
+  the result with the controller token limit before a long run. If the sum
+  exceeds the limit, return the workload for design correction; do not assume
+  cold demotion preserves an owner after token-budget entry removal.
+
+## Improvement: Read-only phase boundaries require completed producer views
+
+Condition:
+
+- When an approved guarded validator must compare entry and branch projections
+  read-only between two production mutation phases
+
+Action:
+
+- Do trace the live producer call order and verify every compared projection is
+  synchronized before the proposed hook. If one view updates only after the
+  next phase, stop before code changes and record the exact order for design
+  correction; do not hide the gap with a mutator forbidden by the gate.
+
+## Improvement: Prepared-proof route fixtures need capability preflight
+
+Condition:
+
+- When an exact route test requires one admitted owner with both exact and
+  checkpoint payloads before a guarded prepared-proof apply
+
+Action:
+
+- Do trace every capability-selecting CLI option and its current default before
+  a long model run. Assert the final launched argv contains the exact selector,
+  including its value and cardinality; model metadata, target checkpoint logs,
+  and a linked checkpoint descriptor do not prove an MTP draft context. Preserve
+  redacted linked and explicit proof requests and responses before validation so
+  a component failure remains diagnosable. Then admit and poll the workload
+  before discovery, use the route's literal `payload_ids` schema, and verify the
+  proof returns both kinds with the required positive draft component before
+  apply.
+  If the selected model/workload returns only `exact_blob`, stop with a fixture
+  capability blocker. Audit existing route helpers and approved fixture plans
+  before editing the test. If the only checkpoint-capable workload needs new
+  model options, requests, caps, or preflight outside the active gate, document
+  the boundary and return for design approval. Do not treat controller-only
+  synthetic checkpoint setup as live route evidence or invent a shorter
+  workload to make the route pass.
+
+## Improvement: Capability preflight strings must be visible at the authorized log level
+
+Condition:
+
+- When a model-backed fixture requires literal startup records as fail-closed
+  capability proof
+
+Action:
+
+- Do trace each required string to its logging macro and confirm the authorized
+  launch level and source branch predicate before running a long node. Prefer an
+  exact success record plus operational evidence over a warning emitted only by
+  one capability subtype. Treat trace-only records absent from default logs as
+  a design or test-contract blocker; do not add a logging flag, accept broad
+  regex alternatives, or weaken the record check without a new gate. Put each
+  case-sensitive record check in one ordinal-literal helper shared by live and
+  pure paths. Add pure negatives for the old warning alone, broad-regex-shaped
+  text, wrong-case fallback text, timing-only readiness, and each missing
+  operational companion record.
+## Improvement: Prometheus braces are not JSON boundaries
+
+Condition:
+
+- When a test helper extracts an embedded JSON object from a Prometheus metrics response that also contains label sets such as `{mode="hybrid"}`
+
+Action:
+
+- Do anchor extraction to the documented JSON payload marker or parse the exact route format; don't treat the first `{` and last `}` in the response as JSON boundaries. Prove the extractor against labeled Prometheus rows before a costly model-backed run.
+
+## Improvement: Preserve live preflight inputs before validation
+
+Condition:
+
+- When a bounded live route helper obtains discovery or parsed metrics and then validates an exact inventory contract
+
+Action:
+
+- Do preserve complete redacted discovery and parsed metrics before the first exact inventory assertion. If validation fails, the saved input must show the actual row count and shape so review does not need another model run to diagnose the mismatch. When a capture-only gate is active, stop immediately after both writes and verify that no proof or mutation artifact exists.
+
+## Improvement: Mocked route inventories must follow producer field semantics
+
+Condition:
+- When pure lifecycle tests mock guarded discovery rows before an authorized model-backed smoke
+
+Action:
+- Do trace each repeated owner or payload field to its production writer and model the real relation before asserting distinctness. In particular, a `cold_sets` incoming key may identify the discovered hot candidate rather than an active slot owner. Preserve the first live captures and stop if a semantic mismatch escapes the pure gate; do not spend a second authorized model run correcting the mock.
+
+## Improvement: Fixed-stop artifact audits need exact forbidden names
+
+Condition:
+- When a one-shot proof or capture gate requires absence of apply, prepared,
+  terminal, or fault artifacts while valid pre-apply files use those words
+
+Action:
+- Do test the contract's exact forbidden filenames and persist those booleans in
+  an artifact manifest after the process stops. Do not use a broad filename
+  regex such as `apply|fault`, because valid names like
+  `metrics-before-apply.json` produce false positives. Preserve the first run
+  and resolve audit ambiguity from its artifacts; do not rerun.
+
+## Improvement: Authenticated terminal proofs need shared shape negatives
+
+Condition:
+- When a guarded terminal proof must establish coherent state plus a complete
+  forbidden-effect matrix across controller and route tests
+
+Action:
+- Do capture the counter and topology baseline before mutation, derive terminal
+  tuple and zero deltas after the common epilogue, and bind the complete state
+  block into the existing authentication record. Never serialize a literal zero
+  for a named forbidden effect: use an event counter at its production boundary
+  plus complete before/after state comparison, and retain the event count when a
+  change can be restored before terminal capture. Make controller and route tests
+  consume the same field contract. Add one isolated pure negative for every
+  required field group and zero delta, restoring shared fixtures in `finally`.
+  Test each request token and terminal HMAC in a nonempty log, plus
+  controller-only nonzero observation probes, before any model run; do not rely
+  on aggregate metrics or duplicate narrower assertion sets.
+
+## Improvement: Terminal artifact audits need original request secrets
+
+Condition:
+- When a route artifact manifest scans for leaked snapshot or proof tokens after
+  retrieving an authenticated terminal proof
+
+Action:
+- Do pass the original apply request into the manifest audit. The terminal proof
+  contains its terminal HMAC but may omit the earlier snapshot and proof tokens;
+  do not derive the complete redaction set from the terminal response alone.
+
+## Improvement: Tamper mocks must inspect raw requests
+
+Condition:
+- When a pure route test uses a canned rejection response to prove a changed
+  token, HMAC, signature, or other tampered request field
+
+Action:
+- Do capture or assert the raw request inside the mock before returning the
+  rejection. Require the field to equal the intended mutation and differ from
+  the valid value, then check redacted artifacts separately. Do not treat a 4xx
+  response plus an already redacted capture as proof that the helper sent the
+  tampered value.
+
+## Improvement: Audit live artifact schema before extracting gate evidence
+
+Condition:
+- When a fresh route or integration run must be audited against an artifact
+  manifest and earlier runs may use different filenames or JSON field shapes
+
+Action:
+- Do list the fresh run files and read the current manifest plus evidence JSON
+  schema before writing extraction commands. Validate required, forbidden, and
+  redaction maps by their actual values; do not assume a `pass` field or reuse
+  stale request, terminal-response, or scalar resource filenames.
+
+## Improvement: Removed test-only APIs imply stale-test classification
+
+Condition:
+- When a QA clean build fails because a test target calls missing
+  `hybrid_cache_controller` members, and the current header or implementation
+  explicitly documents that those members were intentionally retired by a later
+  transactional or synchronous API change
+
+Action:
+- Do classify the failure as stale test/automation unless the product header
+  still promises the removed surface. Assign Developer to port the test to the
+  current API and require a clean-build retest plus execution of the repaired
+  test. Do not label the current product API as defective, add compatibility
+  shims, or reopen the retired async design unless a separate design gate
+  authorizes it.
+
+## Improvement: Quote nested PowerShell parser probes
+
+Condition:
+- When running `pwsh -Command` or `powershell -Command` from an outer
+  PowerShell shell and the inner command uses variables such as `$tokens`,
+  `$errors`, or pipeline stages
+
+Action:
+- Do protect the inner command from outer-shell expansion, for example with a
+  single-quoted `-Command` string and doubled inner path quotes. If a parser
+  probe fails with mangled text such as `[ref]` without a variable name,
+  classify it as command quoting failure, fix the quote boundary, and rerun
+  before recording parser evidence.
+
+## Improvement: Separate entry-level discovery from checkpoint proof
+
+Condition:
+- When Stage 39 hot-byte totals include checkpoint bytes but guarded discovery
+  returns only exact hot candidates and empty cold sets
+
+Action:
+- Do trace `enumerate_hot_policy_candidates_core()`,
+  `stage39_build_snapshot_locked()`, and the guarded `proof` operation before
+  assigning a product bug. Discovery can expose one entry-level exact policy
+  row while proof expands that owner's exact and checkpoint descriptors. Empty
+  cold sets are expected when the startup hot budget prevented demotion. Compare
+  the live driver with the current natural same-owner schema and prepared
+  bindings; do not require a historical cold checkpoint candidate after that
+  owner-reassignment fixture has been superseded.
+
+## Improvement: Canonical same-owner drivers must preserve slot-reference eligibility
+
+Condition:
+- When a canonical model-backed driver must discover one eligible source entry
+  while a second admitted entry remains referenced by the active slot
+
+Action:
+- Do submit source then incoming once, avoid slot erase or a third admission,
+  require exactly one eligible source row with an empty cold set, and expand its
+  exact/checkpoint pair through guarded proof. Build the natural
+  `prepared_bindings` from that stable proof and reject historical owner-move or
+  cold-rank fields; don't copy an older multi-owner discovery setup into the
+  canonical same-owner path.
+
+## Improvement: Explicit pair proof IDs need guarded linked bootstrap
+
+Condition:
+- When a canonical route must send both exact and checkpoint payload IDs but
+  discovery exposes only the eligible exact policy row
+
+Action:
+- Do request a guarded linked proof for the discovered exact ID, validate its
+  ordered same-owner exact/checkpoint rows, then issue the binding proof with
+  both returned IDs explicitly. Do not infer the checkpoint ID from historical
+  owner moves or stale discovery assumptions. After apply, retrieve the terminal
+  proof with its HMAC. Preserve the raw apply response, extract the embedded
+  proof with a string-aware byte scanner, and compare it with the raw retrieval
+  body; parsed-object serialization is not byte proof. Expose consumption by
+  requiring a repeat of the original apply to fail with `consumed`. Redact
+  terminal HMAC artifacts while retaining the in-memory value for authentication.
+
+## Improvement: Hot-policy LRU loss can coexist with retained metadata
+
+Condition:
+- When a Stage 39 pressure proof retains lookup entries, branch nodes, and a
+  cold descriptor but reports source LRU membership `1 -> 0` and a resident
+  total above a budget lowered from the released source
+
+Action:
+- Do trace `evict_entry_by_id()` and active slot-reference exclusions before
+  classifying a product retention or accounting bug. A successfully demoted
+  source leaves the hot-policy LRU while its lookup metadata remains valid; an
+  active incoming entry may remain hot above the source-derived budget because
+  production cannot select it. Report the complete referenced-entry set with
+  owner identity, positive reference count, resident bytes, and payload links;
+  require those bytes to equal the remaining resident total and the owner to
+  differ from the released source. Do not require that referenced entry to
+  remain in the hot-policy LRU. Compute source before/after byte removal and
+  remaining payload versus metadata bytes. Treat unsigned membership
+  subtraction that serializes `0 - 1` as UINT64 maximum as a proof measurement
+  bug, and align the driver with the signed transition rather than changing
+  production retention.
+
+## Improvement: Generation spans cannot classify forbidden work
+
+Condition:
+- When terminal evidence derives a named forbidden-work delta by subtracting an
+  intermediate generation from a final generation
+
+Action:
+- Do trace every permitted mutation between the two observations. If normal
+  cleanup, LRU maintenance, or update-owned work can advance generation, use an
+  event counter at the named forbidden production boundaries instead. Keep the
+  generation span for ordering and freshness only; do not classify all
+  post-sync mutations as forbidden work.
+
+## Improvement: Production-boundary negatives must traverse production helpers
+
+Condition:
+- When a guarded negative claims that a named production-boundary counter makes
+  terminal evidence fail
+
+Action:
+- Do call the actual production helper after the counter baseline and required
+  latch, then assert the selected component delta is one, every sibling delta
+  is zero, the aggregate matches their sum, terminal validation rejects the
+  proof, and product state did not change. Do not increment the observed member
+  directly from fixture or baseline code.
+
+## Improvement: Cold-store validation hooks are not forced corruptors
+
+Condition:
+- When porting or writing cold-store promotion validation fault tests against
+  the synchronous transaction controller
+
+Action:
+- Do verify whether a debug hook actually mutates the serialized cold file or
+  only changes behavior after a real mismatch is detected. If the hook is not a
+  forced corruptor, create an explicit malformed `.cold` file or use the
+  current promotion-failure hook, then run the executable and compare logs
+  before documenting field-specific coverage. Do not assume a
+  `debug_set_*validation_failure*` call alone will make a valid cold file fail.
+
+## Improvement: PowerShell null inventories must be probed through typed boundaries
+
+Condition:
+- When a PowerShell driver imports a header-only CSV or otherwise represents an
+  empty inventory as `$null`, and the failing assertion receives that value
+  through a typed array parameter such as `[object[]]`
+
+Action:
+- Do reproduce the value through the same function signature before
+  classifying the failure. In PowerShell 7, a top-level `@($null).Count` can be
+  `0` while the same `$null` bound to `[object[]]` counts as one null element
+  inside the function. Classify false empty-inventory mismatches as driver
+  assertion bugs and require normalization at the producer or assertion
+  boundary; do not rely on top-level array probes or Windows PowerShell 5
+  behavior alone.
+
+## Improvement: Compound metric outcomes need tuple-set assertions
+
+Condition:
+- When a stage driver helper validates a metric family by requiring the whole
+  family delta to equal one tuple, and the scenario design or terminal proof
+  allows multiple valid tuples in one operation
+
+Action:
+- Do compare the observed metric delta set with the scenario-specific expected
+  tuple set. Require every expected tuple and reject unrelated, missing, or
+  duplicate tuples. Mirror the tuple-set shape in any paired apply-window log
+  validator, including expected transaction tuples, so the next assertion does
+  not reject the same valid operation after metrics pass. Do not classify a
+  second expected tuple as a product bug merely because a shared single-outcome
+  helper rejects the family total.
+
+## Improvement: Driver metric expectation fixes need pure stale negatives
+
+Condition:
+- When a PowerShell driver correction changes an expected metric delta tuple
+  after live evidence proves the old tuple stale
+
+Action:
+- Do update the accepted pure fixture to the new live-backed tuple and add pure
+  negatives that reject the exact stale tuple plus malformed/missing component
+  deltas before any model rerun. Run both PowerShell 7 and Windows PowerShell 5
+  parser plus self-test gates, and keep the model-backed row and coverage
+  blocked unless the user explicitly authorizes them.
+
+## Improvement: Cold-root inventory assertions must separate payload files from metadata
+
+Condition:
+- When a Stage 39 driver or review validates cold-root file inventories and the
+  root contains production metadata such as `ownership.claims`
+
+Action:
+- Do keep the full root inventory artifact for audit, but derive payload
+  cardinality from rows matching `^[0-9a-fA-F]+\.cold$`. Treat
+  `ownership.claims` as expected metadata when the cold-store ownership journal
+  is enabled, and separately reject staging/temp, manifest, quarantine,
+  checkpoint `.cold`, extra payload `.cold`, and other unexpected cold-root
+  rows. Add pure PowerShell 7/5 regressions for the accepted metadata case and
+  each forbidden file class before any model rerun. Do not classify a root-file
+  count greater than the payload count as a product bug without checking
+  metadata semantics.

@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <clocale>
+#include <cstdlib>
 #include <exception>
 #include <signal.h>
 #include <string>
@@ -310,6 +311,21 @@ int llama_server(int argc, char ** argv) {
     const bool is_router_server = params.model.path.empty()
                                && params.model.hf_repo.empty();
 
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    const char * stage39_opt_in_env = std::getenv("LLAMA_STAGE39_LIVE_TEST_SEAM");
+    const bool stage39_opt_in = stage39_opt_in_env != nullptr && std::string(stage39_opt_in_env) == "1";
+    const char * stage39_token_env = std::getenv("LLAMA_STAGE39_LIVE_TEST_TOKEN");
+    const std::string stage39_token = stage39_token_env == nullptr ? "" : stage39_token_env;
+    if (stage39_opt_in && (is_router_server ||
+            (params.hostname != "127.0.0.1" && params.hostname != "::1") ||
+            params.cache_mode_val != CACHE_MODE_HYBRID || !params.endpoint_metrics ||
+            params.cache_ram_mib <= 0 || params.cache_cold_max_mib <= 0 ||
+            params.n_parallel != 1 || stage39_token.size() < 32)) {
+        SRV_ERR("%s", "Stage 39 live test seam prerequisites rejected\n");
+        return 1;
+    }
+#endif
+
     // skip device enumeration so the CUDA primary context stays uncreated
     common_params_print_info(params, !is_router_server);
 
@@ -353,6 +369,11 @@ int llama_server(int argc, char ** argv) {
     // register API routes
     server_child child; // only used in non-router mode
     server_routes routes(params, ctx_server);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (stage39_opt_in) {
+        routes.stage39_live_pressure_token = stage39_token;
+    }
+#endif
     server_tools tools;
 
     std::optional<server_models_routes> models_routes{};
@@ -443,6 +464,11 @@ int llama_server(int argc, char ** argv) {
     // Save & load slots
     ctx_http.get ("/slots",                    ex_wrapper(routes.get_slots));
     ctx_http.post("/slots/:id_slot",           ex_wrapper(routes.post_slots));
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (stage39_opt_in) {
+        ctx_http.post("/debug/cache/stage39-live-pressure", ex_wrapper(routes.post_stage39_live_pressure));
+    }
+#endif
 
     // resumable streaming, the conversation_id is the session identity end to end. router and
     // child wire different handlers under the same paths: a child binds the local g_stream_sessions

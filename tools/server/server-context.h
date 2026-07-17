@@ -15,6 +15,7 @@ struct server_context_impl; // private implementation
 
 #ifdef LLAMA_SERVER_CACHE_TESTS
 std::string server_cache_stage10_prometheus_rows_for_tests(const json & cache_stats);
+std::string server_cache_stage39_prometheus_rows_for_tests(const json & cache_stats);
 std::string server_cache_stage31_prometheus_rows_for_tests(const json & cache_stats);
 #endif
 
@@ -165,6 +166,10 @@ struct server_routes {
     server_http_context::handler_t post_rerank;
     server_http_context::handler_t get_lora_adapters;
     server_http_context::handler_t post_lora_adapters;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    server_http_context::handler_t post_stage39_live_pressure;
+    std::string stage39_live_pressure_token;
+#endif
 
     // to be used in router mode
     json get_model_info() const;
@@ -188,7 +193,7 @@ private:
     std::unique_ptr<const server_context_meta> meta;
 
     const common_params & params;
-    const server_context_impl & ctx_server;
+    server_context_impl & ctx_server;
 
     server_queue & queue_tasks;
     server_response & queue_results;

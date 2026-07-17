@@ -7,6 +7,8 @@ Condition:
 
 Action:
 - Reconstruct progress from `document-index.md`, requested stage source, tracker row, and latest durable prior-stage implementation, fix, manager-gate, and test-report evidence before selecting exactly one active gate. At closure, compare earlier blocked reports against later reconciliation reports before deciding. Treat stale entry-document or tracker statuses and missing durable closure decision as gate-blocking documentation work. Explicitly state whether any docs were changed.
+- When a gate approves a correction chain, name every binding part and state that later parts supersede only conflicting earlier text. Do not describe a final review as reviewing earlier parts unless its scope says so.
+- When a corrected gate supersedes an authorization that a Developer proved infeasible, keep the blocker as durable evidence, name the superseded decision and gate part, and authorize only the independently reviewed replacement chain.
 
 
 ## Improvement: memory-first startup

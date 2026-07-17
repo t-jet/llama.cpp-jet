@@ -173,7 +173,11 @@ void test_cold_payload_bytes_gauge() {
 
         json stats_after = ctrl->get_stats();
         TEST_ASSERT(stats_after["n_demotion_successes"].get<size_t>() == 1);
-        TEST_ASSERT(stats_after["n_cold_payload_bytes"].get<size_t>() == 125);
+        const fs::path cold_file = tmp_dir / "1.cold";
+        TEST_ASSERT(fs::exists(cold_file));
+        const size_t committed_serialized_bytes = fs::file_size(cold_file);
+        TEST_ASSERT(committed_serialized_bytes == sizeof(cold_store_header) + 125);
+        TEST_ASSERT(stats_after["n_cold_payload_bytes"].get<size_t>() == committed_serialized_bytes);
         TEST_ASSERT(stats_after["n_cold_payload_count"].get<size_t>() == 1);
         TEST_ASSERT(stats_after["n_cold_payload_descriptors"].get<size_t>() == 1);
         TEST_ASSERT(stats_after["n_hot_payload_descriptors"].get<size_t>() == 0);
@@ -424,6 +428,32 @@ void test_stage10_prometheus_export_extended_rows() {
     printf("  PASSED\n");
 }
 
+void test_stage39_prometheus_export_has_unique_mode_label() {
+    printf("step10: Stage 39 Prometheus rows have unique mode label...\n");
+    json cache_stats = {
+        {"type", "hybrid"},
+        {"cache_two_layer_decisions", json::array({
+            {{"mode", "hybrid"}, {"result", "evicted"}, {"reason", "both_filled"}, {"value", 2}},
+        })},
+        {"cache_cold_transactions", json::array({
+            {{"mode", "hybrid"}, {"result", "commit"}, {"reason", "none"}, {"value", 3}},
+        })},
+    };
+    const std::string prometheus = server_cache_stage39_prometheus_rows_for_tests(cache_stats);
+    TEST_ASSERT(prometheus.find(
+        "cache_two_layer_decisions_total{mode=\"hybrid\",result=\"evicted\",reason=\"both_filled\"} 2") != std::string::npos);
+    TEST_ASSERT(prometheus.find(
+        "cache_cold_transactions_total{mode=\"hybrid\",result=\"commit\",reason=\"none\"} 3") != std::string::npos);
+    TEST_ASSERT(prometheus.find("mode=\"hybrid\",mode=") == std::string::npos);
+    size_t mode_labels = 0;
+    for (size_t pos = prometheus.find("mode=\""); pos != std::string::npos;
+            pos = prometheus.find("mode=\"", pos + 1)) {
+        ++mode_labels;
+    }
+    TEST_ASSERT(mode_labels == 2);
+    printf("  PASSED\n");
+}
+
 int main() {
     printf("==================================================\n");
     printf("Step 10: Metrics\n");
@@ -439,6 +469,7 @@ int main() {
     test_cold_payload_count_gauge();
     test_stage10_prometheus_export_dimensions();
     test_stage10_prometheus_export_extended_rows();
+    test_stage39_prometheus_export_has_unique_mode_label();
 
     printf("\n==================================================\n");
     printf("Step 10: All tests PASSED\n");

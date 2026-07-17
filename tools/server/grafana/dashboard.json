@@ -24,7 +24,7 @@
     }
   ],
   "cursorSync": "Crosshair",
-  "description": "Detailed monitoring for llama.cpp server with hybrid cache. Covers throughput, slot usage, hot/cold layers, checkpoint, branch tree, promotion latency, and diagnostics. Enable --metrics on the server.",
+  "description": "Detailed monitoring for llama.cpp server with hybrid cache. Covers throughput, slot usage, hot/cold layers, prefix and checkpoint restore, branch tree, promotion latency, and diagnostics. Enable --metrics on the server.",
   "editable": true,
   "elements": {
     "panel-101": {
@@ -2756,8 +2756,8 @@
       "kind": "Panel",
       "spec": {
         "id": 52,
-        "title": "Checkpoint Hits by Profile & Residency",
-        "description": "Accepted checkpoint cache hits broken down by profile and payload residency.",
+        "title": "Checkpoint Hits by Shape",
+        "description": "Accepted checkpoint cache hits broken down by profile, payload residency, and pair state.",
         "links": [],
         "data": {
           "kind": "QueryGroup",
@@ -2774,8 +2774,8 @@
                       "name": "${datasource}"
                     },
                     "spec": {
-                      "expr": "sum by (mode, profile, payload_residency) (rate(llamacpp:cache_checkpoint_hits_total{job=\"$job\", instance=~\"$instance\", mode=~\"$mode\"}[$rate_interval]))",
-                      "legendFormat": "{{profile}} / {{payload_residency}} - {{mode}}"
+                      "expr": "sum by (mode, profile, payload_residency, pair_state) (rate(llamacpp:cache_checkpoint_hits_total{job=\"$job\", instance=~\"$instance\", mode=~\"$mode\"}[$rate_interval]))",
+                      "legendFormat": "{{profile}} / {{payload_residency}} / {{pair_state}} - {{mode}}"
                     }
                   },
                   "refId": "A",
@@ -2814,8 +2814,8 @@
       "kind": "Panel",
       "spec": {
         "id": 53,
-        "title": "Checkpoint Restores by Result",
-        "description": "Checkpoint restore attempts broken down by result.",
+        "title": "Checkpoint Restores by Shape",
+        "description": "Checkpoint restore attempts broken down by profile, payload residency, pair state, and result.",
         "links": [],
         "data": {
           "kind": "QueryGroup",
@@ -2832,8 +2832,8 @@
                       "name": "${datasource}"
                     },
                     "spec": {
-                      "expr": "sum by (mode, result) (rate(llamacpp:cache_checkpoint_restores_total{job=\"$job\", instance=~\"$instance\", mode=~\"$mode\"}[$rate_interval]))",
-                      "legendFormat": "{{result}} - {{mode}}"
+                      "expr": "sum by (mode, profile, payload_residency, pair_state, result) (rate(llamacpp:cache_checkpoint_restores_total{job=\"$job\", instance=~\"$instance\", mode=~\"$mode\"}[$rate_interval]))",
+                      "legendFormat": "{{profile}} / {{payload_residency}} / {{pair_state}} / {{result}} - {{mode}}"
                     }
                   },
                   "refId": "A",

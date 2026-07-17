@@ -1,9 +1,8 @@
 # Cache handling test plan
 Status: Active
-Last updated: 2026-07-11
-Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 38
+Last updated: 2026-07-13
+Scope: server integration tests and focused evidence mapping for implemented cache behavior through Stage 39
 Target environment: Windows 11, PowerShell, local GGUF model-backed integration tests
-
 ## Documentation rules
 Use plain ASCII status labels in plans, scripts, and reports: `PASS`, `FAIL`, `SKIP`, and `BLOCKED`. Every execution session must start from a clean build. Do not use stale or incrementally rebuilt binaries as test evidence.
 
@@ -42,7 +41,6 @@ Example design:
 # Pressure: create four or more unique entries to force eviction.
 ```
 
-## Purpose
 This plan covers server integration tests for the cache behavior implemented now. When public HTTP cannot create an internal precondition, the plan also maps focused C++ or Python metric-shape evidence that may be used for that row.
 
 ## Finding current implementation status
@@ -119,6 +117,7 @@ The integration plan covers:
 - Stage 35 upstream-merge regression after Manager implementation gate PASS: clean build and stale-binary rules, cache core, MTP/KV/speculative pair-state, route/session/router child state, checkpoint message spans, bounded metrics, cold-store checks when touched, Stage 34 replay/synthetic rows when touched, and focused coverage when feature-mode files changed.
 - Stage 36 hybrid hit and performance validation: Stage 33 comparison lineage with tight duplicate bursts, positive hybrid hit evidence, bounded metrics, hot-RAM and throughput comparison, clean logs, cleanup, and hygiene.
 - Stage 38 prefix restore and cold-budget gauge: approved chat strict-prefix partial restore on `/v1/chat/completions` only, suffix turn cached_tokens, matching `timings.cache_n`, full public `prompt_tokens` proved by rendered request tokenization, hybrid hit delta, accepted prefix metric rows, protected branch and cold-prefix behavior, generated-output never replayed, `/completion` strict-prefix recompute, and the D36-FU-01 cold-budget gauge fix to `2147483648` for `2048` MiB.
+- Stage 39 two-layer payload retention: guarded discover/snapshot/apply pressure, per-incoming exact cold sets, hot-pressure demotion, cold room-making, rollback/restart, fixed observability, and 80% changed-line coverage. See [Part 43](./cache-handling-test-plan/part-43-stage39-two-layer-retention.md).
 
 ## Current testable scope
 
@@ -210,6 +209,7 @@ This document is split into smaller part files. Read the parts in order when you
 - [Part 40: Stage 35 upstream merge regression](./cache-handling-test-plan/part-40-stage35-upstream-merge-regression.md)
 - [Part 41: Stage 36 hybrid hit and performance validation](./cache-handling-test-plan/part-41-stage36-hybrid-hit-performance-validation.md)
 - [Part 42: Stage 38 prefix restore and cold-budget gauge](./cache-handling-test-plan/part-42-stage38-prefix-restore-cold-budget.md)
+- [Part 43: Stage 39 two-layer payload retention](./cache-handling-test-plan/part-43-stage39-two-layer-retention.md)
 
 ## T114 split (Stage 11 onward)
 

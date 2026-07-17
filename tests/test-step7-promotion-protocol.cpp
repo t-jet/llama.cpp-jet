@@ -1,10 +1,10 @@
 // Step 7 focused test: Promotion protocol
 // This test verifies the promote_payload, handle_promotion_completion, and
-// try_restore_from_cache promotion path against the Phase 6 Step 7 requirements:
-// promotion eligibility validation, transient state transitions, NB-2 queue-full
-// revert, completion handling (success → hot, failure → evicted), cold-descriptor
-// fallback in try_restore_from_cache, and draft-side failure for target_and_draft
-// transitions to evicted (not partially hot).
+// try_restore_from_cache promotion path against the Phase 6 Step 7 requirements,
+// updated for the current synchronous transaction model: promotion eligibility
+// validation, inline completion handling (success -> hot, failure -> evicted),
+// cold-descriptor fallback in try_restore_from_cache, and draft-side failure for
+// target_and_draft transitions to evicted (not partially hot).
 
 #include "server-cache-hybrid.h"
 #include "server-cache-store-cold.h"
@@ -17,7 +17,6 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <thread>
 #include <vector>
 
 // Custom assertion macro that works in both Debug and Release modes.
@@ -131,7 +130,7 @@ void test_promote_payload_validates_residency() {
     bool hot_result = ctrl.promote_payload(1);
     TEST_ASSERT(!hot_result);
 
-    // Inject promoting state — promote_payload should reject it
+    // Inject promoting state - promote_payload should reject it
     hybrid_cache_controller ctrl2(params, 2, 1000, nullptr, nullptr);
     ctrl2.debug_add_entry_for_tests(create_tokens({4, 5, 6}), false, "test2", 128, 0);
     TEST_ASSERT(ctrl2.debug_inject_first_payload_fault_for_tests(payload_debug_fault::promoting_residency));
@@ -191,12 +190,12 @@ void test_promote_payload_validates_not_already_promoting() {
 }
 
 // ============================================================
-// Test 4: promote_payload transitions to promoting state on success
-// After a successful enqueue, the descriptor should be in promoting state.
+// Test 4: promote_payload completes synchronously to hot on success
+// After a successful call, the descriptor should already be hot.
 // Uses demote-then-promote round-trip to get a valid cold ref.
 // ============================================================
-void test_promote_payload_transitions_to_promoting() {
-    printf("step7: promote_payload transitions to promoting state...\n");
+void test_promote_payload_completes_synchronously_to_hot() {
+    printf("step7: promote_payload completes synchronously to hot...\n");
 
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
@@ -208,16 +207,9 @@ void test_promote_payload_transitions_to_promoting() {
     // Add an entry with payload bytes (starts as hot)
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "test", 128, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -227,85 +219,52 @@ void test_promote_payload_transitions_to_promoting() {
     bool promote_result = ctrl.promote_payload(1);
     TEST_ASSERT(promote_result);
 
-    // Verify the descriptor is in promoting state
+    // Verify promotion completed inline.
     json stats = ctrl.get_stats();
-    TEST_ASSERT(stats["n_promoting_payload_descriptors"] == 1);
+    TEST_ASSERT(stats["n_promotion_successes"] == 1);
+    TEST_ASSERT(stats["n_promoting_payload_descriptors"] == 0);
+    TEST_ASSERT(stats["n_hot_payload_descriptors"] == 1);
+    TEST_ASSERT(stats["n_cold_payload_descriptors"] == 0);
 
-    // Process completions to clean up
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    ctrl.process_completions();
-
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
 }
 
 // ============================================================
-// Test 5: promote_payload queue-full reverts residency to cold (NB-2)
-// When the worker queue is full, promote_payload should revert
-// the descriptor back to cold and return false.
+// Test 5: retired async queue-full path has no current equivalent
+// Stage 25/28 retired the worker queue. Promotion now runs inline, so
+// NB-2 queue-full revert is obsolete and must not be asserted here.
 // ============================================================
-void test_promote_payload_queue_full_reverts_to_cold() {
-    printf("step7: promote_payload queue-full reverts residency to cold (NB-2)...\n");
+void test_promotion_queue_full_path_retired() {
+    printf("step7: promotion queue-full path retired under sync API...\n");
 
     common_params params = create_test_params();
-    hybrid_cache_controller ctrl(params, 4, 1000, nullptr, nullptr);
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
 
     // Configure cold store
     std::string temp_dir = create_temp_dir("queue_full");
     ctrl.debug_set_cold_store_for_tests(temp_dir);
 
-    // Set the worker queue capacity to 1 to make it easy to fill
-    ctrl.debug_set_io_worker_queue_capacity_for_tests(1);
-
-    // Add two entries with payload bytes
+    // Add one entry with payload bytes.
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "test", 128, 0);
-    ctrl.debug_add_entry_for_tests(create_tokens({4, 5, 6}), false, "test2", 128, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
-    // Demote both entries to get valid cold refs
+    // Demote and promote without any queue hook. Both operations complete inline.
     bool demote1 = ctrl.demote_payload(1);
     TEST_ASSERT(demote1);
 
-    // Wait for first demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
-    bool demote2 = ctrl.demote_payload(2);
-    TEST_ASSERT(demote2);
-
-    // Wait for second demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
-    // Verify both are cold
     json stats_after_demote = ctrl.get_stats();
-    TEST_ASSERT(stats_after_demote["n_cold_payload_descriptors"] == 2);
+    TEST_ASSERT(stats_after_demote["n_cold_payload_descriptors"] == 1);
 
-    // Now try to promote the first one — this should succeed
     bool promote1 = ctrl.promote_payload(1);
     TEST_ASSERT(promote1);
 
-    // Wait for the promotion to start processing (so the queue slot is taken)
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    json stats = ctrl.get_stats();
+    TEST_ASSERT(stats["n_promotion_successes"] == 1);
+    TEST_ASSERT(stats["n_promotion_queue_full"] == 0);
+    TEST_ASSERT(stats["n_hot_payload_descriptors"] == 1);
+    TEST_ASSERT(stats["n_cold_payload_descriptors"] == 0);
 
-    // Try to promote the second one — this may fail with queue-full
-    // depending on timing. If it fails, verify the residency was reverted to cold.
-    bool promote2 = ctrl.promote_payload(2);
-    if (!promote2) {
-        // Verify queue-full counter was incremented
-        json stats = ctrl.get_stats();
-        TEST_ASSERT(stats["n_promotion_queue_full"].get<size_t>() >= 1);
-    }
-
-    // Process completions to clean up
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -330,16 +289,9 @@ void test_promotion_completion_success_transitions_to_hot() {
     // Add an entry with payload bytes (starts as hot)
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "test", 128, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -349,16 +301,11 @@ void test_promotion_completion_success_transitions_to_hot() {
     bool promote_result = ctrl.promote_payload(1);
     TEST_ASSERT(promote_result);
 
-    // Wait for the promotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
     // Verify the descriptor is now hot
     json stats = ctrl.get_stats();
     TEST_ASSERT(stats["n_promotion_successes"] == 1);
     TEST_ASSERT(stats["n_promoting_payload_descriptors"] == 0);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -382,16 +329,9 @@ void test_promotion_completion_failure_transitions_to_evicted() {
     // Add an entry with payload bytes (starts as hot)
     ctrl.debug_add_entry_for_tests(create_tokens({1, 2, 3}), false, "test", 128, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -404,20 +344,15 @@ void test_promotion_completion_failure_transitions_to_evicted() {
         }
     }
 
-    // Promote the payload — this will fail because the cold file is gone
+    // Promote the payload - this will fail because the cold file is gone
     bool promote_result = ctrl.promote_payload(1);
-    TEST_ASSERT(promote_result);
-
-    // Wait for the promotion to complete (with failure)
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
+    TEST_ASSERT(!promote_result);
 
     // Verify the descriptor is now evicted
     json stats = ctrl.get_stats();
     TEST_ASSERT(stats["n_promotion_failures"] == 1);
     TEST_ASSERT(stats["n_evicted_payload_descriptors"] == 1);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -465,16 +400,9 @@ void test_draft_side_failure_transitions_to_evicted() {
     // Add an entry with target_and_draft pair
     ctrl.debug_add_entry_for_tests(create_tokens({7, 8, 9}), false, "test_pair", 64, 32);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -509,13 +437,9 @@ void test_draft_side_failure_transitions_to_evicted() {
         }
     }
 
-    // Promote the payload — this will fail because the cold file is corrupted
+    // Promote the payload - this will fail because the cold file is corrupted
     bool promote_result = ctrl.promote_payload(1);
-    TEST_ASSERT(promote_result);
-
-    // Wait for the promotion to complete (with failure)
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
+    TEST_ASSERT(!promote_result);
 
     // Verify the descriptor is evicted (not partially hot)
     json stats = ctrl.get_stats();
@@ -524,7 +448,6 @@ void test_draft_side_failure_transitions_to_evicted() {
     // No hot payload should exist for this descriptor
     TEST_ASSERT(stats["n_hot_payload_descriptors"] == 0);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -567,7 +490,7 @@ void test_promote_payload_nonexistent_descriptor() {
     common_params params = create_test_params();
     hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
 
-    // No entries added — promote_payload should return false
+    // No entries added - promote_payload should return false
     bool result = ctrl.promote_payload(999);
     TEST_ASSERT(!result);
 
@@ -592,16 +515,9 @@ void test_promotion_success_inserts_hot_bytes() {
     // Add an entry with target_and_draft pair
     ctrl.debug_add_entry_for_tests(create_tokens({10, 11, 12}), false, "test_hot", 128, 64);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -611,17 +527,12 @@ void test_promotion_success_inserts_hot_bytes() {
     bool promote_result = ctrl.promote_payload(1);
     TEST_ASSERT(promote_result);
 
-    // Wait for the promotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
     // Verify the descriptor is now hot with correct payload bytes
     json stats = ctrl.get_stats();
     TEST_ASSERT(stats["n_promotion_successes"] == 1);
     TEST_ASSERT(stats["n_hot_payload_descriptors"] == 1);
     TEST_ASSERT(stats["n_promoting_payload_descriptors"] == 0);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -645,19 +556,12 @@ void test_multiple_promotions_processed() {
     ctrl.debug_add_entry_for_tests(create_tokens({20, 21}), false, "test_multi", 64, 0);
     ctrl.debug_add_entry_for_tests(create_tokens({22, 23}), false, "test_multi", 64, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // Demote both entries
     bool demote1 = ctrl.demote_payload(1);
     TEST_ASSERT(demote1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    ctrl.process_completions();
 
     bool demote2 = ctrl.demote_payload(2);
     TEST_ASSERT(demote2);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    ctrl.process_completions();
 
     // Verify both are cold
     json stats_after_demote = ctrl.get_stats();
@@ -667,10 +571,6 @@ void test_multiple_promotions_processed() {
     bool promote1 = ctrl.promote_payload(1);
     TEST_ASSERT(promote1);
 
-    // Wait for the promotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
     // Verify the first descriptor is now hot
     json stats = ctrl.get_stats();
     TEST_ASSERT(stats["n_promotion_successes"] == 1);
@@ -679,15 +579,10 @@ void test_multiple_promotions_processed() {
     bool promote2 = ctrl.promote_payload(2);
     TEST_ASSERT(promote2);
 
-    // Wait for the promotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
-
     // Verify both descriptors are now hot
     json stats_final = ctrl.get_stats();
     TEST_ASSERT(stats_final["n_promotion_successes"] == 2);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
@@ -713,16 +608,9 @@ void test_cold_file_retained_on_promotion_failure() {
     // Add an entry with payload bytes (starts as hot)
     ctrl.debug_add_entry_for_tests(create_tokens({30, 31}), false, "test_retain", 64, 0);
 
-    // Start the IO worker
-    ctrl.debug_start_io_worker_for_tests();
-
     // First demote to get a valid cold ref
     bool demote_result = ctrl.demote_payload(1);
     TEST_ASSERT(demote_result);
-
-    // Wait for demotion to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
 
     // Verify the descriptor is now cold
     json stats_after_demote = ctrl.get_stats();
@@ -762,13 +650,9 @@ void test_cold_file_retained_on_promotion_failure() {
         }
     }
 
-    // Promote the payload — this will fail because of checksum mismatch
+    // Promote the payload - this will fail because of checksum mismatch
     bool promote_result = ctrl.promote_payload(1);
-    TEST_ASSERT(promote_result);
-
-    // Wait for the promotion to complete (with failure)
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    ctrl.process_completions();
+    TEST_ASSERT(!promote_result);
 
     // Verify the descriptor is evicted
     json stats = ctrl.get_stats();
@@ -782,32 +666,37 @@ void test_cold_file_retained_on_promotion_failure() {
     }
     TEST_ASSERT(file_count_after >= 1);
 
-    ctrl.debug_stop_io_worker_for_tests();
     remove_temp_dir(temp_dir);
 
     printf("  PASSED\n");
 }
 
 // ============================================================
-// Test 15: process_completions dispatches promotion results correctly
+// Test 15: synchronous promotion dispatches completion inline
 // ============================================================
-void test_process_completions_dispatches_promotion() {
-    printf("step7: process_completions dispatches promotion results...\n");
+void test_synchronous_promotion_dispatches_completion_inline() {
+    printf("step7: synchronous promotion dispatches completion inline...\n");
 
-    // This test verifies by code inspection that process_completions()
-    // correctly dispatches promotion results to handle_promotion_completion.
-    // The code path is:
-    //   for (auto & result : results) {
-    //       if (result.is_demotion) {
-    //           handle_demotion_completion(result);
-    //       } else {
-    //           handle_promotion_completion(result);
-    //       }
-    //   }
-    // Promotion results have is_demotion == false, so they are dispatched
-    // to handle_promotion_completion.
+    common_params params = create_test_params();
+    hybrid_cache_controller ctrl(params, 2, 1000, nullptr, nullptr);
 
-    printf("  PASSED (verified by code inspection)\n");
+    std::string temp_dir = create_temp_dir("inline_dispatch");
+    ctrl.debug_set_cold_store_for_tests(temp_dir);
+    ctrl.debug_add_entry_for_tests(create_tokens({40, 41}), false, "test_inline", 64, 0);
+
+    TEST_ASSERT(ctrl.demote_payload(1));
+    json stats_after_demote = ctrl.get_stats();
+    TEST_ASSERT(stats_after_demote["n_cold_payload_descriptors"] == 1);
+
+    TEST_ASSERT(ctrl.promote_payload(1));
+    json stats = ctrl.get_stats();
+    TEST_ASSERT(stats["n_promotion_successes"] == 1);
+    TEST_ASSERT(stats["n_promoting_payload_descriptors"] == 0);
+    TEST_ASSERT(stats["n_hot_payload_descriptors"] == 1);
+
+    remove_temp_dir(temp_dir);
+
+    printf("  PASSED\n");
 }
 
 // ============================================================
@@ -853,8 +742,8 @@ int main() {
     test_promote_payload_validates_residency();
     test_promote_payload_requires_cold_store();
     test_promote_payload_validates_not_already_promoting();
-    test_promote_payload_transitions_to_promoting();
-    test_promote_payload_queue_full_reverts_to_cold();
+    test_promote_payload_completes_synchronously_to_hot();
+    test_promotion_queue_full_path_retired();
     test_promotion_completion_success_transitions_to_hot();
     test_promotion_completion_failure_transitions_to_evicted();
     test_cold_descriptor_triggers_promotion_in_restore();
@@ -864,7 +753,7 @@ int main() {
     test_promotion_success_inserts_hot_bytes();
     test_multiple_promotions_processed();
     test_cold_file_retained_on_promotion_failure();
-    test_process_completions_dispatches_promotion();
+    test_synchronous_promotion_dispatches_completion_inline();
     test_promoting_check_before_cold_check();
 
     printf("\n==================================================\n");

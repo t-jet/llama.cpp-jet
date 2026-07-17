@@ -408,6 +408,7 @@ struct server_metrics {
 
 struct server_context_impl {
     friend struct server_context;
+    friend struct server_routes;
 
 public:
     // only use these pointers outside of this class:
@@ -478,6 +479,10 @@ private:
 
     // slots / clients
     std::vector<server_slot> slots;
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    std::mutex stage39_completion_admission_mutex;
+#endif
 
     int trace = 0;
     int slots_debug = 0;
@@ -2152,6 +2157,9 @@ private:
             case SERVER_TASK_TYPE_EMBEDDING:
             case SERVER_TASK_TYPE_RERANK:
                 {
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+                    std::lock_guard<std::mutex> admission_lock(stage39_completion_admission_mutex);
+#endif
                     // special case: if input is provided via CLI, tokenize it first
                     // otherwise, no need to tokenize as it's already done inside the HTTP thread
                     if (task.cli) {
@@ -3782,9 +3790,38 @@ void server_context::set_state_callback(server_state_callback_t callback) {
     impl->callback_state = std::move(callback);
 }
 
+static void server_write_stage39_cache_rows(
+        std::stringstream & prometheus,
+        const std::string & mode,
+        const json & cache_stats) {
+    const auto write_rows = [&](const char * name, const char * help, const char * key) {
+        const json rows = cache_stats.contains(key) ? cache_stats[key] : json::array();
+        for (const auto & row : rows) {
+            server_write_cache_metric_with_labels(
+                prometheus, mode, "counter", name, help,
+                {
+                    {"result", json_value(row, "result", std::string())},
+                    {"reason", json_value(row, "reason", std::string())},
+                },
+                json_value(row, "value", 0));
+        }
+    };
+    write_rows("llamacpp:cache_two_layer_decisions_total",
+        "Hybrid payload pressure decisions.", "cache_two_layer_decisions");
+    write_rows("llamacpp:cache_cold_transactions_total",
+        "Cold admission transactions.", "cache_cold_transactions");
+}
+
 #ifdef LLAMA_SERVER_CACHE_TESTS
 void server_context::debug_install_sleeping_state_handler_for_tests() {
     impl->install_sleeping_state_handler();
+}
+
+std::string server_cache_stage39_prometheus_rows_for_tests(const json & cache_stats) {
+    std::stringstream prometheus;
+    const std::string mode = server_prometheus_label_value(json_value(cache_stats, "type", std::string("none")));
+    server_write_stage39_cache_rows(prometheus, mode, cache_stats);
+    return prometheus.str();
 }
 
 void server_context::debug_invoke_sleeping_state_for_tests(bool sleeping) {
@@ -4326,6 +4363,206 @@ void server_routes::init_routes() {
         return res;
     };
 
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    this->post_stage39_live_pressure = [this](const server_http_req & req) {
+        auto res = create_response();
+        const auto token_header = std::find_if(req.headers.begin(), req.headers.end(), [](const auto & item) {
+            std::string key = item.first;
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) { return std::tolower(ch); });
+            return key == "x-llama-stage39-test-token";
+        });
+        const auto token_matches = [](const std::string & lhs, const std::string & rhs) {
+            size_t different = lhs.size() ^ rhs.size();
+            const size_t count = std::max(lhs.size(), rhs.size());
+            for (size_t i = 0; i < count; ++i) {
+                const unsigned char a = i < lhs.size() ? static_cast<unsigned char>(lhs[i]) : 0;
+                const unsigned char b = i < rhs.size() ? static_cast<unsigned char>(rhs[i]) : 0;
+                different |= a ^ b;
+            }
+            return different == 0;
+        };
+        if (token_header == req.headers.end() ||
+                !token_matches(token_header->second, stage39_live_pressure_token)) {
+            res->error(format_error_response("Stage 39 control rejected", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+
+        stage39_live_pressure_request control;
+        try {
+            const json data = json::parse(req.body);
+            if (!data.is_object() || !data.contains("operation")) {
+                throw std::invalid_argument("schema");
+            }
+            control.operation = data.at("operation").get<std::string>();
+            if (control.operation == "discover") {
+                if (data.size() != 1) throw std::invalid_argument("schema");
+            } else if (control.operation == "proof") {
+                static const std::set<std::string> fields = {
+                    "operation", "snapshot_generation", "snapshot_token", "payload_ids",
+                };
+                if (data.size() != fields.size() || !data.at("payload_ids").is_array()) {
+                    throw std::invalid_argument("schema");
+                }
+                for (const auto & item : data.items()) if (!fields.count(item.key())) throw std::invalid_argument("schema");
+                control.snapshot_generation = data.at("snapshot_generation").get<uint64_t>();
+                control.snapshot_token = data.at("snapshot_token").get<std::string>();
+                for (const auto & id : data.at("payload_ids")) control.proof_payload_ids.push_back(id.get<uint64_t>());
+            } else if (control.operation == "prepared_proof") {
+                static const std::set<std::string> fields = {
+                    "operation", "process_identity", "test_session_id", "run_id", "terminal_hmac",
+                };
+                if (data.size() != fields.size()) throw std::invalid_argument("schema");
+                for (const auto & item : data.items()) if (!fields.count(item.key())) throw std::invalid_argument("schema");
+                control.process_identity = data.at("process_identity").get<std::string>();
+                control.test_session_id = data.at("test_session_id").get<std::string>();
+                control.run_id = data.at("run_id").get<std::string>();
+                control.terminal_hmac = data.at("terminal_hmac").get<std::string>();
+            } else if (control.operation == "apply") {
+                std::set<std::string> expected = {
+                    "operation", "scenario", "hot_budget_bytes", "cold_budget_bytes",
+                    "snapshot_generation", "snapshot_token", "incoming_payload_id",
+                    "incoming_owner_entry_id", "hot_candidates", "cold_sets",
+                    "desired_hot_orders", "desired_cold_ranks",
+                };
+                const std::string scenario = data.at("scenario").get<std::string>();
+                if (scenario == "tp39-03") {
+                    expected.insert("tp39_03_setup");
+                    expected.insert("run_id");
+                    expected.insert("process_identity");
+                    expected.insert("proof_token");
+                    expected.insert("fault");
+                    expected.insert("prepared_bindings");
+                }
+                if (data.size() != expected.size()) throw std::invalid_argument("schema");
+                for (const auto & item : data.items()) {
+                    if (!expected.count(item.key())) throw std::invalid_argument("schema");
+                }
+                control.scenario = scenario;
+                if (control.scenario == "tp39-03") {
+                    control.tp39_03_setup = data.at("tp39_03_setup").get<std::string>();
+                    if (control.tp39_03_setup != "same_owner_kind_sequence") {
+                        throw std::invalid_argument("schema");
+                    }
+                    control.run_id = data.at("run_id").get<std::string>();
+                    control.process_identity = data.at("process_identity").get<std::string>();
+                    control.proof_token = data.at("proof_token").get<std::string>();
+                    control.fault = data.at("fault").get<std::string>();
+                    static const std::set<std::string> binding_fields = {
+                        "workload_role", "request_number", "pressure_step", "payload_id", "owner_entry_id",
+                        "payload_kind", "pair_state", "runtime_has_draft", "target_size_bytes", "draft_size_bytes",
+                        "target_checksum", "draft_checksum",
+                    };
+                    const auto & bindings = data.at("prepared_bindings");
+                    if (!bindings.is_array()) throw std::invalid_argument("schema");
+                    for (const auto & binding : bindings) {
+                        if (!binding.is_object() || binding.size() != binding_fields.size()) {
+                            throw std::invalid_argument("schema");
+                        }
+                        for (const auto & item : binding.items()) {
+                            if (!binding_fields.count(item.key())) throw std::invalid_argument("schema");
+                        }
+                        control.prepared_bindings.push_back({
+                            binding.at("workload_role").get<std::string>(),
+                            binding.at("request_number").get<uint64_t>(),
+                            binding.at("pressure_step").get<uint64_t>(),
+                            binding.at("payload_id").get<uint64_t>(),
+                            binding.at("owner_entry_id").get<uint64_t>(),
+                            binding.at("payload_kind").get<std::string>(),
+                            binding.at("pair_state").get<std::string>(),
+                            binding.at("runtime_has_draft").get<bool>(),
+                            binding.at("target_size_bytes").get<uint64_t>(),
+                            binding.at("draft_size_bytes").get<uint64_t>(),
+                            binding.at("target_checksum").get<uint64_t>(),
+                            binding.at("draft_checksum").get<uint64_t>(),
+                        });
+                    }
+                }
+                control.hot_budget_bytes = data.at("hot_budget_bytes").get<size_t>();
+                control.cold_budget_bytes = data.at("cold_budget_bytes").get<uint64_t>();
+                control.snapshot_generation = data.at("snapshot_generation").get<uint64_t>();
+                control.snapshot_token = data.at("snapshot_token").get<std::string>();
+                control.incoming_payload_id = data.at("incoming_payload_id").get<uint64_t>();
+                control.incoming_owner_entry_id = data.at("incoming_owner_entry_id").get<uint64_t>();
+                const auto parse_row = [](const json & row) {
+                    static const std::set<std::string> fields = {
+                        "payload_id", "owner_entry_id", "payload_kind", "pair_state", "residency",
+                        "protected_root", "slot_reference_count", "resident_bytes",
+                        "serialized_cold_bytes", "hot_order", "cold_rank", "eligible",
+                    };
+                    if (!row.is_object() || row.size() != fields.size()) throw std::invalid_argument("schema");
+                    for (const auto & item : row.items()) if (!fields.count(item.key())) throw std::invalid_argument("schema");
+                    stage39_live_pressure_inventory_row out;
+                    out.payload_id = row.at("payload_id").get<uint64_t>();
+                    out.owner_entry_id = row.at("owner_entry_id").get<uint64_t>();
+                    out.payload_kind = row.at("payload_kind").get<std::string>();
+                    out.pair_state = row.at("pair_state").get<std::string>();
+                    out.residency = row.at("residency").get<std::string>();
+                    out.protected_root = row.at("protected_root").get<bool>();
+                    out.slot_reference_count = row.at("slot_reference_count").get<uint64_t>();
+                    out.resident_bytes = row.at("resident_bytes").get<uint64_t>();
+                    out.has_serialized_cold_bytes = !row.at("serialized_cold_bytes").is_null();
+                    if (out.has_serialized_cold_bytes) out.serialized_cold_bytes = row.at("serialized_cold_bytes").get<uint64_t>();
+                    out.hot_order = row.at("hot_order").get<uint64_t>();
+                    out.cold_rank = row.at("cold_rank").get<uint64_t>();
+                    out.eligible = row.at("eligible").get<bool>();
+                    return out;
+                };
+                for (const auto & row : data.at("hot_candidates")) control.hot_candidates.push_back(parse_row(row));
+                for (const auto & set : data.at("cold_sets")) {
+                    if (!set.is_object() || set.size() != 3 || !set.contains("incoming_payload_id") ||
+                            !set.contains("incoming_owner_entry_id") || !set.at("candidates").is_array()) {
+                        throw std::invalid_argument("schema");
+                    }
+                    stage39_live_pressure_cold_set out;
+                    out.incoming_payload_id = set.at("incoming_payload_id").get<uint64_t>();
+                    out.incoming_owner_entry_id = set.at("incoming_owner_entry_id").get<uint64_t>();
+                    for (const auto & row : set.at("candidates")) out.candidates.push_back(parse_row(row));
+                    control.cold_sets.push_back(std::move(out));
+                }
+                for (const auto & item : data.at("desired_hot_orders")) {
+                    if (!item.is_object() || item.size() != 2 || !item.contains("owner_entry_id") ||
+                            !item.contains("desired_hot_order")) throw std::invalid_argument("schema");
+                    control.desired_hot_orders.push_back({item.at("owner_entry_id").get<uint64_t>(),
+                        item.at("desired_hot_order").get<uint64_t>()});
+                }
+                for (const auto & item : data.at("desired_cold_ranks")) {
+                    if (!item.is_object() || item.size() != 2 || !item.contains("payload_id") ||
+                            !item.contains("desired_cold_rank")) throw std::invalid_argument("schema");
+                    control.desired_cold_ranks.push_back({item.at("payload_id").get<uint64_t>(),
+                        item.at("desired_cold_rank").get<uint64_t>()});
+                }
+            } else throw std::invalid_argument("schema");
+        } catch (const std::exception &) {
+            res->error(format_error_response("Invalid Stage 39 control schema", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+
+        std::lock_guard<std::mutex> admission_lock(ctx_server.stage39_completion_admission_mutex);
+        if (std::any_of(ctx_server.slots.begin(), ctx_server.slots.end(), [](const server_slot & slot) {
+                return slot.is_processing();
+            })) {
+            res->error(format_error_response("Stage 39 control requires idle slots", ERROR_TYPE_UNAVAILABLE));
+            return res;
+        }
+        auto * controller = dynamic_cast<hybrid_cache_controller *>(ctx_server.cache_ctrl.get());
+        if (controller == nullptr) {
+            res->error(format_error_response("Stage 39 hybrid controller unavailable", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        auto outcome = controller->stage39_live_pressure_control(control);
+        if (!outcome.success) {
+            json error = format_error_response(outcome.error, ERROR_TYPE_INVALID_REQUEST);
+            if (!outcome.body.empty()) {
+                error["stage39_state"] = std::move(outcome.body);
+            }
+            res->error(error);
+            return res;
+        }
+        res->ok(outcome.body);
+        return res;
+    };
+#endif
+
     this->get_metrics = [this](const server_http_req & req) {
         auto res = create_response();
         if (!params.endpoint_metrics) {
@@ -4599,6 +4836,7 @@ void server_routes::init_routes() {
             write_cache_metric("gauge",   "llamacpp:cache_cold_payload_count", "Current count of cold payload descriptors by mode.", json_value(cache_stats, "n_cold_payload_count", 0));
             write_cache_metric("gauge",   "llamacpp:cache_cold_bytes", "Current descriptor-owned cold payload bytes.", json_value(cache_stats, "cache_cold_bytes", 0));
             write_cache_metric("gauge",   "llamacpp:cache_cold_budget_bytes", "Configured cold payload budget bytes.", json_value(cache_stats, "cache_cold_budget_bytes", int64_t(-1)));
+            server_write_stage39_cache_rows(prometheus, mode, cache_stats);
             write_cache_metric("counter", "llamacpp:cache_cold_demotions_skipped_total", "Cold demotions skipped before write.", json_value(cache_stats, "cache_cold_demotions_skipped_total", 0));
             const json cold_eviction_rows = cache_stats.contains("cache_cold_evictions_by_shape") ?
                 cache_stats["cache_cold_evictions_by_shape"] : json::array();
@@ -5824,6 +6062,7 @@ static std::vector<llama_token> cache_tokens_to_vector(const server_tokens & tok
 }
 
 bool hybrid_cache_controller::acquire_branch_node_ref_for_slot(server_slot & slot, uint64_t node_id) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (node_id == 0 || slot.hybrid_cache_branch_node_id == node_id) {
         return node_id != 0;
     }
@@ -5831,6 +6070,9 @@ bool hybrid_cache_controller::acquire_branch_node_ref_for_slot(server_slot & slo
         return false;
     }
     n_slot_ref_acquires++;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    advance_cache_generation_locked();
+#endif
     if (slot.hybrid_cache_branch_node_id != 0) {
         release_branch_node_ref(slot.hybrid_cache_branch_node_id);
     }

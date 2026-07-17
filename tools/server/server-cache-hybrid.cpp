@@ -3,17 +3,134 @@
 #include "common.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cinttypes>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <bcrypt.h>
+#elif defined(__APPLE__)
+#include <cstdlib>
+#else
+#include <cerrno>
+#include <sys/random.h>
+#endif
+
 namespace fs = std::filesystem;
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+#define STAGE39_CACHE_MUTATED() advance_cache_generation_locked(false)
+#else
+#define STAGE39_CACHE_MUTATED() do { } while (false)
+#endif
+
+static const char * two_layer_result_name(cache_two_layer_result value);
+static const char * two_layer_reason_name(cache_two_layer_reason value);
+static const char * cold_transaction_result_name(cache_cold_transaction_result value);
+static const char * cold_transaction_reason_name(cache_cold_transaction_reason value);
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+namespace stage39_crypto {
+static bool fill_process_nonce(std::array<uint8_t, 32> & nonce) {
+#ifdef _WIN32
+    return BCryptGenRandom(nullptr, nonce.data(), static_cast<ULONG>(nonce.size()),
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#elif defined(__APPLE__)
+    arc4random_buf(nonce.data(), nonce.size());
+    return true;
+#else
+    size_t offset = 0;
+    while (offset < nonce.size()) {
+        const ssize_t count = getrandom(nonce.data() + offset, nonce.size() - offset, 0);
+        if (count > 0) {
+            offset += static_cast<size_t>(count);
+            continue;
+        }
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+#endif
+}
+static constexpr uint32_t k[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
+};
+static uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
+static std::array<uint8_t, 32> sha256(std::vector<uint8_t> message) {
+    const uint64_t bit_count = static_cast<uint64_t>(message.size()) * 8;
+    message.push_back(0x80);
+    while (message.size() % 64 != 56) message.push_back(0);
+    for (int i = 7; i >= 0; --i) message.push_back(static_cast<uint8_t>(bit_count >> (i * 8)));
+    uint32_t h[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    for (size_t offset = 0; offset < message.size(); offset += 64) {
+        uint32_t w[64]{};
+        for (size_t i = 0; i < 16; ++i) {
+            const size_t p = offset + i * 4;
+            w[i] = (uint32_t(message[p]) << 24) | (uint32_t(message[p + 1]) << 16) |
+                (uint32_t(message[p + 2]) << 8) | uint32_t(message[p + 3]);
+        }
+        for (size_t i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+        for (size_t i = 0; i < 64; ++i) {
+            const uint32_t s1=rotr(e,6)^rotr(e,11)^rotr(e,25), ch=(e&f)^((~e)&g);
+            const uint32_t t1=hh+s1+ch+k[i]+w[i], s0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+            const uint32_t maj=(a&b)^(a&c)^(b&c), t2=s0+maj;
+            hh=g; g=f; f=e; e=d+t1; d=c; c=b; b=a; a=t1+t2;
+        }
+        h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=hh;
+    }
+    std::array<uint8_t, 32> out{};
+    for (size_t i = 0; i < 8; ++i) for (size_t j = 0; j < 4; ++j) out[i*4+j]=uint8_t(h[i]>>(24-j*8));
+    return out;
+}
+static std::string hmac_sha256_hex(const std::array<uint8_t, 32> & key, const std::string & text) {
+    std::array<uint8_t, 64> inner{}, outer{};
+    for (size_t i = 0; i < 64; ++i) { const uint8_t v=i<key.size()?key[i]:0; inner[i]=v^0x36; outer[i]=v^0x5c; }
+    std::vector<uint8_t> inner_data(inner.begin(), inner.end());
+    inner_data.insert(inner_data.end(), text.begin(), text.end());
+    const auto inner_hash = sha256(std::move(inner_data));
+    std::vector<uint8_t> outer_data(outer.begin(), outer.end());
+    outer_data.insert(outer_data.end(), inner_hash.begin(), inner_hash.end());
+    const auto digest = sha256(std::move(outer_data));
+    std::ostringstream out;
+    out << std::hex << std::setfill('0');
+    for (uint8_t byte : digest) out << std::setw(2) << unsigned(byte);
+    return out.str();
+}
+static bool constant_time_equal(const std::string & lhs, const std::string & rhs) {
+    size_t different = lhs.size() ^ rhs.size();
+    const size_t count = std::max(lhs.size(), rhs.size());
+    for (size_t i = 0; i < count; ++i) different |=
+        (i < lhs.size() ? uint8_t(lhs[i]) : 0) ^ (i < rhs.size() ? uint8_t(rhs[i]) : 0);
+    return different == 0;
+}
+}
+#endif
 
 // Stage 25: RAII guard that increments the per-thread reentrancy counter
 // on construction and decrements on destruction. Used together with
@@ -346,6 +463,11 @@ hybrid_cache_controller::hybrid_cache_controller(
     , ctx_tgt(ctx_tgt)
     , ctx_dft(ctx_dft)
 {
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (!stage39_crypto::fill_process_nonce(stage39_snapshot_nonce_)) {
+        throw std::runtime_error("Stage 39 process nonce generation failed");
+    }
+#endif
     if (limit_size_mib < -1) {
         SRV_ERR("%s", " - hybrid cache: invalid hot payload budget (reason=negative_size_limit)\n");
         throw std::runtime_error("invalid hybrid cache hot payload budget");
@@ -375,12 +497,103 @@ hybrid_cache_controller::hybrid_cache_controller(
         // thread.
         io_worker.set_cold_store(&cold_store);
 
+        const auto recovery = cold_store.recover_transactions();
+        cold_mutation_disabled_ = recovery.mutation_disabled;
+        std::vector<cold_recovered_commit> recovered = recovery.claims;
+        recovered.insert(recovered.end(), recovery.committed.begin(), recovery.committed.end());
+        for (const auto & committed : recovered) {
+            const auto & image = committed.incoming_descriptor;
+            const auto owner_key = std::make_pair(image.owner.entry_id, image.owner.owner_link);
+            const bool valid_kind = image.payload_kind <= static_cast<uint8_t>(payload_kind::checkpoint);
+            const bool valid_link = image.owner.owner_link <= 1 &&
+                image.owner.owner_link == (image.payload_kind == static_cast<uint8_t>(payload_kind::checkpoint));
+            const bool valid_owner = image.owner.entry_id != 0;
+            const auto claimed = recovered_payload_owners_.find(owner_key);
+            const bool owner_conflict = claimed != recovered_payload_owners_.end() &&
+                claimed->second != image.file.payload_id;
+            std::error_code recovery_ec;
+            const bool final_exists = fs::exists(committed.incoming_final_path, recovery_ec) && !recovery_ec;
+            if (!valid_kind || !valid_link || !valid_owner || owner_conflict || !final_exists) {
+                cold_mutation_disabled_ = true;
+                continue;
+            }
+            const auto existing = payload_descriptors.find(image.file.payload_id);
+            if (existing != payload_descriptors.end() &&
+                (existing->second.owner_entry_id != image.owner.entry_id ||
+                 static_cast<uint8_t>(existing->second.kind) != image.payload_kind)) {
+                cold_mutation_disabled_ = true;
+                continue;
+            }
+            payload_descriptor incoming{};
+            incoming.payload_id = committed.incoming_descriptor.file.payload_id;
+            incoming.kind = static_cast<payload_kind>(committed.incoming_descriptor.payload_kind);
+            incoming.pair_state = static_cast<payload_pair_state>(committed.incoming_descriptor.file.pair_state);
+            incoming.format_version = committed.incoming_descriptor.file.format_version;
+            incoming.target_size_bytes = static_cast<size_t>(committed.incoming_descriptor.file.target_size_bytes);
+            incoming.draft_size_bytes = static_cast<size_t>(committed.incoming_descriptor.file.draft_size_bytes);
+            incoming.target_checksum = committed.incoming_descriptor.file.target_checksum;
+            incoming.draft_checksum = committed.incoming_descriptor.file.draft_checksum;
+            incoming.store_ref.id = incoming.payload_id;
+            incoming.residency = payload_residency_state::cold;
+            incoming.owner_entry_id = committed.incoming_descriptor.owner.entry_id;
+            incoming.created_sequence = committed.incoming_descriptor.created_sequence;
+            incoming.last_validated_sequence = committed.incoming_descriptor.last_validated_sequence;
+            incoming.token_span_start = committed.incoming_descriptor.token_span_start;
+            incoming.token_span_end = committed.incoming_descriptor.token_span_end;
+            incoming.position_start = committed.incoming_descriptor.position_start;
+            incoming.position_end = committed.incoming_descriptor.position_end;
+            incoming.checkpoint_boundary_required = committed.incoming_descriptor.checkpoint_boundary_required;
+            incoming.checkpoint_boundary_native = committed.incoming_descriptor.checkpoint_boundary_native;
+            incoming.checkpoint_boundary_kind = committed.incoming_descriptor.checkpoint_boundary_kind;
+            incoming.boundary_checksum = committed.incoming_descriptor.boundary_checksum;
+            incoming.boundary_id = committed.incoming_descriptor.boundary_id;
+            incoming.workload_profile = committed.incoming_descriptor.workload_profile;
+            payload_descriptors[incoming.payload_id] = incoming;
+            recovered_payload_owners_[owner_key] = incoming.payload_id;
+            cold_payload_bytes_by_id_[incoming.payload_id] = static_cast<size_t>(committed.incoming_exact_bytes);
+            n_cold_payload_bytes = 0;
+            for (const auto & item : cold_payload_bytes_by_id_) n_cold_payload_bytes += item.second;
+            for (const auto & victim : committed.victims) {
+                auto found = payload_descriptors.find(victim.descriptor.file.payload_id);
+                if (found == payload_descriptors.end()) {
+                    payload_descriptor tombstone{};
+                    tombstone.payload_id = victim.descriptor.file.payload_id;
+                    tombstone.kind = static_cast<payload_kind>(victim.descriptor.payload_kind);
+                    tombstone.owner_entry_id = victim.descriptor.owner.entry_id;
+                    tombstone.pair_state = static_cast<payload_pair_state>(victim.descriptor.file.pair_state);
+                    found = payload_descriptors.emplace(tombstone.payload_id, tombstone).first;
+                }
+                found->second.residency = payload_residency_state::evicted;
+                found->second.resident_payload_bytes = 0;
+                cold_payload_bytes_by_id_.erase(victim.descriptor.file.payload_id);
+                n_cold_quarantine_bytes_ += static_cast<size_t>(victim.exact_bytes);
+            }
+            n_cold_payload_count = cold_payload_bytes_by_id_.size();
+            STAGE39_CACHE_MUTATED();
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+            stage39_recovery_generation_for_tests_ = cache_generation_;
+#endif
+            if (committed.tx_id != 0) {
+                cold_tx_manifest cleanup_manifest{};
+                static_cast<cold_recovered_commit &>(cleanup_manifest) = committed;
+                cleanup_manifest.state = cold_tx_state::committed;
+                const auto cleanup = cold_store.cleanup(cleanup_manifest);
+                if (cleanup.success) {
+                    n_cold_quarantine_bytes_ = 0;
+                    STAGE39_CACHE_MUTATED();
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+                    stage39_recovery_cleanup_generation_for_tests_ = cache_generation_;
+#endif
+                }
+            }
+        }
+
         SRV_INF("%s", " - hybrid cache: cold store configured (synchronous worker)\n");
 
         // Stage 28 R28-BUG-02: delete orphan .cold files left on disk by
         // prior runs whose per-id map entry is missing (e.g. cleanup-loop
         // partial delete or remove_payload cold-path unconditional erase).
-        reconcile_cold_store_with_per_id_map();
+        if (!cold_mutation_disabled_) reconcile_cold_store_with_per_id_map();
     } else if (!cold_path.empty()) {
         SRV_INF("%s", " - hybrid cache: cold store path configured but cold writes are disabled\n");
     }
@@ -444,6 +657,7 @@ void hybrid_cache_controller::reconcile_cold_store_with_per_id_map() {
             const size_t n_deleted = cold_store.delete_ids(ids);
             n_orphan += n_deleted;
             if (n_deleted > 0) {
+                STAGE39_CACHE_MUTATED();
                 SRV_INF(" - hybrid cache: cold-store startup reconcile deleted orphan file for payload_id %" PRIu64 "\n",
                         payload_id);
             }
@@ -538,6 +752,7 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
     }
 
     descriptor.residency = payload_residency_state::demoting;
+    STAGE39_CACHE_MUTATED();
 
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
@@ -555,6 +770,7 @@ bool hybrid_cache_controller::demote_payload(uint64_t payload_id) {
         payload_id, snapshot, record.target, record.draft);
     if (!completion.has_value()) {
         descriptor.residency = payload_residency_state::hot;
+        STAGE39_CACHE_MUTATED();
         record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
         return false;
     }
@@ -605,6 +821,7 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
     }
 
     descriptor.residency = payload_residency_state::promoting;
+    STAGE39_CACHE_MUTATED();
 
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
@@ -623,6 +840,7 @@ bool hybrid_cache_controller::promote_payload(uint64_t payload_id) {
         payload_id, descriptor.store_ref.id, snapshot);
     if (!completion.has_value()) {
         descriptor.residency = payload_residency_state::cold;
+        STAGE39_CACHE_MUTATED();
         record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
         return false;
     }
@@ -690,6 +908,7 @@ bool hybrid_cache_controller::cold_budget_make_room(size_t bytes, const payload_
         }
         it->second.residency = payload_residency_state::evicted;
         it->second.resident_payload_bytes = 0;
+        STAGE39_CACHE_MUTATED();
         if (n_cold_payload_bytes >= removed) {
             n_cold_payload_bytes -= removed;
         } else {
@@ -762,6 +981,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
         n_cold_payload_count++;
         cold_payload_bytes_by_id_[descriptor.payload_id] = written_bytes;
         release_hot_payload_after_success();
+        STAGE39_CACHE_MUTATED();
         n_demotion_successes++;
         record_payload_transition("demotion", descriptor, "success", "none");
         sync_payload_owner_views();
@@ -830,6 +1050,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
         if (record_it != hot_payloads.end()) {
             // Hot bytes still exist: revert to hot (NB-5 pinning)
             descriptor.residency = payload_residency_state::hot;
+            STAGE39_CACHE_MUTATED();
             n_demotion_failures++;
             record_payload_transition("demotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
             record_stage10_diagnostic("demotion_completion", "failure", io_failure_reason_name(result.failure_reason), &descriptor);
@@ -840,6 +1061,7 @@ void hybrid_cache_controller::handle_demotion_completion(io_completion_result & 
             // Hot bytes gone: mark as evicted
             descriptor.residency = payload_residency_state::evicted;
             descriptor.resident_payload_bytes = 0;
+            STAGE39_CACHE_MUTATED();
             sync_payload_owner_views();
             n_demotion_failures++;
             record_payload_transition("demotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
@@ -945,6 +1167,7 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         descriptor.store_ref.id = record.payload_id;
         descriptor.residency = payload_residency_state::hot;
         hot_payloads[record.payload_id] = std::move(record);
+        STAGE39_CACHE_MUTATED();
         sync_payload_owner_views();
         n_promotion_successes++;
         record_payload_transition("promotion", descriptor, "success", "none");
@@ -973,6 +1196,7 @@ void hybrid_cache_controller::handle_promotion_completion(io_completion_result &
         // Failure: mark as evicted
         descriptor.residency = payload_residency_state::evicted;
         descriptor.resident_payload_bytes = 0;
+        STAGE39_CACHE_MUTATED();
         sync_payload_owner_views();
         n_promotion_failures++;
         record_payload_transition("promotion", descriptor, "failure", io_failure_reason_name(result.failure_reason));
@@ -1016,6 +1240,11 @@ void hybrid_cache_controller::update() {
     // Step 1: Demotion (handled by evict_until_within_budget -> mark_payload_evicted -> demote_payload)
     // Step 2: Payload eviction (handled by evict_until_within_budget)
     evict_until_within_budget();
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (stage39_prepared_abort_locked()) {
+        return;
+    }
+#endif
 
     // Step 3: Cold cleanup - delete orphaned cold payloads
     {
@@ -1044,12 +1273,16 @@ void hybrid_cache_controller::update() {
                     } else if (removed_bytes > 0) {
                         n_cold_payload_bytes = 0;
                     }
-                    cold_payload_bytes_by_id_.erase(id);
+                    if (cold_payload_bytes_by_id_.erase(id) > 0) {
+                        STAGE39_CACHE_MUTATED();
+                    }
                 }
             }
             if (n_deleted == cold_to_delete.size()) {
                 for (uint64_t id : cold_to_delete) {
-                    payload_descriptors.erase(id);
+                    if (payload_descriptors.erase(id) > 0) {
+                        STAGE39_CACHE_MUTATED();
+                    }
                 }
             } else {
                 SRV_WRN(" - hybrid cache: cold cleanup deleted %zu of %zu orphaned cold payloads; descriptors retained for retry\n",
@@ -1062,6 +1295,7 @@ void hybrid_cache_controller::update() {
     if (branch_metadata_ram_soft_max > 0) {
         size_t freed = forest.enforce_metadata_budget(branch_metadata_ram_soft_max);
         if (freed > 0) {
+            STAGE39_CACHE_MUTATED();
             n_cache_branch_prunings++;
             n_cache_branch_pruned_metadata_bytes += freed;
             SRV_DBG(" - hybrid cache: metadata pruning freed %zu bytes\n", freed);
@@ -1114,9 +1348,18 @@ void hybrid_cache_controller::update() {
                 victim->entry_id,
                 was_protected ? server_cache_eviction_reason::protected_budget_pressure
                               : server_cache_eviction_reason::over_budget);
+            const auto retained = std::find_if(entries.begin(), entries.end(), [&](const auto & entry) {
+                return entry.entry_id == victim->entry_id;
+            });
+            if (retained != entries.end()) remove_entry_after_eviction(retained);
             continue;
         }
-        evict_entry_by_id(plan.evictions.front().entry_id, plan.evictions.front().reason);
+        const uint64_t victim_id = plan.evictions.front().entry_id;
+        evict_entry_by_id(victim_id, plan.evictions.front().reason);
+        const auto retained = std::find_if(entries.begin(), entries.end(), [&](const auto & entry) {
+            return entry.entry_id == victim_id;
+        });
+        if (retained != entries.end()) remove_entry_after_eviction(retained);
     }
 
     SRV_INF(" - hybrid cache state: %zu entries, %.3f MiB payload, %.3f MiB total, %zu tokens (limits: %.3f MiB payload, %zu tokens)\n",
@@ -1183,6 +1426,25 @@ json hybrid_cache_controller::get_stats() const {
         checksum_lookup_namespaces[item.first] = item.second;
     }
     const branch_traversal_counts traversal_counts = forest.traversal_counts();
+
+    json two_layer_rows = json::array();
+    for (const auto & item : n_two_layer_decisions_) {
+        two_layer_rows.push_back({
+            {"mode", "hybrid"},
+            {"result", two_layer_result_name(std::get<1>(item.first))},
+            {"reason", two_layer_reason_name(std::get<2>(item.first))},
+            {"value", item.second},
+        });
+    }
+    json cold_transaction_rows = json::array();
+    for (const auto & item : n_cold_transactions_) {
+        cold_transaction_rows.push_back({
+            {"mode", "hybrid"},
+            {"result", cold_transaction_result_name(std::get<1>(item.first))},
+            {"reason", cold_transaction_reason_name(std::get<2>(item.first))},
+            {"value", item.second},
+        });
+    }
 
     return json {
         {"type",        "hybrid"},
@@ -1327,6 +1589,8 @@ json hybrid_cache_controller::get_stats() const {
         {"cache_restore_misses_by_shape", metric_shape_map_to_json(n_restore_misses_by_shape)},
         {"cache_prompt_evidence_records_by_shape", metric_shape_map_to_json(n_prompt_evidence_records_by_shape)},
         {"cache_prefix_candidates_by_shape", metric_shape_map_to_json(n_prefix_candidates_by_shape)},
+        {"cache_two_layer_decisions", std::move(two_layer_rows)},
+        {"cache_cold_transactions", std::move(cold_transaction_rows)},
         {"cache_workload_profile_plain_transformer_total", n_workload_profile_plain},
         {"cache_workload_profile_checkpoint_dependent_total", n_workload_profile_checkpoint_dependent},
         {"cache_workload_profile_unsupported_total", n_workload_profile_unsupported},
@@ -1347,6 +1611,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bo
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bool protected_root, const std::string & namespace_id, size_t target_bytes, size_t draft_bytes) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = namespace_id.empty() ? compute_namespace_id(prepared_prompt_metadata{}) : namespace_id;
@@ -1360,6 +1625,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bo
     }
 
     entries.push_back(std::move(entry));
+    STAGE39_CACHE_MUTATED();
     auto it = std::prev(entries.end());
     create_branch_node_for_entry(*it);
     add_to_lru_index(it);
@@ -1368,6 +1634,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, bo
 }
 
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = compute_namespace_id(metadata);
@@ -1380,6 +1647,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
     }
 
     entries.push_back(std::move(entry));
+    STAGE39_CACHE_MUTATED();
     auto it = std::prev(entries.end());
     create_branch_node_for_entry(*it);
     add_to_lru_index(it);
@@ -1394,6 +1662,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
 // overload to preserve the protected_root value. Test-only path; gated
 // by LLAMA_SERVER_CACHE_TESTS in the header.
 void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, const prepared_prompt_metadata & metadata, bool protected_root) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     hybrid_cache_entry entry;
     entry.tokens = std::move(tokens);
     entry.namespace_id = compute_namespace_id(metadata);
@@ -1407,6 +1676,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
     }
 
     entries.push_back(std::move(entry));
+    STAGE39_CACHE_MUTATED();
     auto it = std::prev(entries.end());
     create_branch_node_for_entry(*it);
     add_to_lru_index(it);
@@ -1424,6 +1694,7 @@ void hybrid_cache_controller::debug_add_entry_for_tests(server_tokens tokens, co
 // to match the entry's pair_state. Test-only path; gated by
 // LLAMA_SERVER_CACHE_TESTS in the header.
 bool hybrid_cache_controller::debug_attach_payload_for_tests(server_tokens && tokens, const prepared_prompt_metadata & meta, const debug_attach_options & opts) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (opts.target_bytes == 0) {
         return false;
     }
@@ -1441,6 +1712,7 @@ bool hybrid_cache_controller::debug_attach_payload_for_tests(server_tokens && to
     }
 
     entries.push_back(std::move(entry));
+    STAGE39_CACHE_MUTATED();
     auto it = std::prev(entries.end());
     create_branch_node_for_entry(*it);
     add_to_lru_index(it);
@@ -1636,44 +1908,66 @@ bool hybrid_cache_controller::debug_refresh_entry_for_tests(
 }
 
 void hybrid_cache_controller::debug_set_hot_payload_budget_bytes_for_tests(size_t limit_size_bytes, bool unlimited) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     limit_size = limit_size_bytes;
     limit_size_unlimited = unlimited;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    advance_cache_generation_locked();
+#endif
 }
 
 void hybrid_cache_controller::debug_set_branch_metadata_soft_max_for_tests(size_t limit_size_bytes) {
-    branch_metadata_ram_soft_max = limit_size_bytes;
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    if (branch_metadata_ram_soft_max != limit_size_bytes) {
+        branch_metadata_ram_soft_max = limit_size_bytes;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
+    }
     record_branch_metadata_pressure();
 }
 
 bool hybrid_cache_controller::debug_acquire_first_branch_ref_for_tests() {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (entries.empty()) {
         return false;
     }
     const bool acquired = forest.acquire_slot_ref(entries.front().branch_node_id);
     if (acquired) {
         n_slot_ref_acquires++;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
     }
     return acquired;
 }
 
 bool hybrid_cache_controller::debug_release_first_branch_ref_for_tests() {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (entries.empty()) {
         return false;
     }
     const bool released = forest.release_slot_ref(entries.front().branch_node_id);
     if (released) {
         n_slot_ref_releases++;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
     }
     return released;
 }
 
 bool hybrid_cache_controller::debug_pin_first_branch_ref_for_tests() {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (entries.empty()) {
         return false;
     }
     const bool acquired = forest.acquire_slot_ref(entries.front().branch_node_id);
     if (acquired) {
         n_slot_ref_acquires++;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
     }
     return acquired;
 }
@@ -1683,11 +1977,15 @@ size_t hybrid_cache_controller::debug_entry_count_for_tests() const {
 }
 
 void hybrid_cache_controller::release_branch_node_ref(uint64_t node_id) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
     if (node_id == 0) {
         return;
     }
     if (forest.release_slot_ref(node_id)) {
         n_slot_ref_releases++;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        advance_cache_generation_locked();
+#endif
     }
 }
 
@@ -1812,16 +2110,57 @@ void hybrid_cache_controller::record_stage10_diagnostic(
     n_stage10_diagnostics_by_shape[stage10_diagnostic_shape_key(event, result, reason, descriptor)]++;
 }
 
+bool hybrid_cache_controller::record_two_layer_decision(
+        cache_two_layer_mode mode,
+        cache_two_layer_result result,
+        cache_two_layer_reason reason,
+        uint64_t payload_id) {
+    const char * result_name = two_layer_result_name(result);
+    const char * reason_name = two_layer_reason_name(reason);
+    if (mode != cache_two_layer_mode::hybrid || result_name == nullptr || reason_name == nullptr) {
+        record_stage10_diagnostic("cache_two_layer_decision", "failure", "invalid_metric_enum");
+        return false;
+    }
+    n_two_layer_decisions_[{mode, result, reason}]++;
+    SRV_INF("event=cache_two_layer_decision result=%s reason=%s payload_id=%" PRIu64 "\n",
+        result_name, reason_name, payload_id);
+    return true;
+}
+
+bool hybrid_cache_controller::record_cold_transaction(
+        cache_two_layer_mode mode,
+        cache_cold_transaction_result result,
+        cache_cold_transaction_reason reason,
+        cold_tx_id tx_id) {
+    const char * result_name = cold_transaction_result_name(result);
+    const char * reason_name = cold_transaction_reason_name(reason);
+    if (mode != cache_two_layer_mode::hybrid || result_name == nullptr || reason_name == nullptr) {
+        record_stage10_diagnostic("cache_cold_transaction", "failure", "invalid_metric_enum");
+        return false;
+    }
+    n_cold_transactions_[{mode, result, reason}]++;
+    SRV_INF("event=cache_cold_transaction result=%s reason=%s tx_id=%" PRIu64 "\n",
+        result_name, reason_name, tx_id);
+    return true;
+}
+
 uint64_t hybrid_cache_controller::entry_payload_id_for_kind(const hybrid_cache_entry & entry, payload_kind kind) const {
     return kind == payload_kind::checkpoint ? entry.checkpoint_payload_id : entry.payload_id;
 }
 
 void hybrid_cache_controller::set_entry_payload_id_for_kind(hybrid_cache_entry & entry, payload_kind kind, uint64_t payload_id) {
+    const uint64_t old_payload_id = entry_payload_id_for_kind(entry, kind);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (kind == payload_kind::checkpoint && old_payload_id != payload_id) {
+        stage39_checkpoint_link_mutation_count_++;
+    }
+#endif
     if (kind == payload_kind::checkpoint) {
         entry.checkpoint_payload_id = payload_id;
     } else {
         entry.payload_id = payload_id;
     }
+    if (old_payload_id != payload_id) STAGE39_CACHE_MUTATED();
 }
 
 void hybrid_cache_controller::refresh_entry_payload_accounting(hybrid_cache_entry & entry) {
@@ -1846,9 +2185,13 @@ void hybrid_cache_controller::refresh_entry_payload_accounting(hybrid_cache_entr
         has_target = has_target || descriptor.target_size_bytes > 0;
         has_draft = has_draft || descriptor.draft_size_bytes > 0;
     }
-    entry.resident_payload_bytes_cached = resident_bytes;
-    entry.has_target_payload_cached = has_target;
-    entry.has_draft_payload_cached = has_draft;
+    if (entry.resident_payload_bytes_cached != resident_bytes ||
+            entry.has_target_payload_cached != has_target || entry.has_draft_payload_cached != has_draft) {
+        entry.resident_payload_bytes_cached = resident_bytes;
+        entry.has_target_payload_cached = has_target;
+        entry.has_draft_payload_cached = has_draft;
+        STAGE39_CACHE_MUTATED();
+    }
 }
 
 bool hybrid_cache_controller::entry_has_payload_kind_for_restore(const hybrid_cache_entry & entry, payload_kind kind) const {
@@ -2450,6 +2793,11 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
         const uint64_t checkpoint_payload_id = it->checkpoint_payload_id;
         const size_t payload_bytes = it->resident_payload_bytes();
         mark_payload_evicted(*it);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        if (stage39_prepared_abort_locked()) {
+            return false;
+        }
+#endif
 
         // Check if either payload was demoted rather than immediately evicted.
         // rather than evicted.
@@ -2464,21 +2812,29 @@ bool hybrid_cache_controller::evict_entry_by_id(uint64_t entry_id, server_cache_
             // the entry still owns a restore-visible payload descriptor.
             remove_from_lru_index(it);
             n_evictions++;
+            const auto evicted = [&](uint64_t payload_id) {
+                auto desc_it = payload_descriptors.find(payload_id);
+                return desc_it != payload_descriptors.end() &&
+                    desc_it->second.residency == payload_residency_state::evicted;
+            };
+            if (evicted(exact_payload_id) || evicted(checkpoint_payload_id)) {
+                n_payload_evictions++;
+                n_payload_eviction_bytes += payload_bytes;
+            }
             return true;
         }
 
-        // Immediate eviction: remove the entry when branch topology allows it.
-        // If removal is unsafe, keep branch metadata so Stage 8 can validate
-        // and re-materialize the node later.
-        if (remove_entry_after_eviction(it)) {
-            n_evictions++;
-            n_payload_evictions++;
-            n_payload_eviction_bytes += payload_bytes;
-            return true;
+        const auto retained_hot = [&](uint64_t payload_id) {
+            auto desc_it = payload_descriptors.find(payload_id);
+            return desc_it != payload_descriptors.end() &&
+                desc_it->second.residency == payload_residency_state::hot;
+        };
+        if (retained_hot(exact_payload_id) || retained_hot(checkpoint_payload_id)) {
+            return false;
         }
 
-        remove_from_lru_index(it);
-        remove_from_prefix_index(it);
+        // Payload pressure retains lookup and branch metadata. Token-budget
+        // eviction owns full entry removal through remove_entry_after_eviction().
         n_evictions++;
         n_payload_evictions++;
         n_payload_eviction_bytes += payload_bytes;
@@ -2883,6 +3239,7 @@ bool hybrid_cache_controller::debug_inject_first_payload_fault_for_tests(payload
             return true;
         case payload_debug_fault::cold_residency:
             descriptor.residency = payload_residency_state::cold;
+            STAGE39_CACHE_MUTATED();
             return true;
         case payload_debug_fault::unexpected_draft_for_target_only:
             if (!record) {
@@ -2913,9 +3270,11 @@ bool hybrid_cache_controller::debug_inject_first_payload_fault_for_tests(payload
             return true;
         case payload_debug_fault::demoting_residency:
             descriptor.residency = payload_residency_state::demoting;
+            STAGE39_CACHE_MUTATED();
             return true;
         case payload_debug_fault::promoting_residency:
             descriptor.residency = payload_residency_state::promoting;
+            STAGE39_CACHE_MUTATED();
             return true;
     }
 
@@ -3066,6 +3425,12 @@ bool hybrid_cache_controller::debug_rollback_failure_for_tests(bool runtime_has_
 }
 
 void hybrid_cache_controller::evict_until_within_budget() {
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (stage39_prepared_abort_locked()) {
+        stage39_post_abort_pressure_count_++;
+        return;
+    }
+#endif
     if (!hot_payload_budget_enabled()) {
         return;
     }
@@ -3098,6 +3463,11 @@ void hybrid_cache_controller::evict_until_within_budget() {
 
     for (const auto & eviction : plan.evictions) {
         if (!evict_entry_by_id(eviction.entry_id, eviction.reason)) {
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+            if (stage39_prepared_abort_locked()) {
+                return;
+            }
+#endif
             break;
         }
     }
@@ -3114,6 +3484,7 @@ void hybrid_cache_controller::refresh_existing_entry(std::list<hybrid_cache_entr
     const auto old_key = lru_key_t{it->use_sequence, it->insertion_sequence};
     it->protected_root = it->protected_root || protected_root;
     it->mark_used(next_use_sequence());
+    STAGE39_CACHE_MUTATED();
     sync_branch_node_from_entry(*it);
     update_lru_index(it, old_key);
     evict_until_within_budget();
@@ -3133,6 +3504,7 @@ uint64_t hybrid_cache_controller::create_branch_node_for_entry(hybrid_cache_entr
         return 0;
     }
     entry.branch_node_id = node_id;
+    STAGE39_CACHE_MUTATED();
     n_branch_nodes_created++;
     sync_branch_node_from_entry(entry);
     record_branch_metadata_pressure();
@@ -3290,10 +3662,12 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::admit_entry_wit
     }
 
     entries.push_back(std::move(entry));
+    STAGE39_CACHE_MUTATED();
     auto it = std::prev(entries.end());
     if (create_branch_node_for_entry(*it, parent_node_id) == 0) {
         remove_payload(it->payload_id);
         entries.erase(it);
+        STAGE39_CACHE_MUTATED();
         if (failure_reason) {
             *failure_reason = "branch node creation failed";
         }
@@ -3303,6 +3677,7 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::admit_entry_wit
         remove_payload(it->payload_id);
         forest.remove_node(it->branch_node_id);
         entries.erase(it);
+        STAGE39_CACHE_MUTATED();
         return entries.end();
     }
     add_to_lru_index(it);
@@ -3322,6 +3697,7 @@ bool hybrid_cache_controller::enforce_branch_metadata_admission_budget(
     const size_t before_bytes = forest.total_metadata_ram_bytes();
     const size_t freed = forest.enforce_metadata_budget(branch_metadata_ram_soft_max);
     if (freed > 0) {
+        STAGE39_CACHE_MUTATED();
         n_cache_branch_prunings++;
         n_cache_branch_pruned_metadata_bytes += freed;
     }
@@ -3391,6 +3767,7 @@ void hybrid_cache_controller::sync_branch_node_from_entry(const hybrid_cache_ent
             branch_node::payload_absent_reason::never_owned :
             branch_node::payload_absent_reason::none;
     }
+    STAGE39_CACHE_MUTATED();
 }
 
 std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::find_entry_by_branch_node(uint64_t node_id) {
@@ -3463,6 +3840,12 @@ std::list<hybrid_cache_entry>::iterator hybrid_cache_controller::select_restore_
 }
 
 void hybrid_cache_controller::record_branch_metadata_pressure() {
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (stage39_prepared_abort_locked()) {
+        stage39_post_abort_diagnostic_count_++;
+        return;
+    }
+#endif
     if (branch_metadata_ram_soft_max == 0) {
         return;
     }
@@ -3486,6 +3869,8 @@ void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
         hot_payloads.erase(payload_id);
         descriptor_it->second.residency = payload_residency_state::evicted;
         descriptor_it->second.resident_payload_bytes = 0;
+        STAGE39_CACHE_MUTATED();
+        STAGE39_CACHE_MUTATED();
         return;
     }
     if (descriptor_it != payload_descriptors.end() &&
@@ -3510,6 +3895,7 @@ void hybrid_cache_controller::remove_payload(uint64_t payload_id) {
     }
     hot_payloads.erase(payload_id);
     payload_descriptors.erase(payload_id);
+    STAGE39_CACHE_MUTATED();
 }
 
 bool hybrid_cache_controller::remove_entry_after_eviction(std::list<hybrid_cache_entry>::iterator it) {
@@ -3522,11 +3908,18 @@ bool hybrid_cache_controller::remove_entry_after_eviction(std::list<hybrid_cache
     remove_payload(it->payload_id);
     remove_payload(it->checkpoint_payload_id);
     entries.erase(it);
+    STAGE39_CACHE_MUTATED();
     return true;
 }
 
 bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & entry, payload_kind kind) {
     tx_assert_mutex_held();
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (kind == payload_kind::checkpoint && stage39_prepared_abort_locked()) {
+        stage39_later_kind_work_count_++;
+        return false;
+    }
+#endif
     const uint64_t payload_id = entry_payload_id_for_kind(entry, kind);
     if (payload_id == 0) {
         return false;
@@ -3534,22 +3927,19 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
 
     auto descriptor_it = payload_descriptors.find(payload_id);
     if (descriptor_it != payload_descriptors.end()) {
-        if (cold_store.is_configured() &&
+        if (descriptor_it->second.residency == payload_residency_state::cold) {
+            return true;
+        }
+        const bool cold_disabled = !cold_store.is_configured() || cold_budget_bytes == 0;
+        if (cold_disabled && descriptor_it->second.residency == payload_residency_state::hot) {
+            record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::bypassed,
+                cache_two_layer_reason::cold_disabled, payload_id);
+        } else if (cold_store.is_configured() &&
             descriptor_it->second.residency == payload_residency_state::hot) {
-            // Stage 24 fix: skip the demote attempt when resident bytes are
-            // already over the hot budget. Demotion is async and does not
-            // release hot bytes until the worker drains the result; trying
-            // to demote while over budget only consumes worker capacity and
-            // always falls back to immediate eviction, which delays the
-            // eviction plan and pins the cache above the budget.
-            const bool over_hot_budget =
-                hot_payload_budget_enabled() &&
-                calculate_resident_payload_bytes() > limit_size;
-            if (!over_hot_budget) {
-                if (entry.protected_root) {
-                    n_protected_root_demotions++;
-                    SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
-                }
+            if (entry.protected_root) {
+                n_protected_root_demotions++;
+                SRV_WRN(" - hybrid cache: protected root demoted (payload_id=%" PRIu64 ")\n", payload_id);
+            }
                 // D-EXEC-24-03 root cause (Stage 27): the legacy
                 // demote_payload enqueues to io_worker, but Stage 25
                 // worker retirement (Option B) leaves the worker thread
@@ -3564,23 +3954,40 @@ bool hybrid_cache_controller::mark_payload_kind_evicted(hybrid_cache_entry & ent
                 // and applies handle_demotion_completion before
                 // returning, which releases the hot memory as designed.
                 // The recursive_mutex allows the nested acquisition.
-                if (tx_demote_payload(payload_id)) {
-                    refresh_entry_payload_accounting(entry);
-                    return true;
-                }
-                SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", falling back to immediate eviction\n",
-                        payload_id);
+            if (tx_demote_payload(payload_id, true)) {
+                refresh_entry_payload_accounting(entry);
+                return true;
             }
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+            if (stage39_prepared_abort_locked()) {
+                return false;
+            }
+#endif
+            if (!last_demote_failure_was_capacity_) {
+                record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot,
+                    last_demote_failure_reason_, payload_id);
+                SRV_WRN(" - hybrid cache: demotion failed for payload_id %" PRIu64 ", retaining hot payload\n", payload_id);
+                return false;
+            }
+            record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::evicted,
+                last_demote_failure_reason_, payload_id);
         }
 
         record_payload_eviction(descriptor_it->second, "success", "hot_budget");
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        if (kind == payload_kind::checkpoint) {
+            stage39_checkpoint_descriptor_mutation_count_++;
+        }
+#endif
         descriptor_it->second.residency = payload_residency_state::evicted;
         descriptor_it->second.resident_payload_bytes = 0;
+        STAGE39_CACHE_MUTATED();
     }
     hot_payloads.erase(payload_id);
     set_entry_payload_id_for_kind(entry, kind, 0);
     refresh_entry_payload_accounting(entry);
     if (entry.branch_node_id != 0 && forest.evict_payload(entry.branch_node_id)) {
+        STAGE39_CACHE_MUTATED();
         n_cache_metadata_only_retentions++;
     } else {
         sync_branch_node_from_entry(entry);
@@ -3592,9 +3999,23 @@ void hybrid_cache_controller::mark_payload_evicted(hybrid_cache_entry & entry) {
     tx_assert_mutex_held();
     bool changed = false;
     changed = mark_payload_kind_evicted(entry, payload_kind::exact_blob) || changed;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    bool skip_checkpoint = stage39_prepared_abort_locked();
+    if (!skip_checkpoint && changed && stage39_prepared_session_.active) {
+        skip_checkpoint = !stage39_midpoint_after_exact_locked(entry);
+    }
+    if (!skip_checkpoint) {
+        changed = mark_payload_kind_evicted(entry, payload_kind::checkpoint) || changed;
+    }
+#else
     changed = mark_payload_kind_evicted(entry, payload_kind::checkpoint) || changed;
+#endif
     if (changed) {
+        refresh_entry_payload_accounting(entry);
         sync_branch_node_from_entry(entry);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+        stage39_record_common_sync_locked(entry);
+#endif
     }
 }
 
@@ -3753,6 +4174,7 @@ bool hybrid_cache_controller::attach_payload(
     }
 
     payload_descriptors[descriptor.payload_id] = descriptor;
+    STAGE39_CACHE_MUTATED();
     try {
         // D-EXEC-24-03 Step 2 (Stage 27): wrap the hot_payloads insert
         // in try/catch so that a heap-corruption exception during the
@@ -3764,6 +4186,7 @@ bool hybrid_cache_controller::attach_payload(
         hot_payloads[record.payload_id] = std::move(record);
     } catch (...) {
         payload_descriptors.erase(descriptor.payload_id);
+        STAGE39_CACHE_MUTATED();
         throw;
     }
     set_entry_payload_id_for_kind(entry, kind, descriptor.payload_id);
@@ -4299,9 +4722,10 @@ bool hybrid_cache_controller::hot_payload_budget_enabled() const {
     return !limit_size_unlimited && limit_size > 0;
 }
 
-std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy_candidates() {
-    std::vector<server_cache_policy_candidate> candidates;
-    candidates.reserve(entries.size());
+hybrid_cache_controller::policy_candidate_enumeration
+hybrid_cache_controller::enumerate_hot_policy_candidates_core() {
+    policy_candidate_enumeration result;
+    result.candidates.reserve(entries.size());
     std::unordered_set<uint64_t> lru_entry_ids;
     lru_entry_ids.reserve(lru_index.size());
     for (const auto & item : lru_index) {
@@ -4316,7 +4740,7 @@ std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy
         if (in_lru_index(entry) &&
             entry.branch_node_id != 0 && forest.slot_ref_count(entry.branch_node_id) > 0 &&
             entry.resident_payload_bytes() > 0) {
-            n_eviction_payload_blocked_refs++;
+            result.blocked_references++;
         }
     }
 
@@ -4330,7 +4754,7 @@ std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy
         if (!in_lru_index(entry)) {
             continue;
         }
-        candidates.push_back({
+        result.candidates.push_back({
             entry.entry_id,
             entry.namespace_id,
             entry.resident_payload_bytes(),
@@ -4342,16 +4766,44 @@ std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy
             entry.has_draft_payload(),
         });
     }
+    return result;
+}
+
+std::vector<server_cache_policy_candidate> hybrid_cache_controller::build_policy_candidates() {
+    auto result = enumerate_hot_policy_candidates_core();
+    n_eviction_payload_blocked_refs += result.blocked_references;
+    return std::move(result.candidates);
+}
+
+std::vector<uint64_t> hybrid_cache_controller::enumerate_cold_policy_candidates_core(
+        uint64_t incoming_owner_entry_id) const {
+    std::vector<uint64_t> candidates;
+    for (const auto & item : payload_descriptors) {
+        const auto & descriptor = item.second;
+        if (descriptor.residency == payload_residency_state::cold &&
+                descriptor.owner_entry_id != incoming_owner_entry_id) {
+            candidates.push_back(item.first);
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [&](uint64_t lhs_id, uint64_t rhs_id) {
+        const auto & lhs = payload_descriptors.at(lhs_id);
+        const auto & rhs = payload_descriptors.at(rhs_id);
+        return std::tie(lhs.last_validated_sequence, lhs.payload_id) <
+            std::tie(rhs.last_validated_sequence, rhs.payload_id);
+    });
     return candidates;
 }
 
 uint64_t hybrid_cache_controller::next_use_sequence() {
-    return next_sequence++;
+    const uint64_t result = next_sequence++;
+    STAGE39_CACHE_MUTATED();
+    return result;
 }
 
 void hybrid_cache_controller::assign_entry_identity(hybrid_cache_entry & entry) {
     entry.entry_id = next_entry_id++;
     entry.insertion_sequence = entry.entry_id;
+    STAGE39_CACHE_MUTATED();
 }
 
 std::string hybrid_cache_controller::compute_namespace_id() const {
@@ -4645,6 +5097,7 @@ hybrid_cache_controller::token_prefix_t hybrid_cache_controller::get_token_prefi
 
 void hybrid_cache_controller::add_to_lru_index(std::list<hybrid_cache_entry>::iterator it) {
     lru_index.insert({lru_key_t{it->use_sequence, it->insertion_sequence}, it});
+    STAGE39_CACHE_MUTATED();
 }
 
 void hybrid_cache_controller::remove_from_lru_index(std::list<hybrid_cache_entry>::iterator it) {
@@ -4652,6 +5105,7 @@ void hybrid_cache_controller::remove_from_lru_index(std::list<hybrid_cache_entry
     for (auto lru_it = range.first; lru_it != range.second; ++lru_it) {
         if (lru_it->second == it) {
             lru_index.erase(lru_it);
+            STAGE39_CACHE_MUTATED();
             break;
         }
     }
@@ -4666,17 +5120,20 @@ void hybrid_cache_controller::update_lru_index(
     for (auto lru_it = range.first; lru_it != range.second; ++lru_it) {
         if (lru_it->second == it) {
             lru_index.erase(lru_it);
+            STAGE39_CACHE_MUTATED();
             break;
         }
     }
 
     // Insert new entry
     lru_index.insert({lru_key_t{it->use_sequence, it->insertion_sequence}, it});
+    STAGE39_CACHE_MUTATED();
 }
 
 void hybrid_cache_controller::add_to_prefix_index(std::list<hybrid_cache_entry>::iterator it) {
     token_prefix_t prefix = get_token_prefix(it->tokens);
     prefix_index[prefix].push_back(it);
+    STAGE39_CACHE_MUTATED();
 }
 
 void hybrid_cache_controller::remove_from_prefix_index(std::list<hybrid_cache_entry>::iterator it) {
@@ -4684,10 +5141,13 @@ void hybrid_cache_controller::remove_from_prefix_index(std::list<hybrid_cache_en
     auto map_it = prefix_index.find(prefix);
     if (map_it != prefix_index.end()) {
         auto & vec = map_it->second;
+        const size_t old_size = vec.size();
         vec.erase(std::remove(vec.begin(), vec.end(), it), vec.end());
+        const bool removed = vec.size() != old_size;
         if (vec.empty()) {
             prefix_index.erase(map_it);
         }
+        if (removed) STAGE39_CACHE_MUTATED();
     }
 }
 // ============================================================================
@@ -4713,8 +5173,10 @@ void hybrid_cache_controller::tx_assert_not_reentrant() const {
     (void) server_context_tx_depth_;
 }
 
-bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
+bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id, bool defer_final_decision) {
     std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    last_demote_failure_was_capacity_ = false;
+    last_demote_failure_reason_ = cache_two_layer_reason::io_error;
     stage25_tx::reentrancy_guard tx_guard(server_context_tx_depth_, reentrancy_depth_limit_);
     if (!tx_guard.active) {
         return false;
@@ -4740,7 +5202,7 @@ bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
         record_stage10_diagnostic("demotion", "failure", "residency", &descriptor);
         return false;
     }
-    if (!cold_store.is_configured()) {
+    if (!cold_store.is_configured() || cold_mutation_disabled_) {
         SRV_WRN(" - hybrid cache: tx_demote_payload: cold store not configured\n%s", "");
         record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
         record_stage10_diagnostic("demotion", "failure", "cold_store_unconfigured", &descriptor);
@@ -4755,15 +5217,8 @@ bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
         return false;
     }
     const hot_payload_record & record = record_it->second;
-    const size_t estimated_cold_bytes = record.target.size() + record.draft.size();
-
-    if (hot_payload_budget_enabled() &&
-        calculate_demoting_payload_bytes() + estimated_cold_bytes > limit_size) {
-        record_payload_transition("demotion", descriptor, "failure", "demotion_budget_pressure");
-        record_stage10_diagnostic("queue_pressure", "failure", "demotion_budget_pressure", &descriptor);
-        SRV_WRN(" - hybrid cache: tx_demote_payload: outstanding demotions exceed payload budget\n%s", "");
-        return false;
-    }
+    // Demotion is synchronous. No outstanding queue reserve competes with the
+    // current payload, so hot capacity must not reject a write that fits cold.
     if (descriptor.pair_state == payload_pair_state::target_and_draft) {
         if (record.draft.empty() || descriptor.draft_size_bytes == 0) {
             SRV_ERR(" - hybrid cache: tx_demote_payload: target_and_draft descriptor missing draft\n%s", "");
@@ -4772,13 +5227,6 @@ bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
             return false;
         }
     }
-    if (!cold_budget_make_room(estimated_cold_bytes, descriptor)) {
-        record_payload_transition("demotion", descriptor, "failure", "cold_budget_exceeded");
-        return false;
-    }
-
-    descriptor.residency = payload_residency_state::demoting;
-
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
     snapshot.pair_state = static_cast<uint8_t>(descriptor.pair_state);
@@ -4788,16 +5236,263 @@ bool hybrid_cache_controller::tx_demote_payload(uint64_t payload_id) {
     snapshot.target_checksum = descriptor.target_checksum;
     snapshot.draft_checksum = descriptor.draft_checksum;
 
-    auto completion = io_worker.execute_demotion_inline(
-        payload_id, snapshot, record.target, record.draft);
-    if (!completion.has_value()) {
-        descriptor.residency = payload_residency_state::hot;
-        record_payload_transition("demotion", descriptor, "failure", "cold_store_unconfigured");
+    auto prepared = cold_store.prepare(payload_id, record.target, record.draft, snapshot);
+    if (!prepared) {
+        record_payload_transition("demotion", descriptor, "failure", "stage_write");
+        last_demote_failure_reason_ = prepared.code == cold_prepare_result_code::size_overflow
+            ? cache_two_layer_reason::size_overflow
+            : prepared.code == cold_prepare_result_code::validation_error
+                ? cache_two_layer_reason::integrity_error : cache_two_layer_reason::io_error;
+        if (!defer_final_decision && prepared.code == cold_prepare_result_code::size_overflow) {
+            record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot,
+                cache_two_layer_reason::size_overflow, payload_id);
+        } else if (!defer_final_decision) {
+            record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot,
+                prepared.code == cold_prepare_result_code::validation_error ? cache_two_layer_reason::integrity_error : cache_two_layer_reason::io_error,
+                payload_id);
+            record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::rollback,
+                prepared.code == cold_prepare_result_code::validation_error ? cache_cold_transaction_reason::stage_validate : cache_cold_transaction_reason::stage_write,
+                0);
+        }
         return false;
     }
 
-    handle_demotion_completion(*completion);
-    return completion->success;
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (!stage39_capture_prepared_locked(descriptor, record, prepared.object)) {
+        std::error_code ec;
+        fs::remove(prepared.object.staging_path, ec);
+        if (ec) {
+            stage39_prepared_session_.mismatch_flags.push_back("staging_cleanup");
+        }
+        return false;
+    }
+    if (descriptor.kind == payload_kind::checkpoint) {
+        stage39_checkpoint_classification_count_++;
+    }
+#endif
+
+    const uint64_t incoming_bytes = prepared.object.exact_bytes;
+    const uint64_t budget = cold_budget_bytes < 0 ? UINT64_MAX : static_cast<uint64_t>(cold_budget_bytes);
+    const uint64_t cold_payload_bytes = static_cast<uint64_t>(n_cold_payload_bytes);
+    const uint64_t quarantine_bytes = static_cast<uint64_t>(n_cold_quarantine_bytes_);
+    if (cold_payload_bytes > UINT64_MAX - quarantine_bytes) {
+        std::error_code ec;
+        fs::remove(prepared.object.staging_path, ec);
+        last_demote_failure_reason_ = cache_two_layer_reason::size_overflow;
+        if (!defer_final_decision) record_two_layer_decision(cache_two_layer_mode::hybrid,
+            cache_two_layer_result::retained_hot, cache_two_layer_reason::size_overflow, payload_id);
+        return false;
+    }
+    const uint64_t occupied_bytes = cold_payload_bytes + quarantine_bytes;
+    if (cold_budget_bytes == 0 || incoming_bytes > budget) {
+        std::error_code ec;
+        fs::remove(prepared.object.staging_path, ec);
+        record_payload_transition("demotion", descriptor, "failure", "cold_budget_exceeded");
+        last_demote_failure_was_capacity_ = true;
+        last_demote_failure_reason_ = !limit_size_unlimited && limit_size > 0 &&
+                descriptor.resident_payload_bytes > limit_size
+            ? cache_two_layer_reason::oversized_both
+            : cache_two_layer_reason::both_filled;
+        return false;
+    }
+
+    std::vector<uint64_t> candidates;
+    std::vector<uint64_t> victims;
+    uint64_t reclaimed = 0;
+    if (occupied_bytes > budget - incoming_bytes) {
+        candidates = enumerate_cold_policy_candidates_core(descriptor.owner_entry_id);
+        for (uint64_t candidate_id : candidates) {
+            if (occupied_bytes - reclaimed <= budget - incoming_bytes) break;
+            const auto it = cold_payload_bytes_by_id_.find(candidate_id);
+            if (it != cold_payload_bytes_by_id_.end()) reclaimed += it->second;
+            victims.push_back(candidate_id);
+        }
+        if (occupied_bytes - reclaimed > budget - incoming_bytes) {
+            std::error_code ec;
+            fs::remove(prepared.object.staging_path, ec);
+            record_payload_transition("demotion", descriptor, "failure", "cold_budget_exceeded");
+            last_demote_failure_was_capacity_ = true;
+            last_demote_failure_reason_ = cache_two_layer_reason::both_filled;
+            return false;
+        }
+    }
+
+    cold_tx_manifest manifest{};
+    manifest.tx_id = next_cold_tx_id_++;
+    manifest.state = cold_tx_state::prepared;
+    manifest.incoming = prepared.object;
+    manifest.incoming_exact_bytes = incoming_bytes;
+    manifest.incoming_final_path = prepared.object.final_path;
+    manifest.logical_bytes_before = occupied_bytes;
+    manifest.victim_bytes = reclaimed;
+    manifest.logical_bytes_after = manifest.logical_bytes_before - reclaimed + incoming_bytes;
+    auto snapshot_descriptor = [](const payload_descriptor & source) {
+        cold_recovered_descriptor out{};
+        out.file = {source.payload_id, static_cast<uint8_t>(source.pair_state), static_cast<uint8_t>(source.format_version),
+            source.target_size_bytes, source.draft_size_bytes, source.target_checksum, source.draft_checksum};
+        out.payload_kind = static_cast<uint8_t>(source.kind);
+        out.owner = {source.owner_entry_id, static_cast<uint8_t>(source.kind == payload_kind::checkpoint)};
+        out.created_sequence = source.created_sequence; out.last_validated_sequence = source.last_validated_sequence;
+        out.token_span_start = source.token_span_start; out.token_span_end = source.token_span_end;
+        out.position_start = source.position_start; out.position_end = source.position_end;
+        out.checkpoint_boundary_required = source.checkpoint_boundary_required;
+        out.checkpoint_boundary_native = source.checkpoint_boundary_native;
+        out.checkpoint_boundary_kind = source.checkpoint_boundary_kind; out.boundary_checksum = source.boundary_checksum;
+        out.boundary_id = source.boundary_id; out.workload_profile = source.workload_profile;
+        return out;
+    };
+    manifest.incoming_descriptor = snapshot_descriptor(descriptor);
+    for (uint64_t victim_id : victims) {
+        auto & victim_descriptor = payload_descriptors.at(victim_id);
+        cold_recovered_victim recovered{};
+        recovered.descriptor = snapshot_descriptor(victim_descriptor);
+        recovered.exact_bytes = cold_payload_bytes_by_id_[victim_id];
+        std::ostringstream victim_name;
+        victim_name << std::hex << victim_id << ".cold";
+        cold_victim victim{victim_id, fs::path(cold_store.root_path()) / victim_name.str(), {}};
+        victim.quarantine_path = victim.final_path.string() + ".q." + std::to_string(manifest.tx_id);
+        recovered.quarantine_path = victim.quarantine_path;
+        manifest.victims.push_back(recovered);
+    }
+    auto rollback_disk = [&]() {
+        const auto recovery = cold_store.recover_transactions();
+        cold_mutation_disabled_ = cold_mutation_disabled_ || recovery.mutation_disabled;
+        STAGE39_CACHE_MUTATED();
+    };
+    if (!cold_store.write_manifest(manifest)) {
+        std::error_code ec;
+        fs::remove(prepared.object.staging_path, ec);
+        if (!defer_final_decision) record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot, cache_two_layer_reason::io_error, payload_id);
+        record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::rollback, cache_cold_transaction_reason::manifest, manifest.tx_id);
+        return false;
+    }
+    for (size_t i = 0; i < victims.size(); ++i) {
+        cold_victim victim{};
+        victim.payload_id = victims[i];
+        victim.quarantine_path = manifest.victims[i].quarantine_path;
+        std::ostringstream victim_name;
+        victim_name << std::hex << victim.payload_id << ".cold";
+        victim.final_path = fs::path(cold_store.root_path()) / victim_name.str();
+        if (!cold_store.quarantine(victim, manifest.tx_id)) {
+            rollback_disk();
+            if (!defer_final_decision) record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot, cache_two_layer_reason::io_error, payload_id);
+            record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::rollback, cache_cold_transaction_reason::victim_quarantine, manifest.tx_id);
+            return false;
+        }
+    }
+    manifest.state = cold_tx_state::quarantined;
+    if (!cold_store.write_manifest(manifest) || !cold_store.publish(manifest.incoming, manifest.tx_id)) {
+        rollback_disk();
+        if (!defer_final_decision) record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot, cache_two_layer_reason::io_error, payload_id);
+        record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::rollback, cache_cold_transaction_reason::incoming_publish, manifest.tx_id);
+        return false;
+    }
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (descriptor.kind == payload_kind::checkpoint) {
+        stage39_checkpoint_publish_count_++;
+        stage39_checkpoint_cold_file_event_count_++;
+    }
+#endif
+    manifest.state = cold_tx_state::published;
+    if (!cold_store.write_manifest(manifest) || !cold_store.mark_committed(manifest)) {
+        rollback_disk();
+        if (!defer_final_decision) record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_hot, cache_two_layer_reason::io_error, payload_id);
+        record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::rollback, cache_cold_transaction_reason::commit_marker, manifest.tx_id);
+        return false;
+    }
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (descriptor.kind == payload_kind::checkpoint) {
+        stage39_checkpoint_commit_count_++;
+    }
+#endif
+#ifdef LLAMA_SERVER_CACHE_TESTS
+    if (cold_store.debug_fail_descriptor_apply_for_tests()) {
+        record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::recovery,
+            cache_cold_transaction_reason::apply, manifest.tx_id);
+        return false;
+    }
+#endif
+
+    for (const auto & victim : manifest.victims) {
+        auto & old = payload_descriptors.at(victim.descriptor.file.payload_id);
+        old.residency = payload_residency_state::evicted;
+        old.resident_payload_bytes = 0;
+        STAGE39_CACHE_MUTATED();
+        cold_payload_bytes_by_id_.erase(old.payload_id);
+        n_cold_evictions++; n_payload_evictions++;
+    }
+    n_cold_payload_bytes = static_cast<size_t>(manifest.logical_bytes_after);
+    cold_payload_bytes_by_id_[payload_id] = static_cast<size_t>(incoming_bytes);
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+    if (descriptor.kind == payload_kind::checkpoint) {
+        stage39_checkpoint_descriptor_mutation_count_++;
+    }
+#endif
+    descriptor.store_ref.id = payload_id;
+    descriptor.residency = payload_residency_state::cold;
+    hot_payloads.erase(payload_id);
+    STAGE39_CACHE_MUTATED();
+    n_demotion_successes++;
+    n_cold_payload_count = cold_payload_bytes_by_id_.size();
+    for (auto & entry : entries) refresh_entry_payload_accounting(entry);
+    const auto cleanup = cold_store.cleanup(manifest);
+    if (!cleanup.success) {
+        n_cold_quarantine_bytes_ += static_cast<size_t>(reclaimed);
+    }
+    STAGE39_CACHE_MUTATED();
+    record_two_layer_decision(cache_two_layer_mode::hybrid, cache_two_layer_result::retained_cold,
+        victims.empty() ? cache_two_layer_reason::cold_room : cache_two_layer_reason::cold_room_made, payload_id);
+    record_cold_transaction(cache_two_layer_mode::hybrid, cache_cold_transaction_result::commit,
+        cleanup.success ? cache_cold_transaction_reason::none : cache_cold_transaction_reason::cleanup, manifest.tx_id);
+    return true;
+}
+
+static const char * two_layer_result_name(cache_two_layer_result value) {
+    switch (value) {
+        case cache_two_layer_result::retained_cold: return "retained_cold";
+        case cache_two_layer_result::evicted: return "evicted";
+        case cache_two_layer_result::bypassed: return "bypassed";
+        case cache_two_layer_result::retained_hot: return "retained_hot";
+    }
+    return nullptr;
+}
+
+static const char * two_layer_reason_name(cache_two_layer_reason value) {
+    switch (value) {
+        case cache_two_layer_reason::cold_room: return "cold_room";
+        case cache_two_layer_reason::cold_room_made: return "cold_room_made";
+        case cache_two_layer_reason::both_filled: return "both_filled";
+        case cache_two_layer_reason::oversized_both: return "oversized_both";
+        case cache_two_layer_reason::cold_disabled: return "cold_disabled";
+        case cache_two_layer_reason::io_error: return "io_error";
+        case cache_two_layer_reason::integrity_error: return "integrity_error";
+        case cache_two_layer_reason::size_overflow: return "size_overflow";
+    }
+    return nullptr;
+}
+
+static const char * cold_transaction_result_name(cache_cold_transaction_result value) {
+    switch (value) {
+        case cache_cold_transaction_result::commit: return "commit";
+        case cache_cold_transaction_result::rollback: return "rollback";
+        case cache_cold_transaction_result::recovery: return "recovery";
+    }
+    return nullptr;
+}
+
+static const char * cold_transaction_reason_name(cache_cold_transaction_reason value) {
+    switch (value) {
+        case cache_cold_transaction_reason::none: return "none";
+        case cache_cold_transaction_reason::stage_write: return "stage_write";
+        case cache_cold_transaction_reason::stage_validate: return "stage_validate";
+        case cache_cold_transaction_reason::victim_quarantine: return "victim_quarantine";
+        case cache_cold_transaction_reason::incoming_publish: return "incoming_publish";
+        case cache_cold_transaction_reason::apply: return "apply";
+        case cache_cold_transaction_reason::commit_marker: return "commit_marker";
+        case cache_cold_transaction_reason::cleanup: return "cleanup";
+        case cache_cold_transaction_reason::manifest: return "manifest";
+    }
+    return nullptr;
 }
 
 bool hybrid_cache_controller::tx_promote_payload(uint64_t payload_id) {
@@ -4835,6 +5530,7 @@ bool hybrid_cache_controller::tx_promote_payload(uint64_t payload_id) {
     }
 
     descriptor.residency = payload_residency_state::promoting;
+    STAGE39_CACHE_MUTATED();
 
     cold_descriptor_snapshot snapshot{};
     snapshot.payload_id = descriptor.payload_id;
@@ -4850,6 +5546,7 @@ bool hybrid_cache_controller::tx_promote_payload(uint64_t payload_id) {
     auto completion = io_worker.execute_promotion_inline(payload_id, ref, snapshot);
     if (!completion.has_value()) {
         descriptor.residency = payload_residency_state::cold;
+        STAGE39_CACHE_MUTATED();
         record_payload_transition("promotion", descriptor, "failure", "cold_store_unconfigured");
         return false;
     }
@@ -4865,6 +5562,1376 @@ bool hybrid_cache_controller::tx_evict_entry(uint64_t entry_id, server_cache_evi
 void hybrid_cache_controller::tx_update() {
     update();
 }
+
+
+#ifdef LLAMA_STAGE39_LIVE_TEST_SEAM
+void hybrid_cache_controller::advance_cache_generation_locked(bool explicit_advance) {
+    if (cache_generation_ == std::numeric_limits<uint64_t>::max()) {
+        throw std::overflow_error("Stage 39 cache generation exhausted");
+    }
+    ++cache_generation_;
+    if (explicit_advance) {
+        stage39_explicit_generation_advance_count_++;
+    }
+}
+
+bool hybrid_cache_controller::stage39_validate_inventory_integrity(std::string & error) const {
+    uint64_t cold_bytes = 0;
+    for (const auto & item : payload_descriptors) {
+        const auto & descriptor = item.second;
+        if (item.first != descriptor.payload_id || descriptor.owner_entry_id == 0 ||
+                (descriptor.kind != payload_kind::exact_blob && descriptor.kind != payload_kind::checkpoint) ||
+                (descriptor.pair_state != payload_pair_state::target_only &&
+                 descriptor.pair_state != payload_pair_state::target_and_draft)) {
+            error = "inventory_integrity_error";
+            return false;
+        }
+        const auto owner = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+            return entry.entry_id == descriptor.owner_entry_id;
+        });
+        const uint64_t linked = owner == entries.end() ? 0 :
+            (descriptor.kind == payload_kind::checkpoint ? owner->checkpoint_payload_id : owner->payload_id);
+        const bool tombstone = descriptor.residency == payload_residency_state::evicted;
+        if ((!tombstone && owner == entries.end()) ||
+                (!tombstone && linked != descriptor.payload_id) ||
+                (tombstone && owner != entries.end() && linked != 0 && linked != descriptor.payload_id) ||
+                (descriptor.residency == payload_residency_state::cold &&
+                 descriptor.store_ref.id != descriptor.payload_id)) {
+            error = "inventory_integrity_error";
+            return false;
+        }
+        if (descriptor.residency == payload_residency_state::cold) {
+            const auto bytes = cold_payload_bytes_by_id_.find(descriptor.payload_id);
+            std::error_code ec;
+            std::ostringstream name;
+            name << std::hex << descriptor.payload_id << ".cold";
+            const auto path = fs::path(cold_store.root_path()) / name.str();
+            const bool file_exists = fs::is_regular_file(path, ec) && !ec;
+            if (bytes == cold_payload_bytes_by_id_.end() || !file_exists ||
+                    cold_bytes > UINT64_MAX - bytes->second) {
+                error = "inventory_integrity_error";
+                return false;
+            }
+            cold_bytes += bytes->second;
+        }
+    }
+    if (cold_bytes != n_cold_payload_bytes) {
+        error = "inventory_integrity_error";
+        return false;
+    }
+    return true;
+}
+
+json hybrid_cache_controller::stage39_build_snapshot_locked(std::string & error) {
+    if (!stage39_validate_inventory_integrity(error)) return json();
+    const auto find_owner = [&](uint64_t owner_id) {
+        return std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+            return entry.entry_id == owner_id;
+        });
+    };
+    const auto make_row = [&](const payload_descriptor & descriptor, bool eligible) {
+        const auto owner = find_owner(descriptor.owner_entry_id);
+        const auto bytes = cold_payload_bytes_by_id_.find(descriptor.payload_id);
+        const uint64_t refs = owner == entries.end() || owner->branch_node_id == 0 ? 0 :
+            forest.slot_ref_count(owner->branch_node_id);
+        return json{
+            {"payload_id", descriptor.payload_id},
+            {"owner_entry_id", descriptor.owner_entry_id},
+            {"payload_kind", payload_kind_name(descriptor.kind)},
+            {"pair_state", payload_pair_state_name(descriptor.pair_state)},
+            {"residency", payload_residency_name(descriptor.residency)},
+            {"protected_root", owner != entries.end() && should_protect(*owner)},
+            {"slot_reference_count", refs},
+            {"resident_bytes", descriptor.resident_payload_bytes},
+            {"serialized_cold_bytes", bytes == cold_payload_bytes_by_id_.end() ? json(nullptr) : json(bytes->second)},
+            {"hot_order", owner == entries.end() ? 0 : owner->use_sequence},
+            {"cold_rank", descriptor.last_validated_sequence},
+            {"eligible", eligible},
+        };
+    };
+
+    json hot = json::array();
+    const auto hot_core = enumerate_hot_policy_candidates_core();
+    for (const auto & candidate : hot_core.candidates) {
+        const auto owner = find_owner(candidate.entry_id);
+        if (owner == entries.end() || owner->payload_id == 0) continue;
+        const auto descriptor = payload_descriptors.find(owner->payload_id);
+        if (descriptor != payload_descriptors.end() && descriptor->second.residency == payload_residency_state::hot) {
+            hot.push_back(make_row(descriptor->second, true));
+        }
+    }
+    std::sort(hot.begin(), hot.end(), [](const json & lhs, const json & rhs) {
+        return lhs.at("payload_id").get<uint64_t>() < rhs.at("payload_id").get<uint64_t>();
+    });
+
+    json cold_sets = json::array();
+    for (const auto & incoming : hot) {
+        json candidates = json::array();
+        const uint64_t incoming_owner = incoming.at("owner_entry_id").get<uint64_t>();
+        for (uint64_t payload_id : enumerate_cold_policy_candidates_core(incoming_owner)) {
+            candidates.push_back(make_row(payload_descriptors.at(payload_id), true));
+        }
+        cold_sets.push_back({
+            {"incoming_payload_id", incoming.at("payload_id")},
+            {"incoming_owner_entry_id", incoming_owner},
+            {"candidates", std::move(candidates)},
+        });
+    }
+    return {
+        {"snapshot_generation", cache_generation_},
+        {"hot_budget_bytes", limit_size},
+        {"cold_budget_bytes", cold_budget_bytes},
+        {"hot_candidates", std::move(hot)},
+        {"cold_sets", std::move(cold_sets)},
+    };
+}
+
+std::string hybrid_cache_controller::stage39_snapshot_token_locked(const json & snapshot) const {
+    return stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_,
+        std::string("llama-stage39-snapshot-v1\n") + snapshot.dump());
+}
+
+std::string hybrid_cache_controller::stage39_process_identity_locked() const {
+    return stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_, "llama-stage39-process-v1").substr(0, 32);
+}
+
+json hybrid_cache_controller::stage39_build_runtime_proof_locked(
+        const std::vector<uint64_t> & payload_ids,
+        std::string & error) {
+    if (payload_ids.empty() || payload_ids.size() > 8) {
+        error = "invalid_proof_request";
+        return json();
+    }
+    std::vector<uint64_t> expanded;
+    std::unordered_set<uint64_t> expanded_unique;
+    for (uint64_t requested_id : payload_ids) {
+        const auto descriptor = payload_descriptors.find(requested_id);
+        if (descriptor == payload_descriptors.end()) {
+            error = "invalid_proof_request";
+            return json();
+        }
+        const auto owner = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+            return entry.entry_id == descriptor->second.owner_entry_id;
+        });
+        if (owner == entries.end()) {
+            error = "proof_integrity_error";
+            return json();
+        }
+        for (uint64_t linked : {owner->payload_id, owner->checkpoint_payload_id}) {
+            if (linked != 0 && expanded_unique.insert(linked).second) {
+                expanded.push_back(linked);
+            }
+        }
+    }
+    std::sort(expanded.begin(), expanded.end(), [&](uint64_t lhs, uint64_t rhs) {
+        return static_cast<int>(payload_descriptors.at(lhs).kind) < static_cast<int>(payload_descriptors.at(rhs).kind);
+    });
+    std::unordered_set<uint64_t> unique;
+    json rows = json::array();
+    const bool runtime_has_draft = ctx_dft != nullptr;
+    for (uint64_t payload_id : expanded) {
+        const auto descriptor_it = payload_descriptors.find(payload_id);
+        if (payload_id == 0 || !unique.insert(payload_id).second || descriptor_it == payload_descriptors.end()) {
+            error = "invalid_proof_request";
+            return json();
+        }
+        const payload_descriptor & descriptor = descriptor_it->second;
+        const auto owner = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+            return entry.entry_id == descriptor.owner_entry_id;
+        });
+        if (owner == entries.end() || entry_payload_id_for_kind(*owner, descriptor.kind) != payload_id) {
+            error = "proof_integrity_error";
+            return json();
+        }
+        if (descriptor.target_size_bytes > UINT64_MAX - descriptor.draft_size_bytes) {
+            error = "proof_size_overflow";
+            return json();
+        }
+        const uint64_t resident_total = descriptor.target_size_bytes + descriptor.draft_size_bytes;
+        std::string pair_error;
+        const bool pair_matches = runtime_pair_matches(descriptor.pair_state, runtime_has_draft, &pair_error);
+        json row = {
+            {"payload_id", payload_id}, {"owner_entry_id", descriptor.owner_entry_id},
+            {"payload_kind", payload_kind_name(descriptor.kind)},
+            {"pair_state", payload_pair_state_name(descriptor.pair_state)},
+            {"residency", payload_residency_name(descriptor.residency)},
+            {"runtime_has_draft", runtime_has_draft}, {"runtime_pair_matches", pair_matches},
+            {"target_size_bytes", descriptor.target_size_bytes},
+            {"draft_size_bytes", descriptor.draft_size_bytes},
+            {"target_checksum", descriptor.target_checksum}, {"draft_checksum", descriptor.draft_checksum},
+            {"resident_component_bytes", resident_total}, {"resident_bytes", descriptor.resident_payload_bytes},
+            {"store_id", descriptor.store_ref.id}, {"mismatch_flags", json::array()},
+        };
+        if (!pair_matches || descriptor.target_size_bytes == 0 ||
+                descriptor.resident_payload_bytes != resident_total) {
+            error = "proof_integrity_error";
+            return json();
+        }
+        if (descriptor.residency == payload_residency_state::hot) {
+            const auto record = hot_payloads.find(descriptor.store_ref.id);
+            if (record == hot_payloads.end() || record->second.target.size() != descriptor.target_size_bytes ||
+                    record->second.draft.size() != descriptor.draft_size_bytes ||
+                    payload_checksum(record->second.target) != descriptor.target_checksum ||
+                    (!record->second.draft.empty() ? payload_checksum(record->second.draft) : 0) !=
+                        descriptor.draft_checksum) {
+                error = "proof_integrity_error";
+                return json();
+            }
+            row["serialized_cold_bytes"] = nullptr;
+        } else if (descriptor.residency == payload_residency_state::cold) {
+            std::vector<uint8_t> target;
+            std::vector<uint8_t> draft;
+            cold_descriptor_snapshot header;
+            std::error_code ec;
+            std::ostringstream name;
+            name << std::hex << payload_id << ".cold";
+            const fs::path path = fs::path(cold_store.root_path()) / name.str();
+            const uint64_t file_bytes = fs::file_size(path, ec);
+            const auto accounted = cold_payload_bytes_by_id_.find(payload_id);
+            if (ec || accounted == cold_payload_bytes_by_id_.end() || accounted->second != file_bytes ||
+                    !cold_store.read(payload_id, target, draft, header) || header.payload_id != payload_id ||
+                    header.pair_state != static_cast<uint8_t>(descriptor.pair_state) ||
+                    header.format_version != descriptor.format_version ||
+                    header.target_size_bytes != descriptor.target_size_bytes ||
+                    header.draft_size_bytes != descriptor.draft_size_bytes ||
+                    header.target_checksum != descriptor.target_checksum ||
+                    header.draft_checksum != descriptor.draft_checksum ||
+                    target.size() != descriptor.target_size_bytes || draft.size() != descriptor.draft_size_bytes) {
+                error = "proof_integrity_error";
+                return json();
+            }
+            row["serialized_cold_bytes"] = file_bytes;
+        } else {
+            error = "proof_integrity_error";
+            return json();
+        }
+        rows.push_back(std::move(row));
+    }
+    json body = {
+        {"process_identity", stage39_process_identity_locked()},
+        {"snapshot_generation", cache_generation_},
+        {"rows", std::move(rows)},
+    };
+    body["proof_token"] = stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_,
+        std::string("llama-stage39-runtime-proof-v1\n") + body.dump());
+    return body;
+}
+
+bool hybrid_cache_controller::stage39_prepared_abort_locked() const {
+    return stage39_prepared_session_.active && !stage39_prepared_session_.error.empty();
+}
+
+void hybrid_cache_controller::stage39_latch_prepared_abort_locked(const char * error, const char * mismatch) {
+    if (!stage39_prepared_session_.active || !stage39_prepared_session_.error.empty()) {
+        return;
+    }
+    stage39_prepared_session_.error = error;
+    stage39_prepared_session_.mismatch_flags.push_back(mismatch);
+}
+
+bool hybrid_cache_controller::stage39_capture_prepared_locked(
+        const payload_descriptor & descriptor,
+        const hot_payload_record & record,
+        const prepared_cold_object & prepared) {
+    auto & session = stage39_prepared_session_;
+    if (!session.active) {
+        return true;
+    }
+    const size_t index = session.records.size();
+    if (index >= session.expectations.size()) {
+        stage39_latch_prepared_abort_locked("prepared_binding_mismatch", "unexpected_record");
+        return false;
+    }
+    const auto & expected = session.expectations[index];
+    const uint64_t step = index + 1;
+    const bool runtime_has_draft = ctx_dft != nullptr;
+    std::error_code ec;
+    const uint64_t file_bytes = fs::file_size(prepared.staging_path, ec);
+    const bool fields_match = !ec && expected.pressure_step == step &&
+        session.expected_step == step && cache_generation_ == session.expected_generation &&
+        expected.payload_id == descriptor.payload_id && expected.owner_entry_id == descriptor.owner_entry_id &&
+        expected.payload_kind == payload_kind_name(descriptor.kind) &&
+        expected.pair_state == payload_pair_state_name(descriptor.pair_state) &&
+        expected.runtime_has_draft == runtime_has_draft &&
+        expected.target_size_bytes == descriptor.target_size_bytes &&
+        expected.draft_size_bytes == descriptor.draft_size_bytes &&
+        expected.target_checksum == descriptor.target_checksum &&
+        expected.draft_checksum == descriptor.draft_checksum &&
+        record.target.size() == descriptor.target_size_bytes && record.draft.size() == descriptor.draft_size_bytes &&
+        payload_checksum(record.target) == descriptor.target_checksum &&
+        (!record.draft.empty() ? payload_checksum(record.draft) : 0) == descriptor.draft_checksum &&
+        prepared.exact_bytes == file_bytes;
+    if (!fields_match) {
+        stage39_latch_prepared_abort_locked("prepared_binding_mismatch", "binding_or_file");
+        return false;
+    }
+    session.records.push_back({expected, session.expected_generation, cache_generation_,
+        prepared.exact_bytes, file_bytes});
+    if (step == 2) {
+        session.checkpoint_prepared = true;
+    }
+    if ((step == 1 && (session.fault == "step1" || prepared.exact_bytes > static_cast<uint64_t>(cold_budget_bytes))) ||
+            (step == 2 && session.fault == "step2")) {
+        stage39_latch_prepared_abort_locked("prepared_boundary_abort", step == 1 ? "step1" : "step2");
+        return false;
+    }
+    if (step == 2) {
+        const uint64_t exact_bytes = session.records[0].serialized_bytes;
+        const uint64_t checkpoint_bytes = session.records[1].serialized_bytes;
+        if (exact_bytes > UINT64_MAX - checkpoint_bytes || cold_budget_bytes <= 0 ||
+                std::max(exact_bytes, checkpoint_bytes) > static_cast<uint64_t>(cold_budget_bytes) ||
+                static_cast<uint64_t>(cold_budget_bytes) >= exact_bytes + checkpoint_bytes) {
+            stage39_latch_prepared_abort_locked("prepared_size_formula", "serialized_formula");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool hybrid_cache_controller::stage39_midpoint_after_exact_locked(const hybrid_cache_entry & entry) {
+    auto & session = stage39_prepared_session_;
+    if (!session.active || session.records.empty()) {
+        return true;
+    }
+    session.exact_return_generation = cache_generation_;
+    const auto exact = payload_descriptors.find(entry.payload_id);
+    const auto checkpoint = payload_descriptors.find(entry.checkpoint_payload_id);
+    const bool coherent = exact != payload_descriptors.end() && checkpoint != payload_descriptors.end() &&
+        exact->second.residency == payload_residency_state::cold &&
+        checkpoint->second.residency == payload_residency_state::hot &&
+        entry.resident_payload_bytes_cached == checkpoint->second.resident_payload_bytes;
+    if (!coherent || session.fault == "midpoint") {
+        stage39_latch_prepared_abort_locked("prepared_midpoint_abort", coherent ? "injected_midpoint" : "midpoint_state");
+        return false;
+    }
+    session.expected_step = 2;
+    session.expected_generation = cache_generation_;
+    session.checkpoint_attempted = true;
+    return true;
+}
+
+void hybrid_cache_controller::stage39_record_common_sync_locked(const hybrid_cache_entry & entry) {
+    auto & session = stage39_prepared_session_;
+    if (!session.active || session.records.empty()) {
+        return;
+    }
+    session.common_sync_count++;
+    session.common_sync_observed = true;
+    session.common_sync_generation = cache_generation_;
+    const branch_node * node = forest.get_node(entry.branch_node_id);
+    if (!node || session.common_sync_generation <= session.exact_return_generation ||
+            node->exact_blob_payload_id != entry.payload_id ||
+            node->checkpoint_payload_id != entry.checkpoint_payload_id ||
+            node->resident_payload_bytes != entry.resident_payload_bytes_cached) {
+        stage39_latch_prepared_abort_locked("prepared_common_sync_abort", "common_sync_state");
+    }
+}
+
+static json stage39_checkpoint_descriptor_state(const payload_descriptor * descriptor) {
+    if (descriptor == nullptr) {
+        return nullptr;
+    }
+    return {
+        {"payload_id", descriptor->payload_id}, {"owner_entry_id", descriptor->owner_entry_id},
+        {"payload_kind", payload_kind_name(descriptor->kind)},
+        {"residency", payload_residency_name(descriptor->residency)},
+        {"store_ref", descriptor->store_ref.id}, {"target_size_bytes", descriptor->target_size_bytes},
+        {"draft_size_bytes", descriptor->draft_size_bytes}, {"target_checksum", descriptor->target_checksum},
+        {"draft_checksum", descriptor->draft_checksum},
+        {"resident_payload_bytes", descriptor->resident_payload_bytes},
+        {"pair_state", payload_pair_state_name(descriptor->pair_state)},
+    };
+}
+
+static json stage39_checkpoint_cold_file_state(const fs::path & root, uint64_t payload_id) {
+    if (payload_id == 0) {
+        return {{"exists", false}, {"name", ""}, {"bytes", 0}};
+    }
+    std::ostringstream name;
+    name << std::hex << payload_id << ".cold";
+    const fs::path path = root / name.str();
+    std::error_code ec;
+    const bool exists = fs::is_regular_file(path, ec) && !ec;
+    const uint64_t bytes = exists ? fs::file_size(path, ec) : 0;
+    return {{"exists", exists && !ec}, {"name", name.str()}, {"bytes", ec ? 0 : bytes}};
+}
+
+void hybrid_cache_controller::stage39_capture_prepared_baseline_locked(const hybrid_cache_entry & entry) {
+    auto & session = stage39_prepared_session_;
+    if (!session.active) {
+        return;
+    }
+    auto decisions = json::array();
+    for (const auto & item : n_two_layer_decisions_) {
+        const auto & [key, value] = item;
+        decisions.push_back({
+            {"mode", "hybrid"},
+            {"result", two_layer_result_name(std::get<1>(key))},
+            {"reason", two_layer_reason_name(std::get<2>(key))},
+            {"value", value},
+        });
+    }
+    auto transactions = json::array();
+    for (const auto & item : n_cold_transactions_) {
+        const auto & [key, value] = item;
+        transactions.push_back({
+            {"mode", "hybrid"},
+            {"result", cold_transaction_result_name(std::get<1>(key))},
+            {"reason", cold_transaction_reason_name(std::get<2>(key))},
+            {"value", value},
+        });
+    }
+    json diagnostics = json::object();
+    for (const auto & [shape, value] : n_stage10_diagnostics_by_shape) {
+        diagnostics[shape] = value;
+    }
+    size_t lru_memberships = 0;
+    for (const auto & item : lru_index) {
+        if (item.second->entry_id == entry.entry_id) {
+            lru_memberships++;
+        }
+    }
+    const auto checkpoint = payload_descriptors.find(entry.checkpoint_payload_id);
+    session.pre_apply_state = {
+        {"entry_count", entries.size()}, {"node_count", forest.size()},
+        {"lru_memberships", lru_memberships}, {"branch_prune_count", n_cache_branch_prunings},
+        {"cold_eviction_count", n_cold_evictions},
+        {"checkpoint_admission_count", n_checkpoint_admission_successes},
+        {"checkpoint_classification_count", stage39_checkpoint_classification_count_},
+        {"checkpoint_publish_count", stage39_checkpoint_publish_count_},
+        {"checkpoint_commit_count", stage39_checkpoint_commit_count_},
+        {"checkpoint_cold_file_event_count", stage39_checkpoint_cold_file_event_count_},
+        {"checkpoint_descriptor_mutation_count", stage39_checkpoint_descriptor_mutation_count_},
+        {"checkpoint_link_mutation_count", stage39_checkpoint_link_mutation_count_},
+        {"explicit_generation_advance_count", stage39_explicit_generation_advance_count_},
+        {"later_kind_work_count", stage39_later_kind_work_count_},
+        {"post_abort_pressure_count", stage39_post_abort_pressure_count_},
+        {"post_abort_diagnostic_count", stage39_post_abort_diagnostic_count_},
+        {"checkpoint_descriptor", stage39_checkpoint_descriptor_state(
+            checkpoint == payload_descriptors.end() ? nullptr : &checkpoint->second)},
+        {"checkpoint_entry_link", entry.checkpoint_payload_id},
+        {"checkpoint_cold_file", stage39_checkpoint_cold_file_state(
+            cold_store.root_path(), entry.checkpoint_payload_id)},
+        {"decisions", std::move(decisions)}, {"transactions", std::move(transactions)},
+        {"diagnostics", std::move(diagnostics)},
+    };
+
+    const std::string probe = stage39_forbidden_effect_probe_;
+    if (probe == "checkpoint_classification_delta") {
+        stage39_checkpoint_classification_count_++;
+    } else if (probe == "checkpoint_publish_delta") {
+        stage39_checkpoint_publish_count_++;
+    } else if (probe == "checkpoint_commit_delta") {
+        stage39_checkpoint_commit_count_++;
+    } else if (probe == "checkpoint_cold_file_delta") {
+        stage39_checkpoint_cold_file_event_count_++;
+    } else if (probe == "checkpoint_descriptor_mutation_delta") {
+        stage39_checkpoint_descriptor_mutation_count_++;
+    } else if (probe == "checkpoint_link_mutation_delta") {
+        stage39_checkpoint_link_mutation_count_++;
+    } else if (probe == "explicit_generation_advance_delta") {
+        advance_cache_generation_locked();
+        session.expected_generation = cache_generation_;
+    }
+    if (probe != "later_kind_work" && probe != "post_abort_pressure" &&
+            probe != "post_abort_diagnostic") {
+        stage39_forbidden_effect_probe_.clear();
+    }
+}
+
+static uint64_t stage39_metric_value(const json & rows, const json & row) {
+    for (const auto & candidate : rows) {
+        if (candidate.at("mode") == row.at("mode") && candidate.at("result") == row.at("result") &&
+                candidate.at("reason") == row.at("reason")) {
+            return candidate.at("value").get<uint64_t>();
+        }
+    }
+    return 0;
+}
+
+static json stage39_metric_deltas(const json & before, const json & after) {
+    json result = json::array();
+    for (const auto & row : after) {
+        const uint64_t value = row.at("value").get<uint64_t>();
+        const uint64_t old = stage39_metric_value(before, row);
+        if (value > old) {
+            json delta = row;
+            delta["value"] = value - old;
+            result.push_back(std::move(delta));
+        }
+    }
+    return result;
+}
+
+static json stage39_directory_inventory(const fs::path & root, bool staging) {
+    json result = json::array();
+    std::error_code ec;
+    for (const auto & item : fs::directory_iterator(root, ec)) {
+        if (ec || !item.is_regular_file(ec)) {
+            continue;
+        }
+        const std::string name = item.path().filename().string();
+        const bool is_staging = (name.size() >= 8 && name.compare(name.size() - 8, 8, ".prepare") == 0) ||
+            (name.size() >= 4 && name.compare(name.size() - 4, 4, ".tmp") == 0);
+        if (is_staging != staging || (!staging && item.path().extension() != ".cold")) {
+            continue;
+        }
+        result.push_back({{"name", name}, {"bytes", item.file_size(ec)}});
+    }
+    std::sort(result.begin(), result.end(), [](const json & lhs, const json & rhs) {
+        return lhs.at("name").get<std::string>() < rhs.at("name").get<std::string>();
+    });
+    return result;
+}
+
+void hybrid_cache_controller::stage39_finalize_prepared_locked(const hybrid_cache_entry * entry) {
+    auto & session = stage39_prepared_session_;
+    if (!session.active || session.terminal) {
+        return;
+    }
+    session.final_generation = cache_generation_;
+    if (!session.common_sync_observed || session.final_generation < session.common_sync_generation) {
+        stage39_latch_prepared_abort_locked("prepared_terminal_abort", "generation_order");
+    }
+    const uint64_t exact_id = session.expectations.empty() ? 0 : session.expectations[0].payload_id;
+    const uint64_t checkpoint_id = session.expectations.size() < 2 ? 0 : session.expectations[1].payload_id;
+    const auto exact = payload_descriptors.find(exact_id);
+    const auto checkpoint = payload_descriptors.find(checkpoint_id);
+    const branch_node * node = entry == nullptr ? nullptr : forest.get_node(entry->branch_node_id);
+    const bool fault_terminal = !session.error.empty();
+    const bool expected_state = entry != nullptr && node != nullptr && exact != payload_descriptors.end() &&
+        checkpoint != payload_descriptors.end() && exact->second.residency == payload_residency_state::cold &&
+        (fault_terminal ? checkpoint->second.residency == payload_residency_state::hot :
+            checkpoint->second.residency == payload_residency_state::evicted) &&
+        entry->payload_id == exact_id && entry->checkpoint_payload_id == (fault_terminal ? checkpoint_id : 0) &&
+        node->exact_blob_payload_id == entry->payload_id &&
+        node->checkpoint_payload_id == entry->checkpoint_payload_id &&
+        node->resident_payload_bytes == entry->resident_payload_bytes_cached;
+    if (!expected_state) {
+        if (session.error.empty()) {
+            stage39_latch_prepared_abort_locked("prepared_terminal_abort", "terminal_state");
+        } else {
+            session.mismatch_flags.push_back("terminal_state");
+        }
+    }
+
+    auto decisions = json::array();
+    for (const auto & item : n_two_layer_decisions_) {
+        const auto & [key, value] = item;
+        decisions.push_back({{"mode", "hybrid"},
+            {"result", two_layer_result_name(std::get<1>(key))},
+            {"reason", two_layer_reason_name(std::get<2>(key))}, {"value", value}});
+    }
+    auto transactions = json::array();
+    for (const auto & item : n_cold_transactions_) {
+        const auto & [key, value] = item;
+        transactions.push_back({{"mode", "hybrid"},
+            {"result", cold_transaction_result_name(std::get<1>(key))},
+            {"reason", cold_transaction_reason_name(std::get<2>(key))}, {"value", value}});
+    }
+    json diagnostic_deltas = json::object();
+    const json & before_diagnostics = session.pre_apply_state.at("diagnostics");
+    for (const auto & [shape, value] : n_stage10_diagnostics_by_shape) {
+        const uint64_t old = before_diagnostics.value(shape, 0u);
+        if (value > old) {
+            diagnostic_deltas[shape] = value - old;
+        }
+    }
+    size_t lru_memberships = 0;
+    if (entry != nullptr) {
+        for (const auto & item : lru_index) {
+            if (item.second->entry_id == entry->entry_id) {
+                lru_memberships++;
+            }
+        }
+    }
+    const auto exact_accounted = cold_payload_bytes_by_id_.find(exact_id);
+    const uint64_t exact_file_bytes = exact_accounted == cold_payload_bytes_by_id_.end() ? 0 :
+        exact_accounted->second;
+    const uint64_t exact_descriptor_bytes = exact == payload_descriptors.end() ? 0 :
+        exact->second.target_size_bytes + exact->second.draft_size_bytes;
+    const uint64_t checkpoint_component_bytes = checkpoint == payload_descriptors.end() ? 0 :
+        checkpoint->second.target_size_bytes + checkpoint->second.draft_size_bytes;
+    const json decision_deltas = stage39_metric_deltas(session.pre_apply_state.at("decisions"), decisions);
+    const json transaction_deltas = stage39_metric_deltas(session.pre_apply_state.at("transactions"), transactions);
+    const uint64_t later_victim_count = n_cold_evictions -
+        session.pre_apply_state.at("cold_eviction_count").get<uint64_t>();
+    const uint64_t checkpoint_admission_delta = n_checkpoint_admission_successes -
+        session.pre_apply_state.at("checkpoint_admission_count").get<uint64_t>();
+    const auto observed_delta = [&](const char * key, size_t value) {
+        return value - session.pre_apply_state.at(key).get<size_t>();
+    };
+    const uint64_t checkpoint_classification_delta = observed_delta(
+        "checkpoint_classification_count", stage39_checkpoint_classification_count_);
+    const uint64_t checkpoint_publish_delta = observed_delta(
+        "checkpoint_publish_count", stage39_checkpoint_publish_count_);
+    const uint64_t checkpoint_commit_delta = observed_delta(
+        "checkpoint_commit_count", stage39_checkpoint_commit_count_);
+    const uint64_t checkpoint_cold_file_events = observed_delta(
+        "checkpoint_cold_file_event_count", stage39_checkpoint_cold_file_event_count_);
+    const uint64_t checkpoint_descriptor_events = observed_delta(
+        "checkpoint_descriptor_mutation_count", stage39_checkpoint_descriptor_mutation_count_);
+    const uint64_t checkpoint_link_events = observed_delta(
+        "checkpoint_link_mutation_count", stage39_checkpoint_link_mutation_count_);
+    const uint64_t explicit_generation_advance_delta = observed_delta(
+        "explicit_generation_advance_count", stage39_explicit_generation_advance_count_);
+    const uint64_t later_kind_work_delta = observed_delta(
+        "later_kind_work_count", stage39_later_kind_work_count_);
+    const uint64_t post_abort_pressure_delta = observed_delta(
+        "post_abort_pressure_count", stage39_post_abort_pressure_count_);
+    const uint64_t post_abort_diagnostic_delta = observed_delta(
+        "post_abort_diagnostic_count", stage39_post_abort_diagnostic_count_);
+    const uint64_t later_work_delta = later_kind_work_delta +
+        post_abort_pressure_delta + post_abort_diagnostic_delta;
+    const json checkpoint_descriptor_before = session.pre_apply_state.at("checkpoint_descriptor");
+    const json checkpoint_descriptor_after = stage39_checkpoint_descriptor_state(
+        checkpoint == payload_descriptors.end() ? nullptr : &checkpoint->second);
+    const json checkpoint_cold_file_before = session.pre_apply_state.at("checkpoint_cold_file");
+    const json checkpoint_cold_file_after = stage39_checkpoint_cold_file_state(cold_store.root_path(), checkpoint_id);
+    const uint64_t checkpoint_link_before = session.pre_apply_state.at("checkpoint_entry_link").get<uint64_t>();
+    const uint64_t checkpoint_link_after = entry == nullptr ? 0 : entry->checkpoint_payload_id;
+    const auto signed_delta = [&](size_t current, const char * key) {
+        return static_cast<int64_t>(current) -
+            static_cast<int64_t>(session.pre_apply_state.at(key).get<size_t>());
+    };
+    const uint64_t checkpoint_cold_file_delta = std::max<uint64_t>(checkpoint_cold_file_events,
+        checkpoint_cold_file_before == checkpoint_cold_file_after ? 0 : 1);
+    const uint64_t checkpoint_descriptor_mutation_delta = std::max<uint64_t>(checkpoint_descriptor_events,
+        checkpoint_descriptor_before == checkpoint_descriptor_after ? 0 : 1);
+    const uint64_t checkpoint_link_mutation_delta = std::max<uint64_t>(checkpoint_link_events,
+        checkpoint_link_before == checkpoint_link_after ? 0 : 1);
+    json active_reference_entries = json::array();
+    for (const auto & candidate : entries) {
+        const uint64_t refs = candidate.branch_node_id == 0 ? 0 : forest.slot_ref_count(candidate.branch_node_id);
+        if (refs == 0 || candidate.resident_payload_bytes_cached == 0) {
+            continue;
+        }
+        active_reference_entries.push_back({
+            {"entry_id", candidate.entry_id}, {"slot_reference_count", refs},
+            {"resident_bytes", candidate.resident_payload_bytes_cached},
+            {"exact_link", candidate.payload_id}, {"checkpoint_link", candidate.checkpoint_payload_id},
+        });
+    }
+    json terminal_state = {
+        {"entry", {{"entry_id", entry == nullptr ? 0 : entry->entry_id},
+            {"exact_link", entry == nullptr ? 0 : entry->payload_id},
+            {"checkpoint_link", entry == nullptr ? 0 : entry->checkpoint_payload_id},
+            {"resident_bytes", entry == nullptr ? 0 : entry->resident_payload_bytes_cached},
+            {"has_target", entry != nullptr && entry->has_target_payload_cached},
+            {"has_draft", entry != nullptr && entry->has_draft_payload_cached}}},
+        {"branch", {{"branch_id", node == nullptr ? 0 : node->node_id},
+            {"exact_link", node == nullptr ? 0 : node->exact_blob_payload_id},
+            {"checkpoint_link", node == nullptr ? 0 : node->checkpoint_payload_id},
+            {"resident_bytes", node == nullptr ? 0 : node->resident_payload_bytes},
+            {"has_target", node != nullptr && node->has_target_payload},
+            {"has_draft", node != nullptr && node->has_draft_payload},
+            {"sync_count", session.common_sync_count}}},
+        {"exact_descriptor", {{"payload_id", exact_id},
+            {"residency", exact == payload_descriptors.end() ? "missing" : payload_residency_name(exact->second.residency)},
+            {"cold_file_bytes", exact_file_bytes}, {"descriptor_bytes", exact_descriptor_bytes},
+            {"byte_map_bytes", exact_file_bytes}}},
+        {"checkpoint_descriptor", {{"payload_id", checkpoint_id},
+            {"residency", checkpoint == payload_descriptors.end() ? "missing" : payload_residency_name(checkpoint->second.residency)},
+            {"resident_component_bytes", checkpoint_component_bytes}}},
+        {"cold_inventory", stage39_directory_inventory(cold_store.root_path(), false)},
+        {"staging_inventory", stage39_directory_inventory(cold_store.root_path(), true)},
+        {"resident_accounting", {{"total_resident_bytes", calculate_resident_payload_bytes()},
+            {"hot_budget_bytes", limit_size}, {"active_reference_entries", std::move(active_reference_entries)}}},
+        {"topology", {{"entry_count", entries.size()}, {"node_count", forest.size()},
+            {"lru_memberships", lru_memberships}, {"branch_prune_count", n_cache_branch_prunings},
+            {"entry_count_delta", signed_delta(entries.size(), "entry_count")},
+            {"node_count_delta", signed_delta(forest.size(), "node_count")},
+            {"lru_membership_delta", signed_delta(lru_memberships, "lru_memberships")},
+            {"branch_prune_delta", signed_delta(n_cache_branch_prunings, "branch_prune_count")},
+            {"later_victim_count", later_victim_count}}},
+        {"decision_deltas", decision_deltas}, {"transaction_deltas", transaction_deltas},
+        {"diagnostic_deltas", diagnostic_deltas},
+        {"forbidden_observations", {
+            {"checkpoint_cold_file", {{"before", checkpoint_cold_file_before},
+                {"after", checkpoint_cold_file_after}, {"event_delta", checkpoint_cold_file_events}}},
+            {"checkpoint_descriptor", {{"before", checkpoint_descriptor_before},
+                {"after", checkpoint_descriptor_after}, {"event_delta", checkpoint_descriptor_events}}},
+            {"checkpoint_link", {{"before", checkpoint_link_before}, {"after", checkpoint_link_after},
+                {"event_delta", checkpoint_link_events}}}}},
+        {"forbidden_effects", {{"checkpoint_classification_delta", checkpoint_classification_delta},
+            {"checkpoint_admission_delta", checkpoint_admission_delta},
+            {"checkpoint_publish_delta", checkpoint_publish_delta},
+            {"checkpoint_commit_delta", checkpoint_commit_delta},
+            {"checkpoint_cold_file_delta", checkpoint_cold_file_delta},
+            {"checkpoint_descriptor_mutation_delta", checkpoint_descriptor_mutation_delta},
+            {"checkpoint_link_mutation_delta", checkpoint_link_mutation_delta},
+            {"checkpoint_decision_delta", 0}, {"checkpoint_diagnostic_delta", diagnostic_deltas.size()},
+            {"later_kind_work_delta", later_kind_work_delta},
+            {"post_abort_pressure_delta", post_abort_pressure_delta},
+            {"post_abort_diagnostic_delta", post_abort_diagnostic_delta},
+            {"later_work_delta", later_work_delta},
+            {"later_victim_delta", later_victim_count},
+            {"explicit_generation_advance_delta", explicit_generation_advance_delta},
+            {"duplicate_sync_delta", session.common_sync_count > 1 ? session.common_sync_count - 1 : 0},
+            {"success_snapshot_count", 0}, {"failed_apply_count", 1}}},
+    };
+    json records = json::array();
+    for (const auto & record : session.records) {
+        records.push_back({
+            {"workload_role", record.binding.workload_role}, {"request_number", record.binding.request_number},
+            {"pressure_step", record.binding.pressure_step}, {"payload_id", record.binding.payload_id},
+            {"owner_entry_id", record.binding.owner_entry_id}, {"payload_kind", record.binding.payload_kind},
+            {"pair_state", record.binding.pair_state}, {"runtime_has_draft", record.binding.runtime_has_draft},
+            {"target_size_bytes", record.binding.target_size_bytes},
+            {"draft_size_bytes", record.binding.draft_size_bytes},
+            {"target_checksum", record.binding.target_checksum}, {"draft_checksum", record.binding.draft_checksum},
+            {"expected_generation", record.expected_generation}, {"observed_generation", record.observed_generation},
+            {"serialized_bytes", record.serialized_bytes}, {"staging_file_bytes", record.staging_file_bytes},
+        });
+    }
+    session.success = session.error.empty();
+    session.terminal = true;
+    session.terminal_body = {
+        {"status", session.success ? "success" : "failed"}, {"process_identity", session.process_identity},
+        {"test_session_id", session.test_session_id}, {"run_id", session.run_id},
+        {"discovery_generation", session.discovery_generation},
+        {"post_setup_generation", session.post_setup_generation},
+        {"exact_return_generation", session.exact_return_generation},
+        {"common_sync_generation", session.common_sync_generation}, {"final_generation", session.final_generation},
+        {"fault", session.fault}, {"error", session.error}, {"mismatch_flags", session.mismatch_flags},
+        {"checkpoint_attempted", session.checkpoint_attempted},
+        {"checkpoint_prepared", session.checkpoint_prepared}, {"common_sync_observed", session.common_sync_observed},
+        {"records", std::move(records)}, {"terminal_state", std::move(terminal_state)},
+    };
+    session.terminal_hmac = stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_,
+        std::string("llama-stage39-terminal-proof-v1\n") + session.terminal_body.dump());
+    session.terminal_body["terminal_hmac"] = session.terminal_hmac;
+}
+
+stage39_live_pressure_result hybrid_cache_controller::stage39_retrieve_prepared_locked(
+        const stage39_live_pressure_request & request) {
+    stage39_live_pressure_result result;
+    auto & session = stage39_prepared_session_;
+    if (!session.active || !session.terminal || request.process_identity != session.process_identity ||
+            request.test_session_id != session.test_session_id || request.run_id != session.run_id ||
+            request.terminal_hmac != session.terminal_hmac || cache_generation_ != session.final_generation) {
+        result.error = "stale_prepared_proof";
+        return result;
+    }
+    json authenticated = session.terminal_body;
+    authenticated.erase("terminal_hmac");
+    const std::string expected_hmac = stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_,
+        std::string("llama-stage39-terminal-proof-v1\n") + authenticated.dump());
+    if (!stage39_crypto::constant_time_equal(expected_hmac, request.terminal_hmac)) {
+        result.error = "stale_prepared_proof";
+        return result;
+    }
+    result.success = true;
+    result.consumed = true;
+    result.body = session.terminal_body;
+    return result;
+}
+
+static json stage39_row_to_json(const stage39_live_pressure_inventory_row & row) {
+    return {
+        {"payload_id", row.payload_id}, {"owner_entry_id", row.owner_entry_id},
+        {"payload_kind", row.payload_kind}, {"pair_state", row.pair_state},
+        {"residency", row.residency}, {"protected_root", row.protected_root},
+        {"slot_reference_count", row.slot_reference_count}, {"resident_bytes", row.resident_bytes},
+        {"serialized_cold_bytes", row.has_serialized_cold_bytes ? json(row.serialized_cold_bytes) : json(nullptr)},
+        {"hot_order", row.hot_order}, {"cold_rank", row.cold_rank}, {"eligible", row.eligible},
+    };
+}
+
+stage39_live_pressure_result hybrid_cache_controller::stage39_live_pressure_control(
+    const stage39_live_pressure_request & request) {
+    std::lock_guard<std::recursive_mutex> lock(cache_state_mutex_);
+    stage39_live_pressure_result result;
+    result.consumed = stage39_live_pressure_consumed_;
+    std::string integrity_error;
+    json current = stage39_build_snapshot_locked(integrity_error);
+    if (!integrity_error.empty()) { result.error = integrity_error; return result; }
+    if (request.operation == "discover") {
+        current["snapshot_token"] = stage39_snapshot_token_locked(current);
+        result.success = true;
+        result.body = std::move(current);
+        return result;
+    }
+    if (request.operation == "proof") {
+        if (request.snapshot_generation != cache_generation_ ||
+                !stage39_crypto::constant_time_equal(request.snapshot_token, stage39_snapshot_token_locked(current))) {
+            result.error = "stale_snapshot";
+            return result;
+        }
+        result.body = stage39_build_runtime_proof_locked(request.proof_payload_ids, result.error);
+        result.success = result.error.empty();
+        return result;
+    }
+    if (request.operation == "prepared_proof") {
+        return stage39_retrieve_prepared_locked(request);
+    }
+    if (request.operation != "apply") { result.error = "invalid_operation"; return result; }
+    if (stage39_live_pressure_consumed_) { result.error = "consumed"; return result; }
+    if (request.scenario != "tp39-02" && request.scenario != "tp39-03" && request.scenario != "tp39-04") {
+        result.error = "invalid_scenario"; return result;
+    }
+    const bool tp39_03_owner_move = !request.tp39_03_cold_owner_setup.empty();
+    const bool tp39_03_natural = !request.tp39_03_setup.empty();
+    if ((request.scenario == "tp39-03") != (tp39_03_owner_move || tp39_03_natural) ||
+            (tp39_03_owner_move && tp39_03_natural)) {
+        result.error = "invalid_tp39_03_owner_reassignment"; return result;
+    }
+    if (request.hot_budget_bytes == 0 || request.cold_budget_bytes == 0 || limit_size_unlimited ||
+            request.hot_budget_bytes >= limit_size || cold_budget_bytes <= 0 ||
+            request.cold_budget_bytes >= static_cast<uint64_t>(cold_budget_bytes)) {
+        result.error = "invalid_budgets"; return result;
+    }
+    if (request.snapshot_generation != cache_generation_ ||
+            !stage39_crypto::constant_time_equal(request.snapshot_token, stage39_snapshot_token_locked(current))) {
+        result.error = "stale_snapshot"; return result;
+    }
+    json requested_hot = json::array();
+    for (const auto & row : request.hot_candidates) requested_hot.push_back(stage39_row_to_json(row));
+    json requested_cold = json::array();
+    for (const auto & set : request.cold_sets) {
+        json candidates = json::array();
+        for (const auto & row : set.candidates) candidates.push_back(stage39_row_to_json(row));
+        requested_cold.push_back({{"incoming_payload_id", set.incoming_payload_id},
+            {"incoming_owner_entry_id", set.incoming_owner_entry_id}, {"candidates", std::move(candidates)}});
+    }
+    if (requested_hot != current.at("hot_candidates") || requested_cold != current.at("cold_sets")) {
+        result.error = "stale_snapshot"; return result;
+    }
+    const auto incoming = std::find_if(request.hot_candidates.begin(), request.hot_candidates.end(), [&](const auto & row) {
+        return row.payload_id == request.incoming_payload_id && row.owner_entry_id == request.incoming_owner_entry_id;
+    });
+    if (incoming == request.hot_candidates.end()) { result.error = "invalid_incoming"; return result; }
+
+    json runtime_proof;
+    if (tp39_03_natural) {
+        if (request.tp39_03_setup != "same_owner_kind_sequence" || request.run_id.empty() || request.run_id.size() > 64 ||
+                std::any_of(request.run_id.begin(), request.run_id.end(), [](unsigned char ch) {
+                    return !(std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.');
+                }) || request.prepared_bindings.size() != 2 || request.process_identity.empty() ||
+                request.proof_token.size() != 64 || (request.fault != "none" && request.fault != "step1" &&
+                    request.fault != "midpoint" && request.fault != "step2")) {
+            result.error = "invalid_prepared_proof_setup";
+            return result;
+        }
+        std::vector<uint64_t> proof_ids;
+        for (const auto & binding : request.prepared_bindings) proof_ids.push_back(binding.payload_id);
+        std::string proof_error;
+        runtime_proof = stage39_build_runtime_proof_locked(proof_ids, proof_error);
+        if (!proof_error.empty() || runtime_proof.at("process_identity") != request.process_identity ||
+                !stage39_crypto::constant_time_equal(runtime_proof.at("proof_token").get<std::string>(), request.proof_token)) {
+            result.error = "invalid_prepared_proof_setup";
+            return result;
+        }
+        const auto & rows = runtime_proof.at("rows");
+        if (rows.size() != 2) {
+            result.error = "invalid_prepared_proof_setup";
+            return result;
+        }
+        for (size_t i = 0; i < 2; ++i) {
+            const auto & binding = request.prepared_bindings[i];
+            const auto & row = rows[i];
+            const char * expected_kind = i == 0 ? "exact_blob" : "checkpoint";
+            if (binding.workload_role != "canonical_same_owner" || binding.request_number == 0 ||
+                    binding.pressure_step != i + 1 || binding.payload_kind != expected_kind ||
+                    binding.payload_id != row.at("payload_id").get<uint64_t>() ||
+                    binding.owner_entry_id != request.incoming_owner_entry_id ||
+                    binding.owner_entry_id != row.at("owner_entry_id").get<uint64_t>() ||
+                    binding.pair_state != row.at("pair_state").get<std::string>() ||
+                    binding.runtime_has_draft != row.at("runtime_has_draft").get<bool>() ||
+                    !row.at("runtime_pair_matches").get<bool>() ||
+                    binding.target_size_bytes != row.at("target_size_bytes").get<uint64_t>() ||
+                    binding.draft_size_bytes != row.at("draft_size_bytes").get<uint64_t>() ||
+                    binding.target_checksum != row.at("target_checksum").get<uint64_t>() ||
+                    binding.draft_checksum != row.at("draft_checksum").get<uint64_t>() ||
+                    row.at("residency") != "hot") {
+                result.error = "invalid_prepared_proof_setup";
+                return result;
+            }
+        }
+    }
+
+    std::unordered_set<uint64_t> hot_owners;
+    std::unordered_set<uint64_t> hot_orders;
+    for (const auto & setup : request.desired_hot_orders) {
+        if (setup.owner_entry_id == 0 || setup.desired_hot_order == 0 ||
+                !hot_owners.insert(setup.owner_entry_id).second ||
+                !hot_orders.insert(setup.desired_hot_order).second) {
+            result.error = "invalid_hot_order_setup"; return result;
+        }
+    }
+    if (hot_owners.size() != request.hot_candidates.size() ||
+            std::any_of(request.hot_candidates.begin(), request.hot_candidates.end(), [&](const auto & row) {
+                return !hot_owners.count(row.owner_entry_id);
+            })) {
+        result.error = "invalid_hot_order_setup"; return result;
+    }
+    const auto selected_cold = std::find_if(request.cold_sets.begin(), request.cold_sets.end(), [&](const auto & set) {
+        return set.incoming_payload_id == request.incoming_payload_id &&
+            set.incoming_owner_entry_id == request.incoming_owner_entry_id;
+    });
+    if (selected_cold == request.cold_sets.end()) { result.error = "invalid_incoming"; return result; }
+    std::unordered_set<uint64_t> cold_payloads;
+    for (const auto & setup : request.desired_cold_ranks) {
+        if (setup.payload_id == 0 || setup.desired_cold_rank == 0 ||
+                !cold_payloads.insert(setup.payload_id).second) {
+            result.error = "invalid_cold_rank_setup"; return result;
+        }
+    }
+    if (request.scenario != "tp39-03" && (cold_payloads.size() != selected_cold->candidates.size() ||
+            std::any_of(selected_cold->candidates.begin(), selected_cold->candidates.end(), [&](const auto & row) {
+                return !cold_payloads.count(row.payload_id);
+            }))) {
+        result.error = "invalid_cold_rank_setup"; return result;
+    }
+
+    struct stage39_owner_move {
+        uint64_t payload_id;
+        payload_kind kind;
+        std::list<hybrid_cache_entry>::iterator source;
+        std::list<hybrid_cache_entry>::iterator destination;
+    };
+    std::vector<stage39_owner_move> owner_moves;
+    json owner_rows_before = json::array();
+    if (tp39_03_owner_move) {
+        const auto invalid_owner_setup = [&]() {
+            result.error = "invalid_tp39_03_owner_reassignment";
+        };
+        std::unordered_set<uint64_t> candidate_ids;
+        std::unordered_set<int> candidate_kinds;
+        auto destination = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+            return entry.entry_id == request.incoming_owner_entry_id;
+        });
+        if (destination == entries.end() || destination->branch_node_id == 0 ||
+                forest.get_node(destination->branch_node_id) == nullptr ||
+                forest.slot_ref_count(destination->branch_node_id) != 0) {
+            invalid_owner_setup();
+            return result;
+        }
+        for (const auto & row : selected_cold->candidates) {
+            auto descriptor_it = payload_descriptors.find(row.payload_id);
+            if (row.payload_id == 0 || !candidate_ids.insert(row.payload_id).second ||
+                    descriptor_it == payload_descriptors.end()) {
+                invalid_owner_setup(); return result;
+            }
+            payload_descriptor & descriptor = descriptor_it->second;
+            const int kind_key = static_cast<int>(descriptor.kind);
+            if (!candidate_kinds.insert(kind_key).second ||
+                    (descriptor.kind != payload_kind::exact_blob && descriptor.kind != payload_kind::checkpoint) ||
+                    descriptor.owner_entry_id != row.owner_entry_id ||
+                    descriptor.residency != payload_residency_state::cold ||
+                    descriptor.payload_id != row.payload_id || descriptor.store_ref.id != row.payload_id ||
+                    descriptor.format_version != COLD_STORE_FORMAT_VERSION_1 ||
+                    cold_payload_bytes_by_id_.find(row.payload_id) == cold_payload_bytes_by_id_.end()) {
+                invalid_owner_setup(); return result;
+            }
+            auto source = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+                return entry.entry_id == descriptor.owner_entry_id;
+            });
+            if (source == entries.end() || source == destination || source->branch_node_id == 0 ||
+                    forest.get_node(source->branch_node_id) == nullptr ||
+                    forest.slot_ref_count(source->branch_node_id) != 0 ||
+                    entry_payload_id_for_kind(*source, descriptor.kind) != descriptor.payload_id ||
+                    entry_payload_id_for_kind(*destination, descriptor.kind) != 0) {
+                invalid_owner_setup(); return result;
+            }
+            const branch_node * source_node = forest.get_node(source->branch_node_id);
+            const branch_node * destination_node = forest.get_node(destination->branch_node_id);
+            const auto node_link = [&](const branch_node & node) {
+                return descriptor.kind == payload_kind::checkpoint ?
+                    node.checkpoint_payload_id : node.exact_blob_payload_id;
+            };
+            if (node_link(*source_node) != descriptor.payload_id || node_link(*destination_node) != 0 ||
+                    source->namespace_id.empty() || source->namespace_id != destination->namespace_id ||
+                    source->metadata.compatibility_key.empty() ||
+                    source->metadata.compatibility_key != destination->metadata.compatibility_key ||
+                    source->metadata.preparation_id.empty() ||
+                    source->metadata.preparation_id != destination->metadata.preparation_id ||
+                    descriptor.token_span_start < 0 || descriptor.token_span_end <= descriptor.token_span_start ||
+                    descriptor.token_span_end > source->n_tokens() || descriptor.token_span_end > destination->n_tokens() ||
+                    descriptor.position_end < descriptor.position_start) {
+                invalid_owner_setup(); return result;
+            }
+            for (int64_t token = descriptor.token_span_start; token < descriptor.token_span_end; ++token) {
+                if (source->tokens[static_cast<size_t>(token)] != destination->tokens[static_cast<size_t>(token)]) {
+                    invalid_owner_setup(); return result;
+                }
+            }
+            const bool runtime_has_draft = ctx_dft != nullptr;
+            bool pair_matches_runtime = descriptor.pair_state == (runtime_has_draft ?
+                payload_pair_state::target_and_draft : payload_pair_state::target_only);
+#ifdef LLAMA_SERVER_CACHE_TESTS
+            if (ctx_tgt == nullptr) pair_matches_runtime = true;
+#endif
+            std::vector<uint8_t> cold_target;
+            std::vector<uint8_t> cold_draft;
+            cold_descriptor_snapshot cold_descriptor;
+            if (!pair_matches_runtime || descriptor.target_size_bytes == 0 ||
+                    !cold_store.read(descriptor.store_ref.id, cold_target, cold_draft, cold_descriptor) ||
+                    cold_descriptor.payload_id != descriptor.payload_id ||
+                    cold_descriptor.pair_state != static_cast<uint8_t>(descriptor.pair_state) ||
+                    cold_descriptor.format_version != descriptor.format_version ||
+                    cold_descriptor.target_size_bytes != descriptor.target_size_bytes ||
+                    cold_descriptor.draft_size_bytes != descriptor.draft_size_bytes ||
+                    cold_descriptor.target_checksum != descriptor.target_checksum ||
+                    cold_descriptor.draft_checksum != descriptor.draft_checksum ||
+                    cold_target.size() != descriptor.target_size_bytes || cold_draft.size() != descriptor.draft_size_bytes) {
+                invalid_owner_setup(); return result;
+            }
+            if (descriptor.kind == payload_kind::checkpoint) {
+                std::string checkpoint_error;
+                if (descriptor.workload_profile.empty() ||
+                        descriptor.workload_profile == cache_workload_profile_name(cache_workload_profile::unsupported) ||
+                        descriptor.checkpoint_boundary_native != destination->metadata.boundaries_native ||
+                        cache_token_span_checksum(destination->tokens,
+                            static_cast<size_t>(descriptor.token_span_start),
+                            static_cast<size_t>(descriptor.token_span_end)) != descriptor.boundary_checksum ||
+                        !validate_checkpoint_descriptor_metadata(*destination, descriptor,
+                            &destination->metadata, &checkpoint_error)) {
+                    invalid_owner_setup(); return result;
+                }
+            }
+            owner_moves.push_back({descriptor.payload_id, descriptor.kind, source, destination});
+            owner_rows_before.push_back({
+                {"payload_id", descriptor.payload_id}, {"kind", payload_kind_name(descriptor.kind)},
+                {"source_owner", source->entry_id}, {"current_owner", source->entry_id},
+                {"link_id", entry_payload_id_for_kind(*source, descriptor.kind)},
+            });
+        }
+        if (owner_moves.size() != selected_cold->candidates.size()) {
+            invalid_owner_setup(); return result;
+        }
+    }
+    if (request.scenario == "tp39-02") {
+        if (selected_cold->candidates.size() < 2 || request.desired_cold_ranks.empty() ||
+                std::any_of(request.desired_cold_ranks.begin(), request.desired_cold_ranks.end(), [&](const auto & rank) {
+                    return rank.desired_cold_rank != request.desired_cold_ranks.front().desired_cold_rank;
+                })) {
+            result.error = "invalid_tp39_02_setup"; return result;
+        }
+    } else if (tp39_03_owner_move) {
+        const auto incoming_order = std::find_if(request.desired_hot_orders.begin(), request.desired_hot_orders.end(),
+            [&](const auto & order) { return order.owner_entry_id == request.incoming_owner_entry_id; });
+        if (request.tp39_03_cold_owner_setup != "selected_incoming_owner" ||
+                selected_cold->candidates.empty() || !request.desired_cold_ranks.empty() ||
+                incoming_order == request.desired_hot_orders.end() ||
+                std::any_of(request.desired_hot_orders.begin(), request.desired_hot_orders.end(),
+                    [&](const auto & order) { return order.desired_hot_order < incoming_order->desired_hot_order; }) ||
+                incoming->resident_bytes > request.hot_budget_bytes ||
+                calculate_resident_payload_bytes() <= request.hot_budget_bytes ||
+                n_cold_payload_bytes > request.cold_budget_bytes ||
+                incoming->resident_bytes > UINT64_MAX - n_cold_payload_bytes ||
+                n_cold_payload_bytes + incoming->resident_bytes <= request.cold_budget_bytes) {
+            result.error = "invalid_tp39_03_setup"; return result;
+        }
+    } else if (tp39_03_natural) {
+        const auto & exact = request.prepared_bindings[0];
+        const auto & checkpoint = request.prepared_bindings[1];
+        if (request.hot_candidates.size() != 1 || !selected_cold->candidates.empty() ||
+                !request.desired_cold_ranks.empty() || request.desired_hot_orders.size() != 1 ||
+                request.desired_hot_orders.front().owner_entry_id != request.incoming_owner_entry_id ||
+                n_cold_payload_bytes != 0 || exact.owner_entry_id != checkpoint.owner_entry_id ||
+                exact.target_size_bytes > UINT64_MAX - exact.draft_size_bytes ||
+                checkpoint.target_size_bytes > UINT64_MAX - checkpoint.draft_size_bytes) {
+            result.error = "invalid_tp39_03_setup";
+            return result;
+        }
+        const uint64_t exact_resident = exact.target_size_bytes + exact.draft_size_bytes;
+        const uint64_t checkpoint_resident = checkpoint.target_size_bytes + checkpoint.draft_size_bytes;
+        if (exact_resident > UINT64_MAX - checkpoint_resident || exact_resident > request.hot_budget_bytes ||
+                request.hot_budget_bytes >= exact_resident + checkpoint_resident) {
+            result.error = "invalid_tp39_03_setup";
+            return result;
+        }
+    } else if (incoming->resident_bytes <= request.hot_budget_bytes ||
+            incoming->resident_bytes <= request.cold_budget_bytes) {
+        result.error = "invalid_tp39_04_setup"; return result;
+    }
+
+    const uint64_t before_generation = cache_generation_;
+    const json before = current;
+    struct stage39_entry_owner_journal {
+        std::list<hybrid_cache_entry>::iterator entry;
+        uint64_t payload_id;
+        uint64_t checkpoint_payload_id;
+        size_t resident_payload_bytes;
+        bool has_target;
+        bool has_draft;
+        branch_node node;
+    };
+    struct stage39_descriptor_owner_journal {
+        uint64_t payload_id;
+        uint64_t owner_entry_id;
+    };
+    std::vector<stage39_entry_owner_journal> owner_entry_journal;
+    std::vector<stage39_descriptor_owner_journal> owner_descriptor_journal;
+    if (tp39_03_owner_move) {
+        std::unordered_set<uint64_t> saved_entries;
+        for (const auto & move : owner_moves) {
+            owner_descriptor_journal.push_back({move.payload_id, payload_descriptors.at(move.payload_id).owner_entry_id});
+            for (auto entry : {move.source, move.destination}) {
+                if (!saved_entries.insert(entry->entry_id).second) continue;
+                owner_entry_journal.push_back({entry, entry->payload_id, entry->checkpoint_payload_id,
+                    entry->resident_payload_bytes_cached, entry->has_target_payload_cached,
+                    entry->has_draft_payload_cached, *forest.get_node(entry->branch_node_id)});
+            }
+        }
+    }
+    std::vector<std::pair<uint64_t, uint64_t>> old_hot_orders;
+    std::vector<std::pair<uint64_t, uint64_t>> old_cold_ranks;
+    for (const auto & setup : request.desired_hot_orders) {
+        const auto owner = std::find_if(entries.begin(), entries.end(), [&](const auto & entry) {
+            return entry.entry_id == setup.owner_entry_id;
+        });
+        old_hot_orders.push_back({setup.owner_entry_id, owner->use_sequence});
+    }
+    for (const auto & setup : request.desired_cold_ranks) {
+        old_cold_ranks.push_back({setup.payload_id, payload_descriptors.at(setup.payload_id).last_validated_sequence});
+    }
+    const size_t old_hot_budget = limit_size;
+    const int64_t old_cold_budget = cold_budget_bytes;
+    stage39_live_pressure_consumed_ = true;
+    result.consumed = true;
+    advance_cache_generation_locked();
+    if (tp39_03_natural) {
+        stage39_prepared_session_ = {};
+        stage39_prepared_session_.active = true;
+        stage39_prepared_session_.discovery_generation = request.snapshot_generation;
+        stage39_prepared_session_.process_identity = request.process_identity;
+        stage39_prepared_session_.run_id = request.run_id;
+        stage39_prepared_session_.test_session_id = stage39_crypto::hmac_sha256_hex(stage39_snapshot_nonce_,
+            std::string("llama-stage39-session-v1\n") + request.run_id + "\n" + std::to_string(cache_generation_));
+        stage39_prepared_session_.fault = stage39_requested_fault_.empty() ? request.fault : stage39_requested_fault_;
+        stage39_requested_fault_.clear();
+        stage39_prepared_session_.expectations = request.prepared_bindings;
+    }
+    size_t owner_write_position = 0;
+    const auto owner_write_completed = [&]() {
+        ++owner_write_position;
+        if (stage39_fail_owner_setup_write_for_tests_ == owner_write_position) {
+            stage39_fail_owner_setup_write_for_tests_ = 0;
+            result.error = "terminal_setup_failure";
+            return false;
+        }
+        return true;
+    };
+    if (tp39_03_owner_move) {
+        for (const auto & move : owner_moves) {
+            set_entry_payload_id_for_kind(*move.source, move.kind, 0);
+            if (!owner_write_completed()) break;
+            set_entry_payload_id_for_kind(*move.destination, move.kind, move.payload_id);
+            if (!owner_write_completed()) break;
+            payload_descriptors.at(move.payload_id).owner_entry_id = move.destination->entry_id;
+            advance_cache_generation_locked();
+            if (!owner_write_completed()) break;
+        }
+        if (result.error.empty()) {
+            for (const auto & saved : owner_entry_journal) {
+                refresh_entry_payload_accounting(*saved.entry);
+                if (!owner_write_completed()) break;
+                sync_branch_node_from_entry(*saved.entry);
+                advance_cache_generation_locked();
+                if (!owner_write_completed()) break;
+            }
+        }
+        if (result.error.empty() &&
+                !enumerate_cold_policy_candidates_core(request.incoming_owner_entry_id).empty()) {
+            result.error = "terminal_setup_failure";
+        }
+    }
+    for (const auto & setup : request.desired_hot_orders) {
+        if (!result.error.empty()) break;
+        const auto owner = std::find_if(entries.begin(), entries.end(), [&](const auto & entry) {
+            return entry.entry_id == setup.owner_entry_id;
+        });
+        if (owner == entries.end()) { result.error = "terminal_setup_failure"; break; }
+        if (owner->use_sequence != setup.desired_hot_order) {
+            const lru_key_t old_key{owner->use_sequence, owner->insertion_sequence};
+            owner->use_sequence = setup.desired_hot_order;
+            update_lru_index(owner, old_key);
+            advance_cache_generation_locked();
+            if (stage39_fail_setup_after_first_write_for_tests_) {
+                stage39_fail_setup_after_first_write_for_tests_ = false;
+                result.error = "terminal_setup_failure";
+                break;
+            }
+        }
+    }
+    if (result.error.empty()) {
+        for (const auto & setup : request.desired_cold_ranks) {
+            const auto descriptor = payload_descriptors.find(setup.payload_id);
+            if (descriptor == payload_descriptors.end()) { result.error = "terminal_setup_failure"; break; }
+            if (descriptor->second.last_validated_sequence != setup.desired_cold_rank) {
+                descriptor->second.last_validated_sequence = setup.desired_cold_rank;
+                advance_cache_generation_locked();
+            }
+        }
+    }
+    if (result.error.empty() && limit_size != request.hot_budget_bytes) {
+        limit_size = request.hot_budget_bytes;
+        advance_cache_generation_locked();
+    }
+    if (result.error.empty() && cold_budget_bytes != static_cast<int64_t>(request.cold_budget_bytes)) {
+        cold_budget_bytes = static_cast<int64_t>(request.cold_budget_bytes);
+        advance_cache_generation_locked();
+    }
+    if (!result.error.empty()) {
+        for (const auto & saved : old_hot_orders) {
+            const auto owner = std::find_if(entries.begin(), entries.end(), [&](const auto & entry) {
+                return entry.entry_id == saved.first;
+            });
+            if (owner != entries.end() && owner->use_sequence != saved.second) {
+                const lru_key_t changed_key{owner->use_sequence, owner->insertion_sequence};
+                owner->use_sequence = saved.second;
+                update_lru_index(owner, changed_key);
+                advance_cache_generation_locked();
+            }
+        }
+        for (const auto & saved : old_cold_ranks) {
+            auto descriptor = payload_descriptors.find(saved.first);
+            if (descriptor != payload_descriptors.end() && descriptor->second.last_validated_sequence != saved.second) {
+                descriptor->second.last_validated_sequence = saved.second;
+                advance_cache_generation_locked();
+            }
+        }
+        if (limit_size != old_hot_budget) {
+            limit_size = old_hot_budget;
+            advance_cache_generation_locked();
+        }
+        if (cold_budget_bytes != old_cold_budget) {
+            cold_budget_bytes = old_cold_budget;
+            advance_cache_generation_locked();
+        }
+        for (auto it = owner_descriptor_journal.rbegin(); it != owner_descriptor_journal.rend(); ++it) {
+            auto descriptor = payload_descriptors.find(it->payload_id);
+            if (descriptor == payload_descriptors.end()) {
+                result.error = "terminal_owner_reassignment_rollback_failure";
+                break;
+            }
+            if (descriptor->second.owner_entry_id != it->owner_entry_id) {
+                descriptor->second.owner_entry_id = it->owner_entry_id;
+                advance_cache_generation_locked();
+            }
+        }
+        for (auto it = owner_entry_journal.rbegin(); it != owner_entry_journal.rend(); ++it) {
+            hybrid_cache_entry & entry = *it->entry;
+            if (entry.payload_id != it->payload_id) {
+                entry.payload_id = it->payload_id;
+                advance_cache_generation_locked();
+            }
+            if (entry.checkpoint_payload_id != it->checkpoint_payload_id) {
+                entry.checkpoint_payload_id = it->checkpoint_payload_id;
+                advance_cache_generation_locked();
+            }
+            if (entry.resident_payload_bytes_cached != it->resident_payload_bytes ||
+                    entry.has_target_payload_cached != it->has_target || entry.has_draft_payload_cached != it->has_draft) {
+                entry.resident_payload_bytes_cached = it->resident_payload_bytes;
+                entry.has_target_payload_cached = it->has_target;
+                entry.has_draft_payload_cached = it->has_draft;
+                advance_cache_generation_locked();
+            }
+            branch_node * node = forest.get_node(entry.branch_node_id);
+            if (!node) {
+                result.error = "terminal_owner_reassignment_rollback_failure";
+                break;
+            }
+            *node = it->node;
+            advance_cache_generation_locked();
+        }
+        if (!owner_entry_journal.empty() && result.error != "terminal_owner_reassignment_rollback_failure") {
+            std::string rollback_error;
+            json restored = stage39_build_snapshot_locked(rollback_error);
+            json expected = before;
+            restored.erase("snapshot_generation");
+            expected.erase("snapshot_generation");
+            if (!rollback_error.empty() || restored != expected) {
+                result.error = "terminal_owner_reassignment_rollback_failure";
+            }
+        }
+    } else {
+        if (tp39_03_natural) {
+            stage39_prepared_session_.post_setup_generation = cache_generation_;
+            stage39_prepared_session_.expected_step = 1;
+            stage39_prepared_session_.expected_generation = cache_generation_;
+            const auto terminal_entry = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+                return entry.entry_id == request.incoming_owner_entry_id;
+            });
+            if (terminal_entry != entries.end()) {
+                stage39_capture_prepared_baseline_locked(*terminal_entry);
+            }
+        }
+        result.pressure_started = true;
+        try {
+            tx_update();
+            if (tp39_03_natural) {
+                auto terminal_entry = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+                    return entry.entry_id == request.incoming_owner_entry_id;
+                });
+                const std::string probe = std::exchange(stage39_forbidden_effect_probe_, {});
+                if (probe == "later_kind_work" && terminal_entry != entries.end()) {
+                    mark_payload_kind_evicted(*terminal_entry, payload_kind::checkpoint);
+                } else if (probe == "post_abort_pressure") {
+                    evict_until_within_budget();
+                } else if (probe == "post_abort_diagnostic") {
+                    record_branch_metadata_pressure();
+                }
+                stage39_finalize_prepared_locked(terminal_entry == entries.end() ? nullptr : &*terminal_entry);
+                if (!stage39_prepared_session_.success) {
+                    result.error = stage39_prepared_session_.error;
+                }
+            }
+            const char * fail_after_pressure = std::getenv("LLAMA_STAGE39_LIVE_TEST_FAIL_AFTER_TX_UPDATE");
+            if (fail_after_pressure != nullptr && std::strcmp(fail_after_pressure, "1") == 0) {
+                result.error = "terminal_pressure_failure";
+            }
+        } catch (const std::exception &) {
+            result.error = "terminal_pressure_failure";
+        }
+    }
+    std::string after_error;
+    json after = stage39_build_snapshot_locked(after_error);
+    if (!after_error.empty()) result.error = after_error;
+    json owner_evidence;
+    if (tp39_03_owner_move) {
+        json after_rows = json::array();
+        for (const auto & saved : owner_descriptor_journal) {
+            const auto descriptor = payload_descriptors.find(saved.payload_id);
+            if (descriptor == payload_descriptors.end()) continue;
+            const auto owner = std::find_if(entries.begin(), entries.end(), [&](const hybrid_cache_entry & entry) {
+                return entry.entry_id == descriptor->second.owner_entry_id;
+            });
+            after_rows.push_back({
+                {"payload_id", saved.payload_id}, {"kind", payload_kind_name(descriptor->second.kind)},
+                {"source_owner", saved.owner_entry_id}, {"current_owner", descriptor->second.owner_entry_id},
+                {"link_id", owner == entries.end() ? 0 : entry_payload_id_for_kind(*owner, descriptor->second.kind)},
+            });
+        }
+        owner_evidence = {
+            {"mode", "selected_incoming_owner"}, {"candidate_count", owner_moves.size()},
+            {"applied", result.error.empty()}, {"rolled_back", !result.error.empty()},
+            {"before", owner_rows_before}, {"after", std::move(after_rows)},
+        };
+    }
+    result.body = {
+        {"scenario", request.scenario}, {"consumed", true},
+        {"pressure_completed", result.error.empty()},
+        {"hot_budget_bytes", limit_size}, {"cold_budget_bytes", cold_budget_bytes},
+        {"before_generation", before_generation}, {"after_generation", cache_generation_},
+        {"before", {{"hot_candidates", before.at("hot_candidates")}, {"cold_sets", before.at("cold_sets")}}},
+        {"after", {{"hot_candidates", after.value("hot_candidates", json::array())},
+                     {"cold_sets", after.value("cold_sets", json::array())}}},
+    };
+    if (tp39_03_owner_move) {
+        result.body["tp39_03_owner_reassignment"] = std::move(owner_evidence);
+    }
+    if (tp39_03_natural && stage39_prepared_session_.terminal) {
+        result.body["prepared_proof"] = stage39_prepared_session_.terminal_body;
+        result.body["test_session_id"] = stage39_prepared_session_.test_session_id;
+        result.body["run_id"] = stage39_prepared_session_.run_id;
+    }
+    result.success = result.error.empty();
+    return result;
+}
+#endif
 
 bool hybrid_cache_controller::tx_save(server_slot & slot, const prepared_prompt_metadata & metadata) {
     size_t state_size_tgt = 0;
