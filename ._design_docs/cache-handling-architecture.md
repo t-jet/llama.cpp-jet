@@ -1,23 +1,58 @@
-# Software Architecture: Alternate Hybrid Cache Mode for llama-server
+# Software architecture: hybrid prompt cache for `llama-server`
 
-Status: Target state - atomic transactional cache writes per Stage 25
-Date: 2026-06-25
-Primary source: `cache-handling-requirements.md`
+Status: current implementation baseline through Stage 39 closure; open
+requirements gaps are listed in Part 6
 
-## Target state summary
+Date: 2026-07-19
 
-The hybrid cache controller operates as an atomic transactional state machine under a single recursive mutex. Every demote, evict, restore, admit, and cold-store transition runs synchronously inside a `tx_*` transaction invoked from the slot request that triggered it; no background thread or async drain mutates cache state. The transactional method, slot-lifecycle bindings (`tx_restore`, `tx_apply_restore`, `tx_save`, `tx_load`), and the three new invariants I-25-01 atomicity, I-25-02 isolation, and I-25-03 durability-within-transaction are recorded in [Stage 25 design](cache-handling-phase25-design.md) and applied throughout the parts below.
+Primary requirements: [cache-handling-requirements.md](cache-handling-requirements.md)
+
+## Purpose
+
+This software architecture document (SAD) describes the hybrid prompt cache as
+it exists in the repository. It replaces the earlier target-state narrative and
+the stage-by-stage architecture additions. A reader should not need development
+stage documents to understand the deployed design.
+
+The document uses a C5 extension of the C4 model:
+
+1. C1: system context and architecture drivers.
+2. C2: runtime containers and deployment boundaries.
+3. C3: components, data ownership, and static structure.
+4. C4: code mapping and runtime behavior.
+5. C5: decisions, quality controls, delivery, and operations.
+
+## Architecture summary
+
+Hybrid cache is an opt-in `llama-server` cache controller. It keeps reusable
+prompt state in a shared branch forest, stores exact-state and checkpoint
+payloads separately from branch metadata, and manages target and optional draft
+state as one validated pair. Payload bytes can reside in RAM, move to a local
+cold store, or be evicted while branch metadata remains available.
+
+Cache mutations run synchronously under one recursive controller mutex. Restore
+planning captures immutable state under that mutex, applies it to the live llama
+contexts outside the mutex, then finalizes bookkeeping under the mutex. Any
+validation or apply failure falls back to recomputation without claiming a hit.
+
+Compatibility namespaces contain stable runtime inputs. Prompt-local tokens,
+boundaries, and checksums validate candidates after lookup. Exact restore works
+across supported completion routes. Strict-prefix restore is limited to safe chat
+boundaries; unsafe candidates are rejected and recomputed.
 
 ## Contents
 
-This document is split into smaller part files. Read the parts in order when you need the full content.
+- [Part 1: C1 context and drivers](cache-handling-architecture/part-01-context-and-drivers.md)
+- [Part 2: C2 containers and deployment](cache-handling-architecture/part-02-containers-and-deployment.md)
+- [Part 3: C3 components and data](cache-handling-architecture/part-03-components-and-data.md)
+- [Part 4: C4 runtime behavior](cache-handling-architecture/part-04-runtime-behavior.md)
+- [Part 5: C4 code and interfaces](cache-handling-architecture/part-05-code-and-interfaces.md)
+- [Part 6: C5 quality, security, and delivery](cache-handling-architecture/part-06-quality-security-and-delivery.md)
+- [Part 7: C5 architecture decisions](cache-handling-architecture/part-07-architecture-decisions.md)
 
-- [Part 1: Method](./cache-handling-architecture/part-01-method.md)
-- [Part 2: Restore and Residency Flow](./cache-handling-architecture/part-02-restore-and-residency-flow.md)
-- [Part 3: API Endpoint Compatibility](./cache-handling-architecture/part-03-api-endpoint-compatibility.md)
-- [Part 4: ADR-009: Distinguish Payload Eviction from Branch Pruning and Support Metadata-Only Branch Nodes](./cache-handling-architecture/part-04-adr-009-distinguish-payload-eviction-from-branch.md)
-- [Part 5: Stage 4: LRU Eviction Policy with Protected Roots](./cache-handling-architecture/part-05-stage-4-lru-eviction-policy-with-protected-roots.md)
-- [Part 6: Stage 5 Draft Context Modes and Pairing](./cache-handling-architecture/part-06-stage-5-draft-context-modes-and-pairing.md)
-- [Part 7: Speculative decode-batch cap invariant](./cache-handling-architecture/part-07-speculative-decode-batch-cap-invariant.md)
-- [Part 8: Stage 13 Endpoint Compatibility Corrections](./cache-handling-architecture/part-08-stage-13-endpoint-compatibility-corrections.md)
-- [Part 9: Chat-Path Prompt-Span Boundary Invariant](./cache-handling-architecture/part-09-chat-path-prompt-boundary-invariant.md) (post-closure follow-up, 2026-06-16)
+## Conformance rule
+
+Production code is the authority for current behavior. Requirements define the
+intended contract. If either changes, this SAD and the document index must be
+updated in the same change. Historical stage records remain useful evidence, but
+they do not extend or override this document.
