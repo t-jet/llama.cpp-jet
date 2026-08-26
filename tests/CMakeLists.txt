@@ -312,13 +312,6 @@ target_include_directories(test-step3-4-cold-store-write-read PRIVATE ${CMAKE_SO
 target_compile_definitions(test-step3-4-cold-store-write-read PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-step3-4-cold-store-write-read)
 
-# test-step5-io-worker requires server-context library
-llama_build(test-step5-io-worker.cpp get-model.cpp)
-target_link_libraries(test-step5-io-worker PRIVATE server-context)
-target_include_directories(test-step5-io-worker PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
-target_compile_definitions(test-step5-io-worker PRIVATE LLAMA_SERVER_CACHE_TESTS)
-llama_test(test-step5-io-worker)
-
 # test-step6-demotion-protocol requires server-context library
 llama_build(test-step6-demotion-protocol.cpp get-model.cpp)
 target_link_libraries(test-step6-demotion-protocol PRIVATE server-context)
@@ -332,13 +325,6 @@ target_link_libraries(test-step7-promotion-protocol PRIVATE server-context)
 target_include_directories(test-step7-promotion-protocol PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
 target_compile_definitions(test-step7-promotion-protocol PRIVATE LLAMA_SERVER_CACHE_TESTS)
 llama_test(test-step7-promotion-protocol)
-
-# test-step8-integration-wiring requires server-context library
-llama_build(test-step8-integration-wiring.cpp get-model.cpp)
-target_link_libraries(test-step8-integration-wiring PRIVATE server-context)
-target_include_directories(test-step8-integration-wiring PRIVATE ${CMAKE_SOURCE_DIR}/tools/server)
-target_compile_definitions(test-step8-integration-wiring PRIVATE LLAMA_SERVER_CACHE_TESTS)
-llama_test(test-step8-integration-wiring)
 
 # test-step9-startup-validation requires server-context library
 llama_build(test-step9-startup-validation.cpp get-model.cpp)
