@@ -688,3 +688,40 @@ Condition:
 
 Action:
 - Don't edit those dirty navigation files from Manager mode. Do reconstruct the next durable stage number from on-disk docs, distinguish durable opened stages from non-durable candidates, validate the intake, and return exact stage-opening handoff text with target filenames and row/index text so a fresh owner or user-authorized edit can apply it without overwriting unrelated work.
+
+
+## Improvement: merge implementation gate requires full-tree compile evidence
+
+Condition:
+- A large upstream merge (or any change spanning many files) passes the implementation gate on single-translation-unit or scoped compile evidence, then QA test execution surfaces the merged tree does not compile (dozens of additional cross-file errors)
+
+Action:
+- Do NOT pass a merge implementation gate on partial build evidence (single-TU compiles, F1/F7-scope verification, or a build that timed out). A merge gate PASS must be backed by a full-tree `cmake --build` of all named targets (e.g., llama-server + test-cache-controller) completing with exit 0.
+- Do require the Developer merge session to drive the FULL build to completion (with a real wall-clock budget, not a 600s cap) before the Manager implementation gate, so QA never discovers a non-compiling tree at test-execution time.
+- Do treat a merge whose tree does not compile as a BLOCKED test-execution per plan and route it back to the Developer build-fix before any test row runs.
+- Do update the semantic-conflict scan checklist to include a cross-file type-existence audit (every type/member a local-only file uses must exist on merged types) - this is the prevention for both F1 (result_timings) and F7 (server_prompt_cache_state) class defects.
+- Do record the lesson that "F2 add cross-file type audit" is procedural prevention, not advisory, after it proves itself twice in one merge.
+
+
+## Improvement: stale upstream ref must be re-verified at every gate
+
+Condition:
+- An upstream-merge cycle pins a source ref (local tracking branch or remote-tracking ref) at pre-merge analysis time, then later gates (implementation review, regression, closure) run, and the source ref has been refreshed or the actual upstream remote advanced
+
+Action:
+- Do re-run `git rev-parse <ref>` and `git ls-remote <upstream-url> master` at EVERY gate that consumes merge evidence (analysis review, regression, closure), not just at cycle open.
+- Do verify the ref's freshness BEFORE the subagent runs its gate: a stale `origin/upstream_master` in the Developer's analysis metadata (e.g., 3 commits behind) causes mis-scoped triage if the delta is non-trivial.
+- Do verify the Developer refresh caused the local ref to flip from the stale tip (e.g., 11cd9884) to the actual upstream tip (e.g., fc35562ba) before accepting analysis claims.
+- Do record D40-PLAN-01-style staleness decisions in the plan/analysis itself, not only in the Manager routing part, so the Developer's report and the plan agree on the resolved ref.
+
+
+## Improvement: accepted coverage gap must carry a binding follow-up owner in the plan
+
+Condition:
+- A closure contract (e.g., coverage floor 0.8486) cannot be executed in the current session (toolchain absent, build-cov missing, budget exhausted) and the Manager accepts it as a known gap
+
+Action:
+- Do record the gap as an ACCEPTED-GAP with a REAL Manager plan-change decision (D40-CLOSURE-02 style) that names: what was not met, why it could not run, what the follow-up owner must produce, and when (the next stage touching that surface).
+- Do bind the follow-up to the specific trigger surface (e.g., the NEXT stage editing server-cache-controller/hybrid/cold-store files MUST supply a fresh OpenCppCoverage run).
+- Do NOT reclassify the coverage row to a softer status silently; the corrective tooling for a missed floor is a real plan-change recorded in the test plan, not a reclassification.
+- Do verify the repo's actual coverage toolchain (OpenCppCoverage + build-cov + run_coverage.ps1) before accepting a Developer "no gcov/lcov" claim; CUDA+MSVC builds do not use gcov.

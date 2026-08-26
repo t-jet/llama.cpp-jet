@@ -1,5 +1,17 @@
 # Developer improvement memory
 
+## Improvement: Whole-file upstream server rewrite: local-first + measure the other side's delta before hand-merge
+
+Condition:
+
+- An upstream merge window rewrites a large server file (e.g. `server-context.cpp`) that the local fork has also heavily modified with hybrid-cache/checkpoint/session contracts, producing whole-file or very large conflict regions (thousands of lines)
+
+Action:
+
+- Do measure the BASE-to-HEAD and BASE-to-upstream deltas first (git diff --no-index --stat on extracted :1/:2/:3 blobs). If upstream's delta is modest (hundreds of lines) and HEAD's is large (thousands), the file is local-dominated: apply the Stage 35 precedent (keep local whole-file side for that file) and rely on upstream's concurrent evolution in OTHER files (server-stream, server-schema, server-common, server-mcp) that auto-merge. Then restore local-only files the 3-way merge dropped from HEAD (use git ls-tree HEAD vs git ls-files and `git checkout HEAD -- <path>`), run semantic scans, and build. Do not attempt a hand-weave of thousands of interleaved lines in one session; that silently risks every prior-stage contract.
+- When the local whole-file side is kept but the auto-merged shared headers (`server-common.h`, `server-task.h`, `common/*`) carry a NEWER upstream API than the BASE that the local whole-file side was written against, do NOT take the whole upstream file. The local-only file (`server-slot.h`) and the local whole-file side keep their hybrid/checkpoint instrumentation, but every call site that touches the drifted shared types must be re-pointed at the merged API: `json` = `common_json` (not `nlohmann::ordered_json`, drop the local alias, use `.get<T>()` explicitly for numerics and vectors, `json::array({...})` instead of `json({...})`), `server_metrics` = bucket-based (migrate `metrics.on_*` to `add_prompt`/`predict` buckets via `slot.get_timings()`), `server_task_result_metrics/slots` split (route `/metrics` and `/slots` to the right result types, render base metrics via `to_metrics()`), `common_context_seq_*` static helpers -> public `llama_memory_seq_*` API, speculative `need_embd*` helpers gone (use `task->need_embd()`), `on_new_task` callback gains `bool` param + `bool` return. The error-file list plus the merged header struct diffs tell you the full drift surface; iterate build->fix->build until both `llama-server` and `test-cache-controller` compile, then run `ctest -R cache`.
+- When a long build is required for validation, record the build command in a durable doc, keep the build running in the background, and report the partial state honestly if it exceeds the budget.
+
 ## Improvement: Dot-prefixed design-docs paths and dot-dir PowerShell probes
 
 Condition:
@@ -113,7 +125,6 @@ Action:
 - Do verify the changed lines, status text, line counts, trailing-whitespace state, AND line endings directly with file reads or searches; run a scoped whitespace check for tracked touched paths when available, then report the path as changed. If the hygiene note itself is edited after measurement, rerun the line-count and whitespace checks and record the final values, not the earlier draft values.
 - Do include `git status --short` in the handoff evidence for untracked documentation, because `git diff --name-only` and `git diff --check` omit untracked files unless intent-to-add is used. Treat status output as the authoritative changed-path source for new docs when staging is not authorized.
 - Use `Select-String -Pattern '[ \t]+$'` for trailing whitespace on untracked files, `[regex]::Matches($content, '[^\x00-\x7F]')` for non-ASCII scans, and a byte-level CR/CRLF count (PowerShell walk over `[byte[]]` content) for line-ending checks, because `git diff --check` only reports tracked files. When the user explicitly requires `git diff --check` on a new untracked file, run `git add -N <path>` first so the diff check includes the file without staging its content, then clear the intent-to-add with `git reset -q -- <path>` before final status if the task did not authorize staging. Don't rely on plain `git diff`, because it does not show untracked file content.
-- Use `(Get-Content -LiteralPath $path).Count` for the logical line count and compare it to the LF byte count on LF-only markdown. If a combined PowerShell byte/line probe prints an impossible value such as `lines=0` with nonzero LF bytes, rerun the line count directly before reporting evidence.
 -.
 
 ## Improvement: Verify untracked driver-script edits directly
@@ -302,6 +313,25 @@ Action:
   the run created the required precondition metrics or logs before calling it a
   product bug, and update the stage implementation status with the exact next
   gate action.
+- Do verify a QA row's verdict against the test-plan's own PASS signal and
+  against the merged tree, not only the report narrative. Concrete traps that
+  turn an apparent PASS/SKIP/N-A into REWORK: (a) a SKIP row that claims "no
+  fixture" when the merge itself shipped the needed harness (Stream
+  resume/SSE: upstream added tools/server/tests/unit/test_stream.py), (b) a
+  metrics row asserted in the wrong cache mode (legacy vs hybrid) when the
+  plan signal is hybrid-only, (c) a cold-budget/value row that reads the
+  legacy unlimited sentinel -1 (the "documented unlimited value" from the
+  Stage 17 observability design) instead of the hybrid 2147483648 for 2048 MiB
+  contract (Stage 38 D36-FU-01): -1 in legacy is not a regression, it is the
+  default legacy mode before any cache-cold-max-mib is set, (d) a coverage row
+  justified by "no gcov/lcov, GCC rebuild needed" when the repo's established
+  MSVC coverage path is OpenCppCoverage + run_coverage.ps1 + a build-cov dir
+  with /Zi in CXX + /debug /DEBUG:FULL in LINKER flags (Stage 18 D18-IMPL-01
+  precedent); use that instead of a costly GCC clean build.
+
+Do check working-tree state matches the reported MERGE_HEAD and diff when
+assessing N/A conditional triggers; interim MERGE_HEADs or later commits can
+make report assumptions stale.
 
 ## Improvement: Reclassify old policy tests against current transaction semantics
 
@@ -397,6 +427,16 @@ Action:
 Condition:
 
 - When hybrid cache metrics report a hit, checkpoint admission succeeds, or public completion timing still reports `cache_n=0`
+
+## Improvement: F1 cross-file type compat fix across open merge (result_timings -> server_slot_stats)
+
+Condition:
+
+- An upstream merge removes a struct (e.g. `result_timings`) from a shared header (e.g. `server-task.h`) and replaces it with a new struct (e.g. `server_slot_stats` defined in `server-common.h`), and a local-only file (e.g. `server-slot.h`) returns the old type from a public method; the member name also changed from `.timings` to `.stats` in the task result structs; all `to_json()` callers already use the new member name
+
+Action:
+
+- Do pick Option B (adopt the new upstream type). Do NOT re-add the old struct (Option A) because the task result `to_json()` in server-task.cpp already calls `stats.to_json()` on the new member name. Map fields to the new struct using the same slot fields (unit conversions: `double ms` -> `int64_t us` for the timestamp-based `server_slot_stats`). Change call sites from `res->timings` to `res->stats`. Verify with `Select-String -Pattern "result_timings"` across the staged server/ tree to confirm zero stale refs. When building in a CUDA build dir, use `MSBuild ... /t:ClCompile` on the single vcxproj to test just the compile (skips CUDA nvcc deps). Document separately pre-existing compile errors that are out of scope. (verified 2026-08-26, Stage 40 F1 fix)
 
 Action:
 
@@ -1614,7 +1654,7 @@ Action:
 
 Condition:
 
-- When a one-line PowerShell verification command builds objects with
+- When a one-liner PowerShell verification command builds objects with
   `foreach (...) { ... }` and then pipes the resulting collection to
   `Format-Table`, `Sort-Object`, or another pipeline command
 
@@ -2332,3 +2372,19 @@ Action:
   each forbidden file class before any model rerun. Do not classify a root-file
   count greater than the payload count as a product bug without checking
   metadata semantics.
+
+## Internal Post-Task Record (2026-08-26, Stage 40 pre-merge analysis + plan)
+
+Task completed: Yes (3 deliverable files under ._design_docs/cache-handling-phase40-implementation/).
+
+Effectiveness assessment: Pre-merge analysis ran real git commands — staleness (3 behind) confirmed, 729 total/~180 filtered commits counted, 11 REWORK-REQUIRED rows identified across 3 tracks. Part-06 plan and entry doc match Stage 35 format. Issue: caveman mode "full" compression corrupted table formatting in durable markdown files (merged rows, bare URL warnings). Durable artifacts need normal English with proper markdown tables.
+
+Improvement outcome candidate:
+- Condition: When writing durable markdown artifacts (pre-merge analysis, plans, reports) for Architect/Manager review while in caveman mode
+- Action: Do write durable artifact content in normal English with proper markdown table formatting; caveman compression belongs in chat responses only. Disable caveman for file bodies.
+
+Similar memory check: No similar improvement found.
+
+Decision: Add new improvement.
+
+Memory update: New improvement stored below.

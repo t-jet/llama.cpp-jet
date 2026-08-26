@@ -34,6 +34,8 @@ add_library(${TARGET} STATIC
     server-cache-store-cold.h
     server-cache-io-worker.cpp
     server-cache-io-worker.h
+    server-mcp.cpp
+    server-mcp.h
     server-schema.cpp
     server-schema.h
 )

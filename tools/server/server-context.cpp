@@ -43,8 +43,6 @@
 #include <windows.h>
 #endif
 
-using json = nlohmann::ordered_json;
-
 constexpr int HTTP_POLLING_SECONDS = 1;
 constexpr size_t SPECULATIVE_PROMPT_MAX_OUTPUT_BYTES = 256ull * 1024 * 1024;
 constexpr int32_t SPECULATIVE_PROMPT_SAFE_BATCH_SIZE = 128;
@@ -338,68 +336,6 @@ static uint32_t server_n_outputs_max(const common_params & params) {
 // (tx_save / tx_load / tx_restore / tx_apply_restore).
 
 
-
-
-//
-// server_metrics
-//
-
-struct server_metrics {
-    int64_t t_start = 0;
-
-    uint64_t n_prompt_tokens_processed_total = 0;
-    uint64_t t_prompt_processing_total       = 0;
-    uint64_t n_tokens_predicted_total        = 0;
-    uint64_t t_tokens_generation_total       = 0;
-
-    uint64_t n_tokens_max = 0;
-
-    uint64_t n_prompt_tokens_processed = 0;
-    uint64_t t_prompt_processing       = 0;
-
-    uint64_t n_tokens_predicted  = 0;
-    uint64_t t_tokens_generation = 0;
-
-    uint64_t n_decode_total     = 0;
-    uint64_t n_busy_slots_total = 0;
-
-    void init() {
-        t_start = ggml_time_us();
-    }
-
-    void on_prompt_eval(const server_slot & slot) {
-        n_prompt_tokens_processed_total += slot.n_prompt_tokens_processed;
-        n_prompt_tokens_processed       += slot.n_prompt_tokens_processed;
-        t_prompt_processing             += slot.t_prompt_processing;
-        t_prompt_processing_total       += slot.t_prompt_processing;
-
-        n_tokens_max = std::max(n_tokens_max, (uint64_t) slot.prompt.n_tokens());
-    }
-
-    void on_prediction(const server_slot & slot) {
-        n_tokens_predicted_total   += slot.n_decoded;
-        n_tokens_predicted         += slot.n_decoded;
-        t_tokens_generation        += slot.t_token_generation;
-        t_tokens_generation_total  += slot.t_token_generation;
-    }
-
-    void on_decoded(const std::vector<server_slot> & slots) {
-        n_decode_total++;
-        for (const auto & slot : slots) {
-            if (slot.is_processing()) {
-                n_busy_slots_total++;
-            }
-            n_tokens_max = std::max(n_tokens_max, (uint64_t) slot.prompt.n_tokens());
-        }
-    }
-
-    void reset_bucket() {
-        n_prompt_tokens_processed = 0;
-        t_prompt_processing       = 0;
-        n_tokens_predicted        = 0;
-        t_tokens_generation       = 0;
-    }
-};
 
 
 //
@@ -1084,7 +1020,7 @@ private:
         GGML_ASSERT(!sleeping);
 
         // wiring up server queues
-        queue_tasks.on_new_task([this](server_task && task) {
+        queue_tasks.on_new_task([this](server_task && task, bool /* is_yielding */) {
             const auto task_ids = collect_task_ids(task);
 
             try {
@@ -1102,6 +1038,8 @@ private:
                 SRV_ERR("%s\n", error.c_str());
                 fail_task_ids(task_ids, error);
             }
+
+            return true;
         });
         queue_tasks.on_update_slots([this]() {
             try {
@@ -1863,7 +1801,7 @@ private:
 
         // populate timings if this is final response or timings_per_token is enabled
         if (slot.stop != STOP_TYPE_NONE || slot.task->params.timings_per_token) {
-            res->timings = slot.get_timings();
+            res->stats = slot.get_timings();
         }
 
         queue_results.send(std::move(res));
@@ -1890,7 +1828,7 @@ private:
             res->content     = std::move(slot.generated_text);
             res->tokens      = std::move(slot.generated_tokens);
         }
-        res->timings         = slot.get_timings();
+        res->stats           = slot.get_timings();
         res->prompt          = slot.task->tokens.detokenize(ctx_tgt, true);
         res->response_fields = std::move(slot.task->params.response_fields);
 
@@ -2262,48 +2200,44 @@ private:
                 {
                     // do nothing
                 } break;
-            case SERVER_TASK_TYPE_METRICS:
+            case SERVER_TASK_TYPE_SLOT_GET:
                 {
                     json slots_data = json::array();
 
-                    int n_idle_slots       = 0;
-                    int n_processing_slots = 0;
+                    int n_idle_slots = 0;
 
                     for (server_slot & slot : slots) {
-                        json slot_data = slot.to_json(slots_debug == 0);
-
-                        if (slot.is_processing()) {
-                            n_processing_slots++;
-                        } else {
+                        if (!slot.is_processing()) {
                             n_idle_slots++;
                         }
 
-                        slots_data.push_back(slot_data);
+                        slots_data.push_back(slot.to_json(slots_debug == 0));
                     }
-                    SRV_DBG("n_idle_slots = %d, n_processing_slots = %d\n", n_idle_slots, n_processing_slots);
+                    SRV_DBG("n_idle_slots = %d\n", n_idle_slots);
+
+                    auto res = std::make_unique<server_task_result_slots>();
+                    res->id           = task.id;
+                    res->slots_data   = std::move(slots_data);
+                    res->n_idle_slots = n_idle_slots;
+
+                    queue_results.send(std::move(res));
+                } break;
+            case SERVER_TASK_TYPE_METRICS:
+                {
+                    int n_processing_slots = 0;
+
+                    for (server_slot & slot : slots) {
+                        if (slot.is_processing()) {
+                            n_processing_slots++;
+                        }
+                    }
+                    SRV_DBG("n_processing_slots = %d\n", n_processing_slots);
 
                     auto res = std::make_unique<server_task_result_metrics>();
                     res->id                  = task.id;
-                    res->slots_data          = std::move(slots_data);
-                    res->n_idle_slots        = n_idle_slots;
                     res->n_processing_slots  = n_processing_slots;
                     res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred_size();
-                    res->t_start             = metrics.t_start;
-
-                    res->n_prompt_tokens_processed_total = metrics.n_prompt_tokens_processed_total;
-                    res->t_prompt_processing_total       = metrics.t_prompt_processing_total;
-                    res->n_tokens_predicted_total        = metrics.n_tokens_predicted_total;
-                    res->t_tokens_generation_total       = metrics.t_tokens_generation_total;
-
-                    res->n_tokens_max = metrics.n_tokens_max;
-
-                    res->n_prompt_tokens_processed = metrics.n_prompt_tokens_processed;
-                    res->t_prompt_processing       = metrics.t_prompt_processing;
-                    res->n_tokens_predicted        = metrics.n_tokens_predicted;
-                    res->t_tokens_generation       = metrics.t_tokens_generation;
-
-                    res->n_decode_total          = metrics.n_decode_total;
-                    res->n_busy_slots_total      = metrics.n_busy_slots_total;
+                    res->metrics             = metrics;
 
                     if (task.metrics_reset_bucket) {
                         metrics.reset_bucket();
@@ -2534,12 +2468,12 @@ private:
 
                 SLT_WRN(slot, "slot context shift, n_keep = %d, n_left = %d, n_discard = %d\n", n_keep, n_left, n_discard);
 
-                common_context_seq_rm (ctx_tgt, slot.id, n_keep            , n_keep + n_discard);
-                common_context_seq_add(ctx_tgt, slot.id, n_keep + n_discard, slot.prompt.n_tokens(), -n_discard);
+                llama_memory_seq_rm (llama_get_memory(ctx_tgt), slot.id, n_keep            , n_keep + n_discard);
+                llama_memory_seq_add(llama_get_memory(ctx_tgt), slot.id, n_keep + n_discard, slot.prompt.n_tokens(), -n_discard);
 
                 if (ctx_dft) {
-                    common_context_seq_rm (ctx_dft.get(), slot.id, n_keep            , n_keep + n_discard);
-                    common_context_seq_add(ctx_dft.get(), slot.id, n_keep + n_discard, slot.prompt.tokens.pos_next(), -n_discard);
+                    llama_memory_seq_rm (llama_get_memory(ctx_dft.get()), slot.id, n_keep            , n_keep + n_discard);
+                    llama_memory_seq_add(llama_get_memory(ctx_dft.get()), slot.id, n_keep + n_discard, slot.prompt.tokens.pos_next(), -n_discard);
                 }
 
                 // add generated tokens to cache
@@ -2657,7 +2591,7 @@ private:
                     ckpt.load_dft(ctx_dft.get(), slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
                 }
 
-                common_context_seq_rm(ctx_dft.get(), slot.id, ckpt.pos_max + 1, -1);
+                llama_memory_seq_rm(llama_get_memory(ctx_dft.get()), slot.id, ckpt.pos_max + 1, -1);
             }
 
             if (!draft.empty()) {
@@ -2880,12 +2814,12 @@ private:
 
                                             const int64_t kv_shift = (int64_t) head_p - (int64_t) head_c;
 
-                                            common_context_seq_rm (ctx_tgt, slot.id, head_p, head_c);
-                                            common_context_seq_add(ctx_tgt, slot.id, head_c, head_c + n_match, kv_shift);
+                                            llama_memory_seq_rm (llama_get_memory(ctx_tgt), slot.id, head_p, head_c);
+                                            llama_memory_seq_add(llama_get_memory(ctx_tgt), slot.id, head_c, head_c + n_match, kv_shift);
 
                                             if (ctx_dft) {
-                                                common_context_seq_rm (ctx_dft.get(), slot.id, head_p, head_c);
-                                                common_context_seq_add(ctx_dft.get(), slot.id, head_c, head_c + n_match, kv_shift);
+                                                llama_memory_seq_rm (llama_get_memory(ctx_dft.get()), slot.id, head_p, head_c);
+                                                llama_memory_seq_add(llama_get_memory(ctx_dft.get()), slot.id, head_c, head_c + n_match, kv_shift);
                                             }
 
                                             for (size_t i = 0; i < n_match; i++) {
@@ -3057,9 +2991,9 @@ private:
 
                     SLT_TRC(slot, "cached n_tokens = %d, memory_seq_rm [%d, end)\n", slot.prompt.n_tokens(), p0);
 
-                    common_context_seq_rm(ctx_tgt, slot.id, p0, -1);
+                    llama_memory_seq_rm(llama_get_memory(ctx_tgt), slot.id, p0, -1);
                     if (ctx_dft) {
-                        common_context_seq_rm(ctx_dft.get(), slot.id, p0, -1);
+                        llama_memory_seq_rm(llama_get_memory(ctx_dft.get()), slot.id, p0, -1);
                     }
 
                     // If using an alora, there may be uncached tokens that come
@@ -3328,7 +3262,13 @@ private:
 
             const int ret = llama_decode(ctx_tgt, batch_view);
 
-            metrics.on_decoded(slots);
+            metrics.n_decode++;
+            for (const auto & slot : slots) {
+                if (slot.is_processing()) {
+                    metrics.n_busy_slots++;
+                }
+                metrics.n_tokens_max = std::max(metrics.n_tokens_max, (uint64_t) slot.prompt.n_tokens());
+            }
 
             if (ret != 0) {
                 {
@@ -3520,7 +3460,8 @@ private:
                 if (slot.n_decoded == 1) {
                     slot.t_start_generation = t_current;
                     slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
-                    metrics.on_prompt_eval(slot);
+                    metrics.add_prompt(slot.n_prompt_tokens_processed, (uint64_t)(slot.t_prompt_processing * 1e3));
+                    metrics.n_tokens_max = std::max(metrics.n_tokens_max, (uint64_t) slot.prompt.n_tokens());
                 }
 
                 slot.t_token_generation = std::max<int64_t>(1, t_current - slot.t_start_generation) / 1e3;
@@ -3538,7 +3479,14 @@ private:
                     // release slot because of stop condition
                     slot.print_timings();
                     send_final_response(slot);
-                    metrics.on_prediction(slot);
+                    {
+                        const auto stats = slot.get_timings();
+                        metrics.predict       .add(stats.n_gen, stats.n_gen_steps(), stats.t_gen_us());
+                        metrics.predict_bucket.add(stats.n_gen, stats.n_gen_steps(), stats.t_gen_us());
+                        metrics.n_draft_tokens      += stats.n_draft_tokens;
+                        metrics.n_draft_accepted    += stats.n_draft_accepted;
+                        metrics.n_draft_verif_steps += stats.n_draft_verif_steps;
+                    }
 
                     // Save to hybrid cache after successful completion
                     if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
@@ -3599,13 +3547,13 @@ private:
                             {
                                 ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
 
-                                common_context_seq_rm(slot.ctx_tgt, slot.id, ckpt.pos_max + 1, -1);
+                                llama_memory_seq_rm(llama_get_memory(slot.ctx_tgt), slot.id, ckpt.pos_max + 1, -1);
                             }
 
                             if (slot.ctx_dft) {
                                 ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
 
-                                common_context_seq_rm(slot.ctx_dft, slot.id, ckpt.pos_max + 1, -1);
+                                llama_memory_seq_rm(llama_get_memory(slot.ctx_dft), slot.id, ckpt.pos_max + 1, -1);
                             }
 
                             slot.prompt.tokens.keep_first(ckpt.n_tokens);
@@ -3640,9 +3588,9 @@ private:
                 slot.sampled = ids.back(); // last accepted token
                 SLT_DBG(slot, "add accepted tokens: sampled=%d, ids.size=%zu, n_draft=%zu\n", slot.sampled, ids.size(), n_draft);
 
-                common_context_seq_rm(slot.ctx_tgt, slot.id, slot.prompt.tokens.pos_next(), -1);
+                llama_memory_seq_rm(llama_get_memory(slot.ctx_tgt), slot.id, slot.prompt.tokens.pos_next(), -1);
                 if (slot.ctx_dft) {
-                    common_context_seq_rm(slot.ctx_dft, slot.id, slot.prompt.tokens.pos_next(), -1);
+                    llama_memory_seq_rm(llama_get_memory(slot.ctx_dft), slot.id, slot.prompt.tokens.pos_next(), -1);
                 }
 
                 for (size_t i = 0; i < ids.size(); ++i) {
@@ -3659,7 +3607,14 @@ private:
                     if (!process_token(result, slot)) {
                         slot.print_timings();
                         send_final_response(slot);
-                        metrics.on_prediction(slot);
+                        {
+                            const auto stats = slot.get_timings();
+                            metrics.predict       .add(stats.n_gen, stats.n_gen_steps(), stats.t_gen_us());
+                            metrics.predict_bucket.add(stats.n_gen, stats.n_gen_steps(), stats.t_gen_us());
+                            metrics.n_draft_tokens      += stats.n_draft_tokens;
+                            metrics.n_draft_accepted    += stats.n_draft_accepted;
+                            metrics.n_draft_verif_steps += stats.n_draft_verif_steps;
+                        }
 
                         // Save to hybrid cache after successful completion
                         if (cache_ctrl && slot.task->type == SERVER_TASK_TYPE_COMPLETION) {
@@ -4130,7 +4085,6 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             task.params = server_schema::eval_llama_cmpl_schema(
                     ctx_server.vocab,
                     params,
-                    meta->slot_n_ctx,
                     meta->logit_bias_eog,
                     data);
 
@@ -4594,72 +4548,11 @@ void server_routes::init_routes() {
         auto res_task = dynamic_cast<server_task_result_metrics*>(result.get());
         GGML_ASSERT(res_task != nullptr);
 
-        // metrics definition: https://prometheus.io/docs/practices/naming/#metric-names
-        json all_metrics_def = json {
-            {"counter", {{
-                    {"name",  "prompt_tokens_total"},
-                    {"help",  "Number of prompt tokens processed."},
-                    {"value",  (uint64_t) res_task->n_prompt_tokens_processed_total}
-            }, {
-                    {"name",  "prompt_seconds_total"},
-                    {"help",  "Prompt process time"},
-                    {"value",  (uint64_t) res_task->t_prompt_processing_total / 1.e3}
-            }, {
-                    {"name",  "tokens_predicted_total"},
-                    {"help",  "Number of generation tokens processed."},
-                    {"value",  (uint64_t) res_task->n_tokens_predicted_total}
-            }, {
-                    {"name",  "tokens_predicted_seconds_total"},
-                    {"help",  "Predict process time"},
-                    {"value",  (uint64_t) res_task->t_tokens_generation_total / 1.e3}
-            }, {
-                    {"name",  "n_decode_total"},
-                    {"help",  "Total number of llama_decode() calls"},
-                    {"value",  res_task->n_decode_total}
-            }, {
-                    {"name",  "n_tokens_max"},
-                    {"help",  "Largest observed n_tokens."},
-                    {"value",  res_task->n_tokens_max}
-            }}},
-            {"gauge", {{
-                    {"name",  "prompt_tokens_seconds"},
-                    {"help",  "Average prompt throughput in tokens/s."},
-                    {"value",  res_task->n_prompt_tokens_processed ? 1.e3 / res_task->t_prompt_processing * res_task->n_prompt_tokens_processed : 0.}
-            },{
-                    {"name",  "predicted_tokens_seconds"},
-                    {"help",  "Average generation throughput in tokens/s."},
-                    {"value",  res_task->n_tokens_predicted ? 1.e3 / res_task->t_tokens_generation * res_task->n_tokens_predicted : 0.}
-            },{
-                    {"name",  "requests_processing"},
-                    {"help",  "Number of requests processing."},
-                    {"value",  (uint64_t) res_task->n_processing_slots}
-            },{
-                    {"name",  "requests_deferred"},
-                    {"help",  "Number of requests deferred."},
-                    {"value",  (uint64_t) res_task->n_tasks_deferred}
-            },{
-                    {"name",  "n_busy_slots_per_decode"},
-                    {"help",  "Average number of busy slots per llama_decode() call"},
-                    {"value",  (float) res_task->n_busy_slots_total / std::max((float) res_task->n_decode_total, 1.f)}
-            }}}
-        };
+        res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->metrics.t_start);
 
+        // base metrics in prometheus text format, rendered by the shared result type
         std::stringstream prometheus;
-
-        for (const auto & el : all_metrics_def.items()) {
-            const auto & type        = el.key();
-            const auto & metrics_def = el.value();
-
-            for (const auto & metric_def : metrics_def) {
-                const std::string name = metric_def.at("name");
-                const std::string help = metric_def.at("help");
-
-                auto value = json_value(metric_def, "value", 0.);
-                prometheus << "# HELP llamacpp:" << name << " " << help  << "\n"
-                            << "# TYPE llamacpp:" << name << " " << type  << "\n"
-                            << "llamacpp:"        << name << " " << value << "\n";
-            }
-        }
+        prometheus << res_task->to_metrics();
 
         try {
             const json cache_stats = this->ctx_server.get_cache_stats();
@@ -5090,7 +4983,7 @@ void server_routes::init_routes() {
             SRV_WRN("failed to export cache metrics: %s\n", e.what());
         }
 
-        res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->t_start);
+        res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->metrics.t_start);
         res->content_type = "text/plain; version=0.0.4";
         res->status = 200;
         res->data = prometheus.str();
@@ -5106,7 +4999,7 @@ void server_routes::init_routes() {
 
         // request slots data using task queue
         {
-            server_task task(SERVER_TASK_TYPE_METRICS);
+            server_task task(SERVER_TASK_TYPE_SLOT_GET);
             task.id = res->rd.get_new_id();
             res->rd.post_task(std::move(task), true); // high-priority task
         }
@@ -5125,7 +5018,7 @@ void server_routes::init_routes() {
         }
 
         // TODO: get rid of this dynamic_cast
-        auto * res_task = dynamic_cast<server_task_result_metrics*>(result.get());
+        auto * res_task = dynamic_cast<server_task_result_slots*>(result.get());
         GGML_ASSERT(res_task != nullptr);
 
         // optionally return "fail_on_no_slot" error
@@ -5136,7 +5029,7 @@ void server_routes::init_routes() {
             }
         }
 
-        res->ok(res_task->slots_data);
+        res->ok(res_task->to_json());
         return res;
     };
 
@@ -5542,8 +5435,7 @@ void server_routes::init_routes() {
         GGML_UNUSED(ctx_server);
 
         json models = {
-            {"models", {
-                {
+            {"models", json::array({{
                     {"name",  meta->model_name},
                     {"model", meta->model_name},
                     {"modified_at", ""},
@@ -5551,23 +5443,22 @@ void server_routes::init_routes() {
                     {"digest", ""}, // dummy value, llama.cpp does not support managing model file's hash
                     {"type", "model"},
                     {"description", ""},
-                    {"tags", {""}},
-                    {"capabilities", meta->has_mtmd ? json({"completion","multimodal"}) : json({"completion"})},
+                    {"tags", json::array({""})},
+                    {"capabilities", meta->has_mtmd ? json::array({"completion","multimodal"}) : json::array({"completion"})},
                     {"parameters", ""},
                     {"details", {
                         {"parent_model", ""},
                         {"format", "gguf"},
                         {"family", ""},
-                        {"families", {""}},
+                        {"families", json::array({""})},
                         {"parameter_size", ""},
                         {"quantization_level", ""}
                     }}
-                }
-            }},
+            }})},
             {"object", "list"},
-            {"data", {
+            {"data", json::array({
                 get_model_info(),
-            }}
+            })}
         };
 
         res->ok(models);
@@ -5621,7 +5512,7 @@ void server_routes::init_routes() {
 
         std::string content;
         if (body.count("tokens") != 0) {
-            const llama_tokens tokens = body.at("tokens");
+            const llama_tokens tokens = body.at("tokens").get<std::vector<int>>();
             content = tokens_to_str(ctx_server.vocab, tokens);
         }
 
@@ -5948,7 +5839,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_embeddings_impl(cons
 
     int embd_normalize = params.embd_normalize;
     if (body.count("embd_normalize") != 0) {
-        embd_normalize = body.at("embd_normalize");
+        embd_normalize = body.at("embd_normalize").get<int>();
         if (meta->pooling_type == LLAMA_POOLING_TYPE_NONE) {
             SRV_DBG("embd_normalize is not supported by pooling type %d, ignoring it\n", meta->pooling_type);
         }

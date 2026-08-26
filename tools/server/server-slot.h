@@ -221,8 +221,6 @@ struct server_slot {
     }
 
     bool prompt_save(server_prompt_cache & prompt_cache, bool move_metadata = false) {
-        GGML_ASSERT(prompt.data.size() == 0);
-
         const size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
         const size_t cur_size_dft = ctx_dft ? llama_state_seq_get_size_ext(ctx_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;
 
@@ -239,7 +237,7 @@ struct server_slot {
         const size_t n_tgt = llama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);
         if (n_tgt != cur_size_tgt) {
             SLT_ERR(*this, "failed to save target state: expected %zu bytes, got %zu\n", cur_size_tgt, n_tgt);
-            prompt_cache.discard(cur);
+            prompt_cache.discard(&cur->prompt);
             return false;
         }
 
@@ -247,20 +245,20 @@ struct server_slot {
             const size_t n_dft = llama_state_seq_get_data_ext(ctx_dft, cur->data.drft.data(), cur_size_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE);
             if (n_dft != cur_size_dft) {
                 SLT_ERR(*this, "failed to save draft state: expected %zu bytes, got %zu\n", cur_size_dft, n_dft);
-                prompt_cache.discard(cur);
+                prompt_cache.discard(&cur->prompt);
                 return false;
             }
         }
 
         if (move_metadata) {
-            cur->tokens = std::move(prompt.tokens);
-            cur->checkpoints = std::move(prompt.checkpoints);
+            cur->prompt.tokens = std::move(prompt.tokens);
+            cur->prompt.checkpoints = std::move(prompt.checkpoints);
         } else {
-            cur->tokens = prompt.tokens.clone();
-            cur->checkpoints = prompt.checkpoints;
+            cur->prompt.tokens = prompt.tokens.clone();
+            cur->prompt.checkpoints = prompt.checkpoints;
         }
 
-        trim_checkpoints(*cur, cur_size, "prompt cache checkpoint memory");
+        trim_checkpoints(cur->prompt, cur_size, "prompt cache checkpoint memory");
 
         return true;
     }
@@ -281,9 +279,9 @@ struct server_slot {
 
         SLT_INF(*this, "clearing prompt with %zu tokens\n", prompt.tokens.size());
 
-        common_context_seq_rm(ctx_tgt, id, -1, -1);
+        llama_memory_seq_rm(llama_get_memory(ctx_tgt), id, -1, -1);
         if (ctx_dft) {
-            common_context_seq_rm(ctx_dft, id, -1, -1);
+            llama_memory_seq_rm(llama_get_memory(ctx_dft), id, -1, -1);
         }
 
         prompt.tokens.clear();
@@ -387,13 +385,7 @@ struct server_slot {
 
     bool need_embd() const {
         GGML_ASSERT(task);
-        return task->need_embd() ||
-            (spec && (common_speculative_need_embd(spec) || common_speculative_need_embd_nextn(spec)));
-    }
-
-    bool need_embd_nextn() const {
-        GGML_ASSERT(task);
-        return spec && common_speculative_need_embd_nextn(spec);
+        return task->need_embd();
     }
 
     // if the context does not have a memory module then all embeddings have to be computed within a single ubatch
@@ -523,27 +515,21 @@ struct server_slot {
         }
     }
 
-    result_timings get_timings() const {
-        result_timings timings;
-        timings.cache_n = n_prompt_tokens_cache;
+    server_slot_stats get_timings() const {
+        server_slot_stats stats;
+        stats.n_prompt_cached    = n_prompt_tokens_cache;
+        stats.n_prompt_processed = n_prompt_tokens_processed;
+        stats.n_gen              = n_decoded;
 
-        timings.prompt_n            = n_prompt_tokens_processed;
-        timings.prompt_ms           = t_prompt_processing;
-        timings.prompt_per_token_ms = t_prompt_processing / n_prompt_tokens_processed;
-        timings.prompt_per_second   = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
+        stats.n_draft_tokens   = n_draft_total;
+        stats.n_draft_accepted = n_draft_accepted;
 
-        timings.predicted_n            = n_decoded;
-        timings.predicted_ms           = t_token_generation;
-        timings.predicted_per_token_ms = t_token_generation / n_decoded;
-        timings.predicted_per_second   = 1e3 / t_token_generation * n_decoded;
+        // map slot timing fields (absolute us timestamps + ms durations) to server_slot_stats
+        stats.t_start       = t_start_process_prompt;
+        stats.t_prompt_last = t_start_generation;
+        stats.t_gen_last    = t_start_generation + (int64_t)(t_token_generation * 1000.0);
 
-        // Add speculative metrics
-        if (n_draft_total > 0) {
-            timings.draft_n          = n_draft_total;
-            timings.draft_n_accepted = n_draft_accepted;
-        }
-
-        return timings;
+        return stats;
     }
 
     size_t find_stopping_strings(const std::string & text, const size_t last_token_size, bool is_full_stop) {
@@ -679,12 +665,12 @@ struct server_slot {
     void copy_state_to(server_slot & other) const {
         GGML_ASSERT(state == SLOT_STATE_DONE_PROMPT);
 
-        common_context_seq_rm(ctx_tgt, other.id,     -1, -1);
-        common_context_seq_cp(ctx_tgt, id, other.id, -1, -1);
+        llama_memory_seq_rm(llama_get_memory(ctx_tgt), other.id,     -1, -1);
+        llama_memory_seq_cp(llama_get_memory(ctx_tgt), id, other.id, -1, -1);
 
         if (ctx_dft) {
-            common_context_seq_rm(ctx_dft, other.id,     -1, -1);
-            common_context_seq_cp(ctx_dft, id, other.id, -1, -1);
+            llama_memory_seq_rm(llama_get_memory(ctx_dft), other.id,     -1, -1);
+            llama_memory_seq_cp(llama_get_memory(ctx_dft), id, other.id, -1, -1);
         }
 
         other.n_decoded   = n_decoded;

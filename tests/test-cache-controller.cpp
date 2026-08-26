@@ -1334,18 +1334,20 @@ void test_task_result_and_prompt_helpers() {
 
     server_prompt prompt;
     prompt.tokens = create_tokens({1, 2, 3});
-    prompt.data = data;
     common_prompt_checkpoint ckpt;
     ckpt.data_tgt.resize(2);
     ckpt.data_dft.resize(4);
     prompt.checkpoints.push_back(ckpt);
-
     assert(prompt.n_tokens() == 3);
-    assert(prompt.size() == data.size() + ckpt.size());
+
+    server_prompt_cache_state state0;
+    state0.prompt = prompt.clone();
+    state0.data = data;
+    assert(state0.prompt.n_tokens() == 3);
+    assert(state0.size() == data.size() + ckpt.size());
 
     server_prompt clone = prompt.clone();
     assert(clone.n_tokens() == prompt.n_tokens());
-    assert(clone.size() == prompt.size());
 
     printf("  PASSED\n");
 }
@@ -3816,7 +3818,7 @@ void test_stage21_demoting_payload_counted_in_budget() {
     // Stage 28 R28-BUG-04 Phase C: async worker start/stop retired.
 
     json stats_before = ctrl.get_stats();
-    size_t resident_before = stats_before["resident_payload_bytes"];
+    size_t resident_before = stats_before["resident_payload_bytes"].get<size_t>();
     assert(resident_before >= 600);
 
     // Sync demotion: residency transitions cold before returning.
@@ -3824,7 +3826,7 @@ void test_stage21_demoting_payload_counted_in_budget() {
     assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::cold);
 
     json stats_after = ctrl.get_stats();
-    size_t resident_after = stats_after["resident_payload_bytes"];
+    size_t resident_after = stats_after["resident_payload_bytes"].get<size_t>();
     // Stage 21 F-21-RERUN-01: descriptor-resident-bytes stays accounted
     // even after residency transitions to cold (see server-cache-hybrid.cpp
     // descriptor.resident_payload_bytes invariant). This guards against
@@ -3851,7 +3853,7 @@ void test_stage21_descriptor_resident_bytes_preserved_during_demotion() {
     // Stage 28 R28-BUG-04 Phase C: async worker start/stop retired.
 
     json stats_before = ctrl.get_stats();
-    size_t resident_before = stats_before["resident_payload_bytes"];
+    size_t resident_before = stats_before["resident_payload_bytes"].get<size_t>();
     assert(resident_before >= 800);
 
     // Sync demotion: residency transitions cold before returning. The
@@ -3861,7 +3863,7 @@ void test_stage21_descriptor_resident_bytes_preserved_during_demotion() {
     assert(ctrl.debug_get_residency_state_for_tests(checkpoint_id) == payload_residency_state::cold);
 
     json stats_after = ctrl.get_stats();
-    size_t resident_after = stats_after["resident_payload_bytes"];
+    size_t resident_after = stats_after["resident_payload_bytes"].get<size_t>();
     assert(resident_after >= 800);
 
     printf("  PASSED\n");
@@ -3913,7 +3915,7 @@ void test_stage23_demotion_queue_budget_pressure_falls_back_to_eviction() {
     }
 
     json stats = ctrl.get_stats();
-    size_t resident = stats["resident_payload_bytes"];
+    size_t resident = stats["resident_payload_bytes"].get<size_t>();
     assert(resident <= 200);
     assert(stats["n_payload_evictions"] > 0);
 

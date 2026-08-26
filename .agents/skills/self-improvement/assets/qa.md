@@ -150,6 +150,25 @@ Condition:
 - Public model-mode QA row cannot reach `/health` before cache behavior is observable
 
 Action:
+- Do classify as BLOCKED-missing-fixture instead of BLOCKED-server-not-starting. Issue is not server health but lack of real GGUF model. Vocab-only GGUFs cannot load as inference models. Check model directory for `._test_models/` as well as `models/`.
+
+## Improvement: note coverage unavailability for CUDA+MSVC builds
+
+Condition:
+- QA execution report requires TP-*-COV-* focused coverage rows, and the build uses MSVC (cl.exe) with CUDA (no gcov/lcov)
+
+Action:
+- Do mark coverage row as BLOCKED with reason `coverage tooling unavailable (CUDA+MSVC)`. Record that GCC-based rebuild would be needed and its estimated budget. Do not treat this as a product defect.
+
+## Improvement: handle offline remote ref lookups
+
+Condition:
+- QA source-ref check requires `git ls-remote origin` but host has no network connectivity to GitHub
+
+Action:
+- Do record `ls-remote returned empty (no network)` in the report and continue using the local `rev-parse origin/upstream_master` value. Mark source-ref as PARTIAL with evidence `local SHA available, remote not verifiable`. Do not BLOCK the session on network unavailability when the local fork SHA matches the Manager-approved merge plan.
+
+Action:
 - Classify row as `BLOCKED` for cache acceptance. Preserve startup logs and exit codes. Create separate bug handoff when process crashes or exits without clear unsupported-mode diagnostic.
 
 
@@ -179,6 +198,15 @@ Condition:
 Action:
 - Check that `#undef NDEBUG` appears before `#include <cassert>` in every test file, not after. If assertions are silently disabled, Release-only crash may mask real product bug or test infrastructure bug. Run Debug build as cross-check. Classify Release-only crashes as test infrastructure defects requiring Developer investigation before marking test step as PASS.
 
+
+## Improvement: scan plan files for invisible control characters
+
+Condition:
+- Reviewing or updating test plan or design markdown files that contain inline commands (git, cmake, shell) or code blocks
+
+Action:
+- Do grep for non-printable ASCII control characters (0x00-0x1F excluding \n \r \t) in the file before accepting content. A backspace (0x08) before a command word eats the first character and silently breaks copy-paste execution. Control characters are invisible in most editors and markdown renderers but cause real terminal failures.
+- Do not trust a 0x08 count of zero as full proof of a fixed command line. The backspace can be removed while the eaten leading character is never restored, leaving a still-broken command whose first char is simply gone. Verify each target command with a literal regex against its exact canonical spelling (e.g. `build-cuda\bin\...`) and cross-check against the identical command written elsewhere in the same file. Fix the missing character directly when removal never restored it.
 
 ## Improvement: verify markdown constraints after QA doc edits and fresh part files
 
@@ -270,6 +298,14 @@ Action:
 - Use OpenCppCoverage binary `.cov` export per run and merge with `--input_coverage` for union coverage; summing separate Cobertura XML line counts across test runs double-counts shared code and does not produce union coverage.
 - Include server HTTP probe in coverage measurement when target files contain server integration paths that focused tests cannot reach.
 
+## Improvement: classify coverage BLOCKED-build-cov-absent when reconfigure exceeds budget
+
+Condition:
+- Coverage required (OpenCppCoverage available, run_coverage.ps1 present) but `build-cov/` dir absent, current Release build has no `/Zi` flags, and remaining time budget < 30 min
+
+Action:
+- Do mark as `BLOCKED` with reason `build-cov dir absent; reconfigure+rebuild exceeds time budget`. Record: OpenCppCoverage path check result, run_coverage.ps1 path, current CXX_FLAGS_RELEASE (no /Zi), and estimated reconfigure+rebuild time. Recommend dedicated session with D18-IMPL-01 flags before next eval. Do not start reconfigure if budget insufficient.
+
 
 ## Improvement: load required memory before status updates
 
@@ -287,6 +323,14 @@ Condition:
 
 Action:
 - Carry those blockers forward as setup and evidence requirements for future execution report. Don't convert missing tools, dependencies, model fixtures, coverage output, or benchmark output into accepted skips in long-lived test plan.
+
+## Improvement: check existing part numbers before creating new test-plan part
+
+Condition:
+- Creating a fresh test-plan part file in `._design_docs/cache-handling-test-plan/`
+
+Action:
+- Do list the directory first and note the highest existing part-NN number before choosing the new part number. Part numbers must be unique; creating a file with a duplicate number silently overwrites the existing plan. When setArtifactRules pushes a file as an artifact, verify the file landed at the intended path before continuing to content edits.
 
 
 ## Improvement: block unavailable mandatory endpoint rows

@@ -779,9 +779,11 @@ Action:
 ## Improvement: Post-closure follow-up design review scope and dual-doc traceability
 
 Condition:
+
 - Reviewing a post-closure follow-up design correction (not full stage re-review) where correction introduces both a new design part (stage-scoped) and a new architecture-level invariant (cross-stage); task brief says review correction only
 
 Action:
+
 - Do write review verdict in new part file under the new stage's design directory (e.g., the current stage design directory), not in the closed stage's part file. Do follow the documented placement rule. Do explicitly state scope rule in review file (correction only, not full closed-stage re-review). Do list reviewed files in a scope table.
 - Do include a separate Traceability section mapping each design claim to BOTH the stage design part AND the new architecture part line refs. Do not merge stage and architecture traceability into one cell.
 - Do verify checksum function equivalence by reading both implementations when design says "same function" and code uses two byte-for-byte identical functions in different files (e.g., cache_metadata_checksum vs cache_token_span_checksum). Do record as non-blocking observation when equivalence holds but design wording imprecise.
@@ -987,7 +989,7 @@ Condition:
 
 Action:
 
-- Do distinguish fresh allocation from numeric uniqueness. Require separate process identities, sessions, run IDs, proof bindings, roots, and ports, then verify each repeated counter value is scoped to its fresh process. Don't reject valid isolation because deterministic counters restart; don't describe equal numeric IDs or generations as distinct without explaining their process scope.
+- Do distinguish fresh allocation from numeric uniqueness. Require separate process identities, sessions, run IDs
 
 
 ## Improvement: Parallel decision IDs across design and tracker
@@ -998,24 +1000,54 @@ Condition:
 
 Action:
 
+
+
+### Post-Task Review — 2026-08-26 (Stage 40 implementation plan re-review)
+
+**Task:** Independent Architect re-review of Stage 40 implementation plan after Developer corrected 1 BLOCKING + 4 NON-BLOCKING findings (F40-PMR-01/02/03/06/07). 2 NON-BLOCKING findings (F40-PMR-04/05) not routed by Manager.
+
+**Outcome:** PASS — 1 INFO observation (F40-PMR-10: cosmetic truncation in REWORK detail rows). No new BLOCKING or NON-BLOCKING findings.
+
+**What went well:** All 5 Manager-routed findings verified resolved. F40-PMR-01: full 17-row grouped triage table present with file-glob group, count, contracts, decision, reason. F40-PMR-02: SHA drift confirmed fixed (`f5014e1a79d3` resolves, `f014e1a79d3` returns fatal; `8c146a836630` resolves, `8c146a83630` returns fatal). F40-PMR-03: D40-PLAN-01 staleness resolution recorded in both part-01 metadata/staleness block and part-06 Status, source ref updated to fc35562ba. F40-PMR-06: Stage 39 coverage floor (0.8486) and VS2022 conformance gap present in both docs. F40-PMR-07: I-34-01/I-34-02 explicitly named in Track 2 scope with preservation sub-bullets. Triage assignments still reasonable — all 11 REWORK rows still correctly mapped to 3 tracks. Plan executability unchanged. File created: `part-04-implementation-plan-re-review-20260826.md`.
+
+**What to improve:** Two findings (F40-PMR-04 metadata fields, F40-PMR-05 git remote -v) were in the first review but absent from the Manager routing table, so they had no resolution path. The existing improvement set does not yet document how a re-review should handle "NOT ROUTED" findings: should they be classified as NOT ROUTED (current behavior), delegated to a correction-notice in the re-review, or escalated to Manager as an observation? The re-review correctly classified them as NOT ROUTED with the note "No correction required for this re-review" — preserve this pattern. Created new improvement: `NOT-ROUTED findings in re-review require explicit classification`.
+
+## Improvement: NOT-ROUTED findings in re-review require explicit classification
+
+Condition:
+
+- Re-reviewing a plan where Manager routing table explicitly lists only a subset of the original review findings, leaving some findings without a correction path
+
+Action:
+
+- Do classify each un-routed finding as NOT ROUTED with a note explaining the absence. Do record the finding in the status table with status "NOT ROUTED" and no PASS/FAIL. Do not re-route findings to Developer that Manager explicitly excluded. Do not escalate to BLOCKING simply because Manager omitted the finding. Do surface the gap as a single INFO-level observation in the new findings section so Manager can decide whether to route the remaining findings later. Don't silently drop un-routed findings from the re-review status table.
+
+**Files changed:**
+- `._design_docs/cache-handling-phase40-implementation/part-04-implementation-plan-re-review-20260826.md` (created, 60 lines)
+- `.agents/skills/self-improvement/assets/architect.md` (updated with this review)
+
 - Do record both IDs as non-blocking observation in the design review findings table. Do require implementation plan to reference both IDs in a single decision table row so future audits reconcile them. Don't reject design on parallel IDs when design correctly defers to Manager and Manager already recorded a parallel decision; the reconciliation is implementation-plan-time work.
 
 
 ## Improvement: State-machine validation-order contradictions
 
 Condition:
+
 - When reviewing a design for a state-machine refactor where one requirement says to preserve current validation order and another requires special handling for a state already rejected by that order
 
 Action:
+
 - Do compare the proposed order against current code line-by-line and flag the contradiction as blocking unless the design states the exact reordered branch or diagnostic outcome. Do require a focused unit assertion for the special state.
 
 
 ## Improvement: Race-fix plans need deterministic duplicate/stale assertions
 
 Condition:
+
 - When reviewing an implementation plan for an async race, stale callback, duplicate callback, or idempotent completion fix
 
 Action:
+
 - Do require focused deterministic unit assertions for the stale/duplicate state transitions and counter stability. Don't accept heavy rerun evidence or timing-dependent async behavior as the only proof path.
 
 ## Improvement: Persist expensive-run inputs before validation
@@ -1032,9 +1064,11 @@ Action:
 ## Improvement: Placeholder tests are not acceptance evidence
 
 Condition:
+
 - When reviewing implementation evidence that maps a required test ID to a registered test function
 
 Action:
+
 - Do inspect the test body, not only its name, registration, compile status, or coverage inclusion. If the function only prints, asserts `true`, uses tautologies such as unsigned `value >= 0`, or guards the real assertion behind `if (counter > 0)` so the required behavior can disappear without failure, do not count it as meaningful coverage. Do accept separately registered underlying tests only when the implementation log states that mapping truthfully.
 - For HTTP route suites, do verify each named security, retry, corruption, race,
   and terminal-failure case creates that condition. Do not accept a healthy
@@ -1050,28 +1084,34 @@ Action:
 ## Improvement: User hints are hypotheses, not requirements
 
 Condition:
+
 - When a bug-fix review mentions a user-provided thinking hint such as async timing, race behavior, or suspected root cause
 
 Action:
+
 - Do decide independently from code, evidence, and approved docs whether that hint is required for the fix. Don't treat the hint as a new design requirement unless Manager or the accepted design records it.
 
 
 ## Improvement: Fallback predicates must match accepted scope
 
 Condition:
+
 - When reviewing a bug fix that claims fallback is limited to restore-visible or resident state, but code gates fallback through a broader descriptor-exists predicate
 
 Action:
+
 - Do compare the exact predicate used for candidate visibility with the accepted fix wording and focused regression setup. Don't accept a descriptor-only predicate when the gate requires resident bytes or hot-record visibility; require code narrowing or a documented Manager-approved behavior expansion.
 
 
 ## Improvement: Fragility review blocker threshold
 
 Condition:
+
 - When Manager requires a fragility or design review after a multi-iteration
   bug-fix cascade before QA rerun authorization
 
 Action:
+
 - Do separate current-fix correctness from broader design fragility. Block QA
   only when the active fix violates approved architecture, leaves durable
   behavior undocumented, lacks a focused regression for the newly accepted
@@ -1084,10 +1124,12 @@ Action:
 ## Improvement: Raw payload retention success paths
 
 Condition:
+
 - When reviewing a memory-pressure fix that drops, trims, or gates raw payload
   data only on a failure, skip, or rejection path
 
 Action:
+
 - Do inspect the corresponding success/admission path for retained raw vectors
   or copied payload lists. Do require a regression that proves the success path
   is bounded, not only that the skip path drops data.
@@ -1096,10 +1138,12 @@ Action:
 ## Improvement: Entry docs near line cap
 
 Condition:
+
 - When updating an entry/navigation document that is already close to the
   300-line cap
 
 Action:
+
 - Do run a line count after adding links or gate wording, then trim duplicate
   status text into the existing top-level status/gate line before finishing.
   Don't leave a parent entry over cap because the new detailed part is under
@@ -1109,10 +1153,12 @@ Action:
 ## Improvement: Multi-leg row runner port contract
 
 Condition:
+
 - When reviewing a runner-contract fix where one logical row starts more than
   one server leg or uses `Port + N` internally
 
 Action:
+
 - Do verify the wrapper port allocation, batching rule, dry-run side log, and
   next-row interaction. Require a code fix when approved execution can batch
   the row with a colliding neighbor; otherwise record an explicit handoff
@@ -1122,11 +1168,13 @@ Action:
 ## Improvement: Mixed-workload runner evidence with collapsed public profiles
 
 Condition:
+
 - When reviewing a mixed-workload runner fix where the fixture's public prompt
   evidence collapses every request into one product profile or one lookup
   outcome
 
 Action:
+
 - Do distinguish fixture/product profile classification from harness prompt
   classes. Accept the runner contract only when a machine-readable artifact
   records per-class plan and counts, request status, metrics deltas, redacted
@@ -1138,10 +1186,12 @@ Action:
 ## Improvement: Durable report names and whitelist
 
 Condition:
+
 - When reviewing a plan or design that introduces a custom durable report name
   under `._design_docs/.test_reports/`
 
 Action:
+
 - Do check the active `.test_reports/.gitignore` whitelist and the test output
   folder convention before approving report placement. Require either a
   whitelisted report name or an explicit docs-only whitelist/convention update.
@@ -1157,11 +1207,13 @@ Action:
 ## Improvement: Smoke failures during implementation re-review
 
 Condition:
+
 - When implementation re-review evidence includes smoke-run FAIL or BLOCKED
   outcomes while the review subject is the runner contract rather than final
   test execution
 
 Action:
+
 - Do separate runner correctness from product or test-result behavior. Pass the
   implementation gate when the runner preserves `PASS`, `FAIL`, and `BLOCKED`
   states, computes the required evidence from artifacts, and keeps durable docs
@@ -1292,9 +1344,11 @@ Action:
 ## Improvement: Tight-scope rework respects file boundary even for non-blocking items
 
 Condition:
+
 - Task brief says tight scope (e.g., 'fix the counts only') AND lists non-blocking items that target OTHER files, while hard constraint says 'DO NOT modify other files beyond what these fixes require'
 
 Action:
+
 - Do limit edits strictly to the file(s) named by the BLOCKING fix descriptions. Do report non-blocking address ratio as X/N honestly with one-line deferral reason. Do run grep_search verifications for non-blocking items and include findings in the response as INFO without committing them to docs. Don't expand scope to non-blocking items even when addressing them is cheap and within reach. Don't silently skip the non-blocking items; surface them in the response so the next owner can decide.
 
 
@@ -1389,54 +1443,66 @@ Action:
 ## Improvement: Plan-review deliverable filename table must match actual part-file naming
 
 Condition:
+
 - Reviewing implementation plan whose deliverable table in an open-questions part or similar summary section lists part-file paths that do not match the actual filenames in the same plan directory
 
 Action:
+
 - Do grep the plan directory for actual part file names (part files) before reviewing. Do flag any deliverable table row referencing a stale filename (e.g., one part filename when actual files use split part names). Do record as non-blocking observation since the entry doc links the correct filenames and the stale references are cosmetic; the developer doesn't follow these as implementation instructions. Do verify entry doc link table matches actual filenames since entry doc is the navigation surface.
 
 
 ## Improvement: Plan-review wording-vs-actual-code mismatch in cpp fix snippets
 
 Condition:
+
 - Reviewing implementation plan that describes a cpp line substitution using a pattern (e.g., if (self->promote_payload(...)) with if-wrapper) that doesn't match the actual code at the cited line (the line has no if, or has a different wrapper, or has been moved)
 
 Action:
+
 - Do grep the actual line number in the cited file to confirm the substitution pattern matches. Do record as non-blocking observation when the substitution intent is clear (replacing the method name) but the textual pattern is inaccurate; the developer applies the substitution regardless of pattern wording. Do not block sign-off on minor textual mismatch when the design and plan both name the correct method/line and the intent is unambiguous.
 
 
 ## Improvement: Plan-review [[deprecated]] marker location must match symbol's class
 
 Condition:
+
 - Reviewing implementation plan that marks symbols with [[deprecated]] but lists the wrong header file (e.g., a member of hybrid_cache_controller in server-cache-io-worker.h, or vice versa)
 
 Action:
+
 - Do grep the actual symbol's class declaration across all .h files in the same directory. Do flag as non-blocking observation when the marker location is wrong but the intent is clear. Do recommend the developer grep for the symbol first and apply the marker to the actual declaration header. Do not block sign-off when the marker is on the right symbol regardless of which header the plan names, as long as the developer can locate the right declaration.
 
 
 ## Improvement: Multi-candidate fix designs vs implementer-chosen alternative
 
 Condition:
+
 - Reviewing implementation report that cites a design part file as the basis for its fix but the design lists three named candidates (A/B/C) and the implementation takes none of them; the fix report cites the design as if it documented the chosen alternative.
 
 Action:
+
 - Do grep the design file for the cited "Option" or "Fix N" reference before accepting the citation. Do flag as BLOCKING design-scope drift when the approved design does not document the implementer's chosen strategy. Do require either a design correction (new part file or amendment to existing part) recording the chosen strategy before re-review, OR a revert to one of the approved candidates. Do not accept "achieves same outcome" as a substitute for design approval; design gate exists to constrain strategy choice, not just outcome. Do recommend the Manager decide between design amendment (preferred if the alternative is genuinely better) and revert (preferred if the approved candidates are still viable and the alternative defers critical root-cause fixes).
 
 
 ## Improvement: Counter pattern parity between get_stats() and Prometheus /metrics
 
 Condition:
+
 - Reviewing implementation that adds a new counter exposed via get_stats() JSON, when the user's checklist explicitly references `/metrics` (the public Prometheus endpoint) and a similar existing counter (e.g., cache_cold_cleanup_total) is exposed in BOTH endpoints.
 
 Action:
+
 - Do grep server-context.cpp for write_cache_metric calls to verify whether the new counter is exposed in the public Prometheus exporter. Do flag as BLOCKING when the user explicitly cited /metrics in their checklist and the existing pattern exposes similar counters in both endpoints. Do distinguish design-internal-only counters (acceptable in get_stats() alone) from observability-required counters (must be in /metrics). Do record the server-context.cpp line range where the new write_cache_metric line should be added. Do not accept "exposed in get_stats()" as proof of /metrics exposure when both endpoints have separate write_cache_metric wiring.
 
 
 ## Improvement: git diff --check on CRLF cpp files reports CR as trailing whitespace
 
 Condition:
+
 - Running git diff --check on cpp files in this repo where the file is CRLF throughout (CR count matches line count, design convention says "CRLF for cpp"); diff shows "trailing whitespace" on every newly added line but byte-level scan shows zero trailing space characters.
 
 Action:
+
 - Do run a byte-level scan (ReadAllBytes + 0x0D/0x20 membership) on the touched cpp file before declaring a hygiene defect. Do report the CR count vs line count to distinguish real CRLF convention from accidental trailing CR. Do flag as INFO, not BLOCKING, when byte scan shows CR matches line count and zero trailing spaces (genuine CRLF hygiene noise). Do flag as BLOCKING when byte scan shows non-zero trailing-space count or CR count > line count + 1 (genuine defect). Don't trust git diff --check exit code alone on a CRLF file; the exit code is 1 for any CR at end of line, which is the project's convention.
 
 
@@ -1575,9 +1641,11 @@ Action:
 ## Improvement: PowerShell disjoint line-range reads
 
 Condition:
+
 - Reading several non-contiguous line ranges from one file in PowerShell
 
 Action:
+
 - Do use separate `foreach($n in A..B)` loops or an array of explicit range objects. Don't assign `$ranges=@(A..B,C..D)` and then iterate as if each item were a range; PowerShell flattens or casts it poorly and can fail before any useful output.
 
 
@@ -1725,6 +1793,16 @@ Action:
 
 - Do rerun a non-mutating upstream tip check such as `git ls-remote` during the review, without fetching, using the upstream URL or ref policy named by the design/report rather than assuming `origin master` is upstream. Compare that actual upstream tip to the reported source ref before accepting the range. Do block the gate when the actual upstream tip moved after the Developer report, even if the report's local counts and table math are internally consistent.
 
+## Improvement: Pre-merge analysis completeness against guide part-01 section 5
+
+Condition:
+
+- Reviewing a merge-cycle pre-merge analysis whose aggregate counts and REWORK rows look complete but the per-commit triage table is absent or partial, or plan-side SHA references drift from analysis-side SHAs
+
+Action:
+
+- Do verify the per-commit triage table exists for ALL in-scope commits before accepting triage correctness; aggregate counts plus REWORK rows alone cannot prove INTEGRATE/NO-OP rows are correctly assigned. Do require REWORK rows to carry the guide's per-row fields (SHA, subject, matched file-glob group, affected contract, reason citing a contract/path/test surface, follow-up owner). Do diff plan-side SHA references against analysis-side SHAs and flag drift as a non-blocking consistency finding. Do verify staleness decision disposition (refresh vs merge-with-gap) is actually recorded in both the analysis and the plan; a stale "Manager decides" state is itself a finding. Do rerun the actual tip recheck and confirm the gap that the analysis reports still matches reality before accepting the analysis metadata.
+
 ## Improvement: Verify delegated manager gate state locally
 
 Condition:
@@ -1828,9 +1906,11 @@ Action:
 ## Improvement: Release test fixes must activate setup and verdict checks
 
 Condition:
+
 - When a Release test crashes because `assert` compiled out side-effecting setup
 
 Action:
+
 - Do inspect the full failing test and count every `assert`. Require explicit checks for all side-effecting calls, container cardinality before iterator or element access, and every result or metric assertion needed for the verdict. Don't approve a fix that only makes setup execute while leaving postconditions compiled out. Verify `NDEBUG` ordering at the first `<cassert>` inclusion; a later `#undef NDEBUG` cannot redefine `assert`.
 
 ## Improvement: Bounded metrics require every label domain
@@ -1896,9 +1976,11 @@ Action:
 ## Improvement: Fail-closed coverage probes must name real final artifacts
 
 Condition:
+
 - When reviewing a coverage-runner correction that injects a merge failure
 
 Action:
+
 - Do trace the runner's actual merged XML and report paths, require a literal
   nonzero-exit fixture, and verify fresh success and failure trees separately
   under every required shell. Do distinguish specified expected results from
@@ -1908,10 +1990,12 @@ Action:
 ## Improvement: Exact-ID control seams need bootstrap discovery
 
 Condition:
+
 - When a guarded live control request requires complete internal IDs and owners
   that no approved public artifact exposes before the first mutation
 
 Action:
+
 - Do require a non-mutating, non-consuming discovery operation under the same
   compile/runtime, auth, admission, and cache locks before approving the schema.
   Do bind apply to a stable generation and opaque snapshot token, then revalidate
@@ -1924,9 +2008,11 @@ Action:
 ## Improvement: Shared discovery builders must be pure
 
 Condition:
+
 - When non-mutating discovery must reuse a production candidate builder
 
 Action:
+
 - Do inspect the builder for counter, metric, LRU, rank, and diagnostic side
   effects. Require a pure enumeration core and production-only observation
   wrapper when any side effect exists. Also compare every added eligibility
@@ -1936,11 +2022,13 @@ Action:
 ## Improvement: Discovery corrections must update the active QA contract
 
 Condition:
+
 - When a guarded control design changes an apply-only request into discovery
   plus snapshot-bound apply, with per-incoming candidate sets or generation
   evidence
 
 Action:
+
 - Do cross-read the active test-plan schema and named evidence map. Require it
   to replace the old request shape, preserve prior security and normal-path
   tests, and add exact names for discovery purity, staleness, integrity,
@@ -1951,10 +2039,12 @@ Action:
 ## Improvement: Mutation generation cannot be replaced by state polling
 
 Condition:
+
 - When snapshot freshness requires every mutation to advance one monotonic
   generation, but implementation hashes state only at discover or apply time
 
 Action:
+
 - Do enumerate direct entry, descriptor, residency, rank, forest, slot-ref,
   completion, recovery, rollback, cleanup, and budget write sites and verify each
   advances generation in the same lock. Treat a control-time state digest as
@@ -1963,10 +2053,12 @@ Action:
 ## Improvement: Driver self-tests may bypass scenario preflight
 
 Condition:
+
 - When implementation evidence uses a script self-test to claim live scenario
   assertion completeness
 
 Action:
+
 - Do trace where the self-test exits relative to argument validation, measured
   budget preconditions, workload setup, and live assertions. Run or inspect each
   scenario preflight separately. Don't accept helper-only metric and log tests as
@@ -1975,10 +2067,12 @@ Action:
 ## Improvement: Owner-reassignment seams must respect kind-link cardinality
 
 Condition:
+
 - When a guarded setup reassigns cold descriptor owners to make production's
   incoming-owner exclusion produce an empty victim set
 
 Action:
+
 - Do validate the complete discovered set, require at most one descriptor per
   payload kind, and require the destination's exact/checkpoint link to be empty
   before mutation. For checkpoint moves, prove destination namespace, tokens,
@@ -1995,10 +2089,12 @@ Action:
 ## Improvement: Superseded evidence may retain old contract values
 
 Condition:
+
 - When a correction changes a capacity or fixture value after an implementation
   evidence report recorded a failed run under the old value
 
 Action:
+
 - Do preserve the evidence report as historical proof, but require the new
   correction and review to name the supersession explicitly. Treat an old-value
   sentence as advisory only when active entry docs and handoff text are
@@ -2007,10 +2103,12 @@ Action:
 ## Improvement: Separate measurement and canonical startup budgets
 
 Condition:
+
 - When measured high startup budgets prove sizes and capability but prevent the
   residency transition required by a later canonical preflight
 
 Action:
+
 - Do state measurement and canonical budget contracts separately, derive every
   integer MiB value from exact resident and immutable serialized bytes, require
   checked safety and coexistence inequalities, and sweep active docs for stale
@@ -2020,11 +2118,13 @@ Action:
 ## Improvement: Complete-pair budget inputs need executable provenance
 
 Condition:
+
 - When a startup-budget correction derives one-fit/two-not limits from hot
   discovery rows while the contract requires complete resident and serialized
   target/draft pairs
 
 Action:
+
 - Do verify each measured row's payload kind, pair state, resident aggregation,
   and serialized-byte field in the raw artifact. Require an executable exact
   serialized-size path when hot rows report null and no cold object exists.
@@ -2092,10 +2192,12 @@ Action:
 ## Improvement: Split impossible live seam setup from focused seam proof
 
 Condition:
+
 - When a live cache test requires a guarded ownership precursor that conflicts
   with production payload-kind order or occupied kind-link rules
 
 Action:
+
 - Do prove the conflict from exact production order, owner exclusion, and link
   cardinality. Keep guarded mutation coverage focused, then use the smallest
   natural production sequence for model-backed evidence when it proves the same
@@ -2106,10 +2208,12 @@ Action:
 ## Improvement: Route fixtures need model capability parity before approval
 
 Condition:
+
 - When a route test expects model-created cache state that a controller test
   can construct directly, such as a same-owner exact and checkpoint pair
 
 Action:
+
 - Do require the exact model, startup flags, literal admission bytes, endpoint,
   resource caps, and a bounded non-mutating capability preflight before
   approving the route test. Do require isolated process state and a no-skip
@@ -2119,10 +2223,12 @@ Action:
 ## Improvement: Capability logs require an enabling selector
 
 Condition:
+
 - When a model-backed fixture contract requires a startup capability log or
   runtime mode that is disabled by default
 
 Action:
+
 - Do trace the exact parser spelling, default value, enum mapping, startup
   branch, log macro, severity, and default verbosity before approving the
   command list. Require explicit bounded test verbosity when a binding literal
@@ -2134,10 +2240,12 @@ Action:
 ## Improvement: Per-candidate set keys need constructor provenance
 
 Condition:
+
 - When a discovery schema has per-candidate sets whose key names can be
   mistaken for a separate workload actor or latest request owner
 
 Action:
+
 - Do trace the snapshot constructor, nested selector predicate, apply lookup,
   and proof expansion together. Require each set key to equal the source row it
   indexes when production copies those fields; apply different-owner rules
@@ -2148,10 +2256,12 @@ Action:
 ## Improvement: Proof reachability does not close fault-route readiness
 
 Condition:
+
 - When a proof-only model smoke reaches the exact apply inputs and the next
   proposed gate runs mutation faults
 
 Action:
+
 - Do map every route assertion back to the original fault contract, including
   terminal entry, branch, descriptor, file, byte-map, topology, decision,
   transaction, diagnostic, later-work, and generation effects. Require the
@@ -2162,9 +2272,11 @@ Action:
 ## Improvement: Zero-effect proof fields need observed provenance
 
 Condition:
+
 - When authenticated terminal evidence claims a production effect delta is zero
 
 Action:
+
 - Do trace each field to a baseline comparison, production event counter, or
   independently observable artifact. Reject literal zero serialization and
   tests that only assert the generated constant. For changed-then-restored
@@ -2173,10 +2285,12 @@ Action:
 ## Improvement: Test-helper counters can include wrapper effects
 
 Condition:
+
 - When a focused test drives a production transaction through a debug wrapper
   and proposes exact counter assertions
 
 Action:
+
 - Do trace counter writes in both the production transaction and the wrapper,
   then require exact before/after progression. Use state, descriptor, and
   storage reconciliation to prove the production effect when a generic counter
@@ -2186,10 +2300,12 @@ Action:
 ## Improvement: Correct stale comments with changed test expectations
 
 Condition:
+
 - When a test correction replaces an obsolete policy expectation but retains
   historical comments beside the changed setup or assertions
 
 Action:
+
 - Do compare every nearby behavior comment with the corrected execution path.
   Require a comment-only correction when prose still describes the opposite
   outcome, even if assertions and evidence pass. Keep the correction isolated,
@@ -2200,10 +2316,12 @@ Action:
 ## Improvement: Separate shared pytest preload from node-owned model evidence
 
 Condition:
+
 - When a model-backed pytest node fails in an autouse shared-model preload before
   its own helper starts, and an environment variable can bypass that preload
 
 Action:
+
 - Do trace the variable's only reader and the node helper's model launch
   independently. Approve the bypass only when it suppresses an unrelated preset
   while the node still validates, launches, exercises, and captures its required
@@ -2214,10 +2332,12 @@ Action:
 ## Improvement: Pair proof drivers must request both concrete IDs
 
 Condition:
+
 - When a live driver needs ordered exact and checkpoint proof rows but discovery
   exposes only the entry-level exact candidate
 
 Action:
+
 - Do trace the proof builder to determine whether it expands owner links or
   returns only requested IDs. Require an approved non-mutating source for the
   checkpoint ID and send both concrete IDs in canonical order when no expansion
@@ -2233,10 +2353,12 @@ Action:
 ## Improvement: Terminal proof positives need negative-group parity
 
 Condition:
+
 - When a pure self-test claims complete coverage for a large authenticated
   terminal proof assertion
 
 Action:
+
 - Do map each assertion group to an isolated rejecting mutation, including
   identity and status, generation order, records, retained state, descriptor
   and file accounting, staging and topology, decisions, transactions,
@@ -2255,10 +2377,12 @@ Action:
 ## Improvement: Canonical argv guards need parser and environment parity
 
 Condition:
+
 - When a canonical live driver must select exactly one runtime mode and reject
   aliases or environment overrides
 
 Action:
+
 - Do enumerate aliases and environment names from the production argument
   registry, not from memory. Require exact anchor-relative placement, including
   rejection when the anchor is absent. Put environment rejection in a pure
@@ -2269,10 +2393,12 @@ Action:
 ## Improvement: Startup literal fixes need shared ordinal proof
 
 Condition:
+
 - When a live driver replaces a stale startup log marker with a current success
   record while retaining other capability markers
 
 Action:
+
 - Do trace the new and old literals to separate production log sites, require
   the live gate and pure tests to call one ordinal helper, and require isolated
   negatives for the old marker, regex-shaped text, wrong case, timing-only
@@ -2283,10 +2409,12 @@ Action:
 ## Improvement: Nested PowerShell parser checks need protected variables
 
 Condition:
+
 - When running PowerShell parser API checks from an outer PowerShell command
   against a script under review
 
 Action:
+
 - Do quote the inner `-Command` body so `$tokens`, `$errors`, and redirection
   targets are interpreted only by the inner shell. Prefer a single-quoted
   scriptblock wrapper from the outer command. If a parser command fails with
@@ -2296,26 +2424,32 @@ Action:
 ## Improvement: Terminal LRU evidence separates hot membership from retained topology
 
 Condition:
+
 - When a cache pressure proof reports a valid source transition from one hot-LRU membership to zero while lookup, branch, owner, and cold payload state remain retained
 
 Action:
+
 - Do verify topology deltas use a signed JSON integer domain, require `1 -> 0` as `-1`, and keep hot-policy membership separate from lookup and branch retention. For an over-budget terminal state, require source resident bytes to be zero and require live-reference rows to reconcile the complete remaining resident total against the applied budget. Add isolated negatives for retained membership, zero delta, unsigned wrap, source-owner substitution, and unexplained bytes. Don't classify cold-only removal from the hot LRU as metadata loss.
 
 ## Improvement: Retired symbol audits must classify comments separately
 
 Condition:
+
 - When reviewing a stale API port or target-set audit for removed async/test-only symbols
 
 Action:
+
 - Do search the exact gated target set, not only the repaired file. Classify each hit as an active call, declaration, or comment before deciding the gate. Treat active calls as blocking; treat comments as non-blocking only when they explicitly document retirement or historical context and cannot compile into behavior.
 
 ## Improvement: PowerShell empty CSV fixes need typed-boundary coverage
 
 Condition:
+
 - When reviewing a PowerShell driver fix for empty `Import-Csv` output or
   header-only inventory files
 
 Action:
+
 - Do verify `$null`, header-only CSV imports, and typed `[object[]]` parameters
   at the exact assertion boundary in both PowerShell 7 and Windows PowerShell 5.
   Require assertions to count real filtered rows, such as `.cold` file rows,
@@ -2325,10 +2459,12 @@ Action:
 ## Improvement: Neighboring delta assertions need topology math
 
 Condition:
+
 - When reviewing a driver fix that changes one row's descriptor, residency, or
   counter deltas and a neighboring row appears suspicious
 
 Action:
+
 - Do reconstruct each row's before/after topology from hot descriptors, cold
   descriptors, evicted tombstones, files, and owner exclusions before calling it
   regression. Do keep distinct rows' net deltas separate: incoming demotion plus
@@ -2340,11 +2476,13 @@ Action:
 ## Improvement: Untracked driver fixes need direct semantic diff
 
 Condition:
+
 - When reviewing a PowerShell or test-driver fix whose file is untracked, or
   when unrelated product files are already dirty, so `git diff` cannot isolate
   the task-local change
 
 Action:
+
 - Do verify the current file directly with targeted `rg`/line reads around the
   changed helpers and call sites, then run the relevant parser and pure
   self-tests in every supported shell. Do record that product/test files may be
@@ -2355,10 +2493,43 @@ Action:
 ## Improvement: Entry/index docs at the 300-line limit need in-place links
 
 Condition:
+
 - When adding a review or gate part and the parent entry document or
   `document-index.md` is already at the 300-line limit
 
 Action:
+
 - Do update existing status, summary, or index rows in place instead of
   appending new lines. Verify line counts after editing and record the exact
   line count. Don't exceed the split-rule limit just to add a new handoff link.
+
+## Improvement: Single-entry operational design under 300-line cap without unauthorized splits
+
+Condition:
+
+- Authoring an operational stage design (upstream merge cycle) as a single entry doc when the task mandates the entry doc plus only separately-session review/gate parts; the mandated prior-stage contract table and file-glob groups push the first draft over 300 lines (repo mandatory split rule)
+
+Action:
+
+- Do pre-budget the 300-line cap for a single entry doc before writing when the task does not authorize splitting design content into part files. Do keep every mandated section (scope, exclusions, prerequisites, prior-stage contract list, file-glob groups, risk register, rework tracks, status line) but tighten narration to one-line bullets and compress repeated prose. Do verify with `(Get-Content).Count` (logical lines) after every rewrite and confirm CR=0, no BOM, trailing LF, no trailing whitespace. Don't split the entry doc into design part files on your own when the task explicitly assigns the review and gate parts to separate sessions; splitting the design body would leave the entry doc incomplete and create unrequested artifacts. Don't trim mandated contract rows to fit; tighten prose/bullets instead.
+
+## Improvement: Cross-file type compat in merge reviews
+
+Condition:
+
+- Performing merge review where local-only files coexist with upstream-merged files; merge log claims semantic scans PASS
+
+Action:
+
+- Do enumerate all types and structs used by local-only files (0-line staged diff). For each type, verify it exists in the merged staged tree (git show :<path>). Do add this audit as a separate semantic scan category. Don't trust upstream struct removals from non-local files unless caller sites in local-only files are also updated.
+
+## Improvement: One resolved blocker can expose a second cross-file mismatch
+
+Condition:
+
+- Re-reviewing a fix for a BLOCKING cross-file type mismatch (e.g., removed local type `result_timings`) after Developer applied a type migration, and the fix closes the original finding but the same merge still holds other local-only call sites against the merged type contract
+
+Action:
+
+- Do re-run the full cross-file audit after the fix, not just the specific check that failed. Do enumerate every member access a local-only file makes on the merged type (for `server_prompt_cache_state`: `cur->data`, `cur->tokens`, `cur->checkpoints`, `trim_checkpoints(*cur,...)`, `discard(server_prompt_cache_state*)` vs `discard(server_prompt*)`). Do flag any remaining old-contract access as a NEW BLOCKING finding with its own ID (e.g., F7). Do verify the JSON schema is preserved when the migration upstream `to_json()` emits identical field names. Do keep the merge open at MERGE_HEAD and return to Manager -> Developer. Don't close the gate on the original finding alone; don't merge the F7 finding into F1.
+
