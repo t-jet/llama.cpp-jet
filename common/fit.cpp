@@ -899,8 +899,7 @@ std::vector<size_t> common_get_mtp_ctx_memory_overhead(
 
     llama_model_params mparams_copy = *mparams;
     mparams_copy.no_alloc  = true;
-    mparams_copy.use_mmap  = false;
-    mparams_copy.use_mlock = false;
+    mparams_copy.load_mode  = LLAMA_LOAD_MODE_NONE;
 
     llama_model * model = llama_model_load_from_file(path_model, mparams_copy);
     if (model == nullptr) {
